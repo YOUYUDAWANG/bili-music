@@ -20,6 +20,7 @@ struct NowPlayingView: View {
     @State private var currentPlaylistLoading = false
     @State private var currentPlaylistError: String?
     @State private var suppressNextRecommendationRefresh = false
+    @State private var recommendationsStale = false
     @State private var showLyrics = false
     @State private var showMVFullscreen = false
     @State private var showMVControls = false
@@ -98,17 +99,20 @@ struct NowPlayingView: View {
                 suppressNextRecommendationRefresh = false
                 return
             }
+            recommendationsStale = true
             if selectedPage == PlayerPage.recommendations.rawValue {
-                return
+                recommendedTracks = []
+                recommendationsError = nil
+                Task { await loadRecommendations() }
+                recommendationsStale = false
             }
-            recommendedTracks = []
-            recommendationsError = nil
-            Task { await loadRecommendations() }
         }
         .onChange(of: selectedPage) { _, page in
-            guard page != PlayerPage.recommendations.rawValue else { return }
+            guard page == PlayerPage.recommendations.rawValue else { return }
+            guard recommendationsStale || recommendedTracks.isEmpty else { return }
             recommendedTracks = []
             recommendationsError = nil
+            recommendationsStale = false
             Task { await loadRecommendations() }
         }
     }
@@ -421,7 +425,7 @@ struct NowPlayingView: View {
 
     private var qualityMenu: some View {
         Menu {
-            ForEach(qualityOptions, id: \.id) { option in
+            ForEach(BiliClient.qualityOptions, id: \.id) { option in
                 Button {
                     Task { await engine.setPlaybackQuality(option.id) }
                 } label: {
@@ -442,16 +446,6 @@ struct NowPlayingView: View {
             ActionSymbolLabel(title: "播放音质", systemName: "hifispeaker")
         }
         .buttonStyle(.plain)
-    }
-
-    private var qualityOptions: [(id: Int, title: String)] {
-        [
-            (0, "最高可用"),
-            (30251, "Hi-Res"),
-            (30280, "高码率"),
-            (30232, "132K"),
-            (30216, "64K"),
-        ]
     }
 
     private func playerListPage<Content: View>(title: String, systemName: String, @ViewBuilder content: () -> Content) -> some View {

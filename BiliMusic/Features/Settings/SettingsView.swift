@@ -45,20 +45,16 @@ struct SettingsView: View {
                 }
                 Section("音质") {
                     Picker("播放音质", selection: $playbackQuality) {
-                        Text("最高可用").tag(0)
-                        Text("Hi-Res").tag(30251)
-                        Text("高码率").tag(30280)
-                        Text("132K").tag(30232)
-                        Text("64K").tag(30216)
+                        ForEach(BiliClient.qualityOptions, id: \.id) { option in
+                            Text(option.title).tag(option.id)
+                        }
                     }
                     Picker("下载音质", selection: $downloadQuality) {
-                        Text("最高可用").tag(0)
-                        Text("Hi-Res").tag(30251)
-                        Text("高码率").tag(30280)
-                        Text("132K").tag(30232)
-                        Text("64K").tag(30216)
+                        ForEach(BiliClient.qualityOptions, id: \.id) { option in
+                            Text(option.title).tag(option.id)
+                        }
                     }
-                    Text("“最高可用”含 Hi-Res 无损(需大会员);流量紧张选低档")
+                    Text("\"自动(最高)\"含 Hi-Res 无损(需大会员);流量紧张选低档")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

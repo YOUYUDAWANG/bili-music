@@ -600,7 +600,7 @@ final class PlayerEngine {
         item.preferredForwardBufferDuration = 0
         item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
         let player = AVPlayer(playerItem: item)
-        player.automaticallyWaitsToMinimizeStalling = false
+        player.automaticallyWaitsToMinimizeStalling = true
         self.player = player
         timeObserver = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main
@@ -620,7 +620,7 @@ final class PlayerEngine {
                 case .paused:
                     if self.state == .playing { self.state = .paused }
                 case .waitingToPlayAtSpecifiedRate:
-                    break
+                    self.state = .loading
                 @unknown default:
                     break
                 }
@@ -635,7 +635,7 @@ final class PlayerEngine {
                       self.player?.currentItem === item else { return }
                 let expectedDuration = self.duration
                 let actualTime = item.currentTime().seconds
-                guard expectedDuration <= 0 || actualTime >= max(expectedDuration - 1.5, 1) else { return }
+                guard actualTime >= 5 || expectedDuration <= 30 else { return }
                 await self.advance(automatic: true)
             }
         }
