@@ -1,6 +1,11 @@
 import Foundation
 
 enum MusicFilter {
+    // Bilibili music partition and common music sub-partitions.
+    // 3: 音乐, 28: 原创音乐, 31: 翻唱, 30: VOCALOID/UTAU, 59: 演奏,
+    // 29: 音乐现场, 193: MV, 130: 音乐综合, 243/244: music vertical subtypes.
+    private static let musicTypeIDs: Set<Int> = [3, 28, 29, 30, 31, 59, 130, 193, 243, 244]
+
     private static let musicHints = [
         "music", "mv", "live", "cover", "remix", "ost", "op", "ed", "bgm", "piano",
         "guitar", "bass", "drum", "vocal", "lyrics", "lyric", "playlist", "album",
@@ -26,6 +31,63 @@ enum MusicFilter {
         isStrictMusic(title: track.title, artist: track.artist, duration: track.duration)
     }
 
+    static func isSearchResultMusic(_ track: Track, query: String? = nil) -> Bool {
+        guard (45...900).contains(track.duration) else { return false }
+        let text = (track.title + " " + track.artist).lowercased()
+        let hasMusicHint = musicHints.contains { text.contains($0.lowercased()) }
+        if let typeID = track.typeID, !musicTypeIDs.contains(typeID) {
+            return false
+        }
+        if nonMusicHints.contains(where: { text.contains($0.lowercased()) }) {
+            return hasMusicHint
+        }
+        if let query, !isRelevantToSearchQuery(track, query: query) {
+            return false
+        }
+        if track.typeID != nil {
+            return true
+        }
+        return hasMusicHint || looksLikeSongTitle(text)
+    }
+
+    private static func isRelevantToSearchQuery(_ track: Track, query: String) -> Bool {
+        let normalizedQuery = normalize(query)
+        guard !normalizedQuery.isEmpty else { return true }
+        let normalizedText = normalize(track.title + " " + track.artist)
+        let compactQuery = normalizedQuery.replacingOccurrences(of: " ", with: "")
+        let compactText = normalizedText.replacingOccurrences(of: " ", with: "")
+
+        if compactText.contains(compactQuery) || normalizedText.contains(normalizedQuery) {
+            return true
+        }
+
+        let tokens = normalizedQuery
+            .split(separator: " ")
+            .map(String.init)
+            .filter { token in
+                token.count >= 2 || token.unicodeScalars.contains { $0.value > 127 }
+            }
+        guard !tokens.isEmpty else { return true }
+
+        let matchedCount = tokens.filter { normalizedText.contains($0) || compactText.contains($0) }.count
+        if tokens.count == 1 {
+            return matchedCount == 1
+        }
+        return matchedCount == tokens.count || (tokens.count >= 3 && matchedCount >= tokens.count - 1)
+    }
+
+    private static func normalize(_ text: String) -> String {
+        text
+            .lowercased()
+            .folding(options: [.diacriticInsensitive, .widthInsensitive, .caseInsensitive], locale: .current)
+            .replacingOccurrences(of: "<em class=\"keyword\">", with: "")
+            .replacingOccurrences(of: "</em>", with: "")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: #"[\p{P}\p{S}]+"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     static func isMusic(title: String, artist: String, duration: Int) -> Bool {
         guard (60...720).contains(duration) else { return false }
         let text = (title + " " + artist).lowercased()
@@ -39,9 +101,7 @@ enum MusicFilter {
         }
 
         // Many song uploads are simply "artist - title" or "song / artist".
-        let hasSongLikeSeparator = text.contains(" - ") || text.contains("《") || text.contains("》")
-            || text.contains("「") || text.contains("」") || text.contains("|")
-        return hasSongLikeSeparator && duration <= 600
+        return looksLikeSongTitle(text) && duration <= 600
     }
 
     static func isStrictMusic(title: String, artist: String, duration: Int) -> Bool {
@@ -53,7 +113,11 @@ enum MusicFilter {
         if musicHints.contains(where: { text.contains($0.lowercased()) }) {
             return true
         }
-        return text.contains(" - ") || text.contains("《") || text.contains("》")
-            || text.contains("「") || text.contains("」")
+        return looksLikeSongTitle(text)
+    }
+
+    private static func looksLikeSongTitle(_ text: String) -> Bool {
+        text.contains(" - ") || text.contains("《") || text.contains("》")
+            || text.contains("「") || text.contains("」") || text.contains("|")
     }
 }

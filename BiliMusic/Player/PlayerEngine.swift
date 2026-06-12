@@ -3,9 +3,10 @@ import MediaPlayer
 import Observation
 import UIKit
 
-struct Track: Identifiable, Equatable {
+struct Track: Identifiable, Equatable, Codable {
     let aid: Int?
     let ownerMid: Int?
+    let typeID: Int?
     let bvid: String
     var cid: Int?          // 搜索结果没有 cid,首次播放时补全
     let title: String
@@ -14,9 +15,10 @@ struct Track: Identifiable, Equatable {
     var duration: Int
     var id: String { bvid }
 
-    init(aid: Int? = nil, ownerMid: Int? = nil, bvid: String, cid: Int? = nil, title: String, artist: String, coverURL: URL?, duration: Int) {
+    init(aid: Int? = nil, ownerMid: Int? = nil, typeID: Int? = nil, bvid: String, cid: Int? = nil, title: String, artist: String, coverURL: URL?, duration: Int) {
         self.aid = aid
         self.ownerMid = ownerMid
+        self.typeID = typeID
         self.bvid = bvid
         self.cid = cid
         self.title = title
@@ -26,7 +28,7 @@ struct Track: Identifiable, Equatable {
     }
 
     init(search item: BiliClient.SearchItem) {
-        self.init(aid: item.aid, ownerMid: item.mid, bvid: item.bvid, title: item.cleanTitle, artist: item.author,
+        self.init(aid: item.aid, ownerMid: item.mid, typeID: item.typeid, bvid: item.bvid, title: item.cleanTitle, artist: item.author,
                   coverURL: item.coverURL, duration: item.durationSeconds)
     }
 
@@ -56,6 +58,24 @@ final class PlayerEngine {
         var id: String { rawValue }
     }
 
+    enum QueueMode: String, CaseIterable, Identifiable {
+        case sequential = "顺序"
+        case shuffle = "随机"
+        case repeatOne = "单曲循环"
+        case radio = "电台"
+
+        var id: String { rawValue }
+
+        var icon: String {
+            switch self {
+            case .sequential: "text.line.first.and.arrowtriangle.forward"
+            case .shuffle: "shuffle"
+            case .repeatOne: "repeat.1"
+            case .radio: "dot.radiowaves.left.and.right"
+            }
+        }
+    }
+
     struct LyricLine: Identifiable, Equatable {
         let id = UUID()
         let from: Double
@@ -71,13 +91,17 @@ final class PlayerEngine {
     private(set) var isScrubbing = false
     private(set) var lyrics: [LyricLine] = []
     private(set) var videoAvailable = false
-    /// 电台模式:队列播到末尾时用相关推荐自动续歌
-    var radioMode = true
+    private(set) var currentAudioQuality: Int?
+    private(set) var currentAudioBandwidth: Int?
+    /// 队列推进策略:顺序、随机、单曲循环、电台。
+    var queueMode: QueueMode = .sequential
     private(set) var playbackMode: PlaybackMode = .music
 
     var current: Track? { queue.indices.contains(queueIndex) ? queue[queueIndex] : nil }
     var duration: Double { Double(current?.duration ?? 0) }
-    var hasNext: Bool { queueIndex + 1 < queue.count || radioMode }
+    var hasNext: Bool {
+        queueIndex + 1 < queue.count || queueMode == .radio || queueMode == .repeatOne || (queueMode == .shuffle && queue.count > 1)
+    }
     var hasPrevious: Bool { queueIndex > 0 }
     var avPlayer: AVPlayer? { player }
 
@@ -92,12 +116,22 @@ final class PlayerEngine {
     private var prefetchTask: Task<Void, Never>?
     private var preloadTask: Task<Void, Never>?
     private var preparedStreams: [String: PreparedStream] = [:]
+    private var preparedVideoStreams: [String: PreparedVideoStream] = [:]
+    private var prefetchedRadio: (seed: String, track: Track)?
     private var playbackGeneration = UUID()
 
     private struct PreparedStream {
         let url: URL
         let cid: Int
         let duration: Int
+        let quality: Int
+        let bandwidth: Int
+        let fetchedAt: Date
+    }
+
+    private struct PreparedVideoStream {
+        let url: URL
+        let cid: Int
         let fetchedAt: Date
     }
 
@@ -109,10 +143,26 @@ final class PlayerEngine {
     // MARK: - 对外操作
 
     /// 用一组曲目替换队列并从指定位置开播(搜索页点击)
-    func play(tracks: [Track], startAt index: Int) async {
+    func play(tracks: [Track], startAt index: Int, queueMode: QueueMode? = nil) async {
+        preloadTask?.cancel()
+        prefetchTask?.cancel()
         queue = tracks
         queueIndex = index
         playedBVs = []
+        if let queueMode {
+            self.queueMode = queueMode
+        }
+        playbackMode = preferredModeForNewTrack()
+        await startCurrent()
+    }
+
+    func playRadio(seed track: Track) async {
+        preloadTask?.cancel()
+        prefetchTask?.cancel()
+        queue = [track]
+        queueIndex = 0
+        playedBVs = []
+        queueMode = .radio
         playbackMode = preferredModeForNewTrack()
         await startCurrent()
     }
@@ -131,6 +181,8 @@ final class PlayerEngine {
 
     /// 直接播一个 BV 号(粘贴链接/调试)
     func play(bvid: String) async {
+        preloadTask?.cancel()
+        prefetchTask?.cancel()
         state = .loading
         do {
             let track = try await resolve(bvid: bvid)
@@ -141,20 +193,44 @@ final class PlayerEngine {
     }
 
     func playNext() async {
-        if queueIndex + 1 < queue.count {
-            queueIndex += 1
-            playbackMode = preferredModeForNewTrack()
+        await advance(automatic: false)
+    }
+
+    private func advance(automatic: Bool) async {
+        if automatic, queueMode == .repeatOne {
             await startCurrent()
-        } else if radioMode, let bvid = current?.bvid {
+        } else if queueMode == .radio, let bvid = current?.bvid {
             state = .loading
-            if let next = await radioPick(after: bvid) {
-                queue.append(next)
-                queueIndex = queue.count - 1
+            let prefetched = prefetchedRadio?.seed == bvid ? prefetchedRadio?.track : nil
+            prefetchedRadio = nil
+            let next: Track?
+            if let prefetched {
+                next = prefetched
+            } else {
+                next = await radioPick(after: bvid)
+            }
+            if let next {
+                let insertIndex = min(queueIndex + 1, queue.count)
+                queue.insert(next, at: insertIndex)
+                queueIndex = insertIndex
+                playbackMode = preferredModeForNewTrack()
+                await startCurrent()
+            } else if queueIndex + 1 < queue.count {
+                queueIndex += 1
                 playbackMode = preferredModeForNewTrack()
                 await startCurrent()
             } else {
                 state = .paused
             }
+        } else if queueMode == .shuffle, queue.count > 1 {
+            let candidates = queue.indices.filter { $0 != queueIndex }
+            queueIndex = candidates.randomElement() ?? queueIndex
+            playbackMode = preferredModeForNewTrack()
+            await startCurrent()
+        } else if queueIndex + 1 < queue.count {
+            queueIndex += 1
+            playbackMode = preferredModeForNewTrack()
+            await startCurrent()
         }
     }
 
@@ -171,6 +247,8 @@ final class PlayerEngine {
 
     func jump(to index: Int) async {
         guard queue.indices.contains(index) else { return }
+        preloadTask?.cancel()
+        prefetchTask?.cancel()
         queueIndex = index
         playbackMode = preferredModeForNewTrack()
         await startCurrent()
@@ -214,6 +292,17 @@ final class PlayerEngine {
     }
 
     /// 进度条交互:开始拖动时冻结时间回写,只更新显示;松手时一次性 seek。
+    /// 当前在线播放音质偏好(0=最高)。下载音质单独存 downloadQuality。
+    static var playbackQuality: Int { UserDefaults.standard.integer(forKey: "playbackQuality") }
+
+    /// 在播放器里切换音质:写入偏好并按当前进度重取流续播。本地缓存曲目无需切换。
+    func setPlaybackQuality(_ id: Int) async {
+        UserDefaults.standard.set(id, forKey: "playbackQuality")
+        guard let track = current, CacheStore.shared.entry(bvid: track.bvid) == nil else { return }
+        preparedStreams.removeValue(forKey: track.bvid)
+        await startCurrent(resumeAt: currentTime)
+    }
+
     func beginScrub() {
         isScrubbing = true
     }
@@ -244,21 +333,24 @@ final class PlayerEngine {
         state = .loading
         currentTime = resumeAt
         lyrics = []
+        videoAvailable = false
+        currentAudioQuality = nil
+        currentAudioBandwidth = nil
         do {
             let url: URL
             let isLocal: Bool
             if playbackMode == .mv {
                 if track.cid == nil {
-                    let info = try await client.videoInfo(bvid: track.bvid)
-                    guard let page = info.pages.first else {
-                        throw BiliClient.APIError(code: -1, message: "无分P")
-                    }
-                    track = Track(aid: info.aid, ownerMid: info.owner.mid, bvid: track.bvid,
-                                  cid: page.cid, title: track.title, artist: track.artist,
-                                  coverURL: track.coverURL, duration: page.duration)
+                    track = try await fillPlaybackPage(for: track)
                     queue[queueIndex] = track
                 }
-                url = try await client.videoStream(bvid: track.bvid, cid: track.cid!)
+                if let prepared = preparedVideoStream(for: track.bvid), prepared.cid == track.cid {
+                    url = prepared.url
+                } else {
+                    url = try await client.videoStream(bvid: track.bvid, cid: track.cid!)
+                    preparedVideoStreams[track.bvid] = PreparedVideoStream(
+                        url: url, cid: track.cid!, fetchedAt: Date())
+                }
                 isLocal = false
                 videoAvailable = true
             } else if let cached = CacheStore.shared.entry(bvid: track.bvid) {
@@ -268,38 +360,58 @@ final class PlayerEngine {
                 queue[queueIndex] = track
                 url = CacheStore.audioDir.appendingPathComponent(cached.fileName)
                 isLocal = true
+                currentAudioQuality = cached.quality
+                currentAudioBandwidth = nil
             } else if let prepared = preparedStream(for: track.bvid) {
                 track.cid = prepared.cid
                 track.duration = prepared.duration
                 queue[queueIndex] = track
                 url = prepared.url
                 isLocal = false
+                currentAudioQuality = prepared.quality
+                currentAudioBandwidth = prepared.bandwidth
             } else {
                 if track.cid == nil {
-                    let info = try await client.videoInfo(bvid: track.bvid)
-                    guard let page = info.pages.first else {
-                        throw BiliClient.APIError(code: -1, message: "无分P")
-                    }
-                    track = Track(aid: info.aid, ownerMid: info.owner.mid, bvid: track.bvid,
-                                  cid: page.cid, title: track.title, artist: track.artist,
-                                  coverURL: track.coverURL, duration: page.duration)
+                    track = try await fillPlaybackPage(for: track)
                     queue[queueIndex] = track
                 }
-                url = try await client.audioStream(bvid: track.bvid, cid: track.cid!).url
+                let stream = try await client.audioStream(
+                    bvid: track.bvid, cid: track.cid!,
+                    preferredQuality: Self.playbackQuality)
+                url = stream.url
                 isLocal = false
+                currentAudioQuality = stream.quality
+                currentAudioBandwidth = stream.bandwidth
             }
             guard playbackGeneration == generation, current?.bvid == track.bvid else { return }
             startPlayback(url: url, isLocal: isLocal, resumeAt: resumeAt)
             try? AVAudioSession.sharedInstance().setActive(true)
             state = .playing
+            let shouldRecordHistory = resumeAt < 1 || !playedBVs.contains(track.bvid)
             playedBVs.insert(track.bvid)
+            if shouldRecordHistory {
+                PlaybackHistoryStore.shared.record(track)
+            }
             if !isLocal, UserDefaults.standard.bool(forKey: "autoCache") {
                 let toCache = track
-                Task { await DownloadManager.shared.download(track: toCache) }
+                Task {
+                    try? await Task.sleep(for: .seconds(12))
+                    guard playbackGeneration == generation, current?.bvid == toCache.bvid else { return }
+                    await DownloadManager.shared.download(track: toCache)
+                }
             }
-            await loadCover(for: track, generation: generation)
-            await loadLyrics(for: track, generation: generation)
-            await checkVideoAvailability(for: track, generation: generation)
+            Task { [track, generation] in
+                try? await Task.sleep(for: .seconds(1))
+                await loadCover(for: track, generation: generation)
+            }
+            Task { [track, generation] in
+                try? await Task.sleep(for: .seconds(2))
+                await loadLyrics(for: track, generation: generation)
+            }
+            Task { [track, generation] in
+                try? await Task.sleep(for: .seconds(4))
+                await checkVideoAvailability(for: track, generation: generation)
+            }
             scheduleRadioPrefetch()
             scheduleQueuePrefetch()
         } catch {
@@ -324,8 +436,20 @@ final class PlayerEngine {
                      duration: page.duration)
     }
 
+    private func fillPlaybackPage(for track: Track) async throws -> Track {
+        let pages = try await client.pageList(bvid: track.bvid)
+        guard let page = pages.first else {
+            throw BiliClient.APIError(code: -1, message: "无分P")
+        }
+        return Track(aid: track.aid, ownerMid: track.ownerMid, typeID: track.typeID, bvid: track.bvid,
+                     cid: page.cid, title: track.title, artist: track.artist,
+                     coverURL: track.coverURL, duration: page.duration)
+    }
+
     private func preferredModeForNewTrack() -> PlaybackMode {
-        UserDefaults.standard.bool(forKey: "preferMVOnWiFi") && NetworkMonitor.shared.isWiFi ? .mv : .music
+        // 新点击歌曲先出声。MV 流尤其是高画质会明显慢于音频流;Wi-Fi 优先 MV
+        // 只作为切换/预取策略,不阻塞新歌首播。
+        .music
     }
 
     /// 电台选歌:相关推荐里挑 1~11 分钟、没播过的第一条
@@ -338,16 +462,16 @@ final class PlayerEngine {
 
     private func scheduleRadioPrefetch() {
         prefetchTask?.cancel()
-        guard radioMode, queueIndex == queue.count - 1, let bvid = current?.bvid else { return }
+        guard queueMode == .radio, let bvid = current?.bvid else { return }
         let expectedIndex = queueIndex
         prefetchTask = Task { [weak self] in
             guard let self else { return }
+            try? await Task.sleep(for: .seconds(3))
             guard let next = await self.radioPick(after: bvid) else { return }
             guard !Task.isCancelled else { return }
-            if self.queueIndex == expectedIndex,
-               self.queue.count == expectedIndex + 1,
-               !self.queue.contains(where: { $0.bvid == next.bvid }) {
-                self.queue.append(next)
+            if self.queueIndex == expectedIndex {
+                self.prefetchedRadio = (bvid, next)
+                await self.prepare(track: next)
             }
         }
     }
@@ -356,6 +480,7 @@ final class PlayerEngine {
         guard queue.indices.contains(queueIndex + 1) else { return }
         let next = queue[queueIndex + 1]
         Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
             await self?.prepare(track: next)
         }
     }
@@ -369,27 +494,36 @@ final class PlayerEngine {
         return nil
     }
 
+    private func preparedVideoStream(for bvid: String) -> PreparedVideoStream? {
+        guard let prepared = preparedVideoStreams[bvid] else { return nil }
+        if Date().timeIntervalSince(prepared.fetchedAt) < 90 * 60 {
+            return prepared
+        }
+        preparedVideoStreams[bvid] = nil
+        return nil
+    }
+
     private func prepare(track: Track) async {
         guard CacheStore.shared.entry(bvid: track.bvid) == nil,
               preparedStream(for: track.bvid) == nil else { return }
         do {
             var track = track
             if track.cid == nil {
-                let info = try await client.videoInfo(bvid: track.bvid)
-                guard let page = info.pages.first else { return }
-                track.cid = page.cid
-                track.duration = page.duration
+                track = try await fillPlaybackPage(for: track)
             }
             guard let cid = track.cid else { return }
-            let stream = try await client.audioStream(bvid: track.bvid, cid: cid)
+            let stream = try await client.audioStream(
+                bvid: track.bvid, cid: cid, preferredQuality: Self.playbackQuality)
             preparedStreams[track.bvid] = PreparedStream(
-                url: stream.url, cid: cid, duration: track.duration, fetchedAt: Date())
+                url: stream.url, cid: cid, duration: track.duration,
+                quality: stream.quality, bandwidth: stream.bandwidth, fetchedAt: Date())
         } catch {
             // 预加载失败不影响手动播放,真正播放时会再取一次。
         }
     }
 
     private func startPlayback(url: URL, isLocal: Bool = false, resumeAt: Double = 0) {
+        let generation = playbackGeneration
         if let timeObserver, let player { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         statusObserver?.invalidate()
@@ -402,7 +536,10 @@ final class PlayerEngine {
             ? AVURLAsset(url: url)
             : AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": BiliClient.headers])
         let item = AVPlayerItem(asset: asset)
+        item.preferredForwardBufferDuration = 0
+        item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
         let player = AVPlayer(playerItem: item)
+        player.automaticallyWaitsToMinimizeStalling = false
         self.player = player
         timeObserver = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main
@@ -432,13 +569,19 @@ final class PlayerEngine {
             forName: AVPlayerItem.didPlayToEndTimeNotification, object: item, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                await self?.playNext()
+                guard let self,
+                      self.playbackGeneration == generation,
+                      self.player?.currentItem === item else { return }
+                let expectedDuration = self.duration
+                let actualTime = item.currentTime().seconds
+                guard expectedDuration <= 0 || actualTime >= max(expectedDuration - 1.5, 1) else { return }
+                await self.advance(automatic: true)
             }
         }
         if resumeAt > 0 {
             player.seek(to: CMTime(seconds: resumeAt, preferredTimescale: 600))
         }
-        player.play()
+        player.playImmediately(atRate: 1)
         updateNowPlayingInfo()
     }
 
@@ -464,8 +607,12 @@ final class PlayerEngine {
 
     private func checkVideoAvailability(for track: Track, generation: UUID) async {
         guard playbackMode == .music, let cid = track.cid else { return }
-        let available = (try? await client.videoStream(bvid: track.bvid, cid: cid)) != nil
+        let videoURL = try? await client.videoStream(bvid: track.bvid, cid: cid)
         guard playbackGeneration == generation, current?.bvid == track.bvid else { return }
+        if let videoURL {
+            preparedVideoStreams[track.bvid] = PreparedVideoStream(url: videoURL, cid: cid, fetchedAt: Date())
+        }
+        let available = videoURL != nil
         videoAvailable = available
     }
 

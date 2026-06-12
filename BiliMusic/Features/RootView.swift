@@ -4,23 +4,35 @@ struct RootView: View {
     @Environment(PlayerEngine.self) private var engine
     @Environment(\.scenePhase) private var scenePhase
     @State private var showFullPlayer = false
+    @State private var isDraggingFullPlayer = false
+    @State private var openPlayerTranslation: CGFloat = 0
 
     var body: some View {
-        TabView {
-            withMiniBar(HomeView())
-                .tabItem { Label("推荐", systemImage: "music.note.house.fill") }
-            withMiniBar(SearchView())
-                .tabItem { Label("搜索", systemImage: "magnifyingglass") }
-            withMiniBar(FavoritesView())
-                .tabItem { Label("收藏", systemImage: "heart.fill") }
-            withMiniBar(LibraryView())
-                .tabItem { Label("缓存", systemImage: "arrow.down.circle.fill") }
-            withMiniBar(SettingsView())
-                .tabItem { Label("设置", systemImage: "gearshape.fill") }
-        }
-        .tint(AppTheme.accent)
-        .sheet(isPresented: $showFullPlayer) {
-            NowPlayingView()
+        GeometryReader { proxy in
+            ZStack {
+                TabView {
+                    withMiniBar(HomeView())
+                        .tabItem { Label("推荐", systemImage: "music.note.house.fill") }
+                    withMiniBar(SearchView())
+                        .tabItem { Label("搜索", systemImage: "magnifyingglass") }
+                    withMiniBar(FavoritesView())
+                        .tabItem { Label("收藏", systemImage: "heart.fill") }
+                    withMiniBar(LibraryView())
+                        .tabItem { Label("缓存", systemImage: "arrow.down.circle.fill") }
+                    withMiniBar(SettingsView())
+                        .tabItem { Label("设置", systemImage: "gearshape.fill") }
+                }
+                .tint(AppTheme.accent)
+
+                if showFullPlayer || isDraggingFullPlayer {
+                    NowPlayingView {
+                        closeFullPlayer()
+                    }
+                    .offset(y: fullPlayerOffset(height: proxy.size.height))
+                    .ignoresSafeArea()
+                    .zIndex(10)
+                }
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background {
@@ -44,8 +56,26 @@ struct RootView: View {
     private func withMiniBar(_ content: some View) -> some View {
         content.safeAreaInset(edge: .bottom) {
             if engine.current != nil {
-                MiniPlayerBar(showFullPlayer: $showFullPlayer)
+                MiniPlayerBar(
+                    showFullPlayer: $showFullPlayer,
+                    isDraggingFullPlayer: $isDraggingFullPlayer,
+                    openPlayerTranslation: $openPlayerTranslation)
             }
+        }
+    }
+
+    private func fullPlayerOffset(height: CGFloat) -> CGFloat {
+        if showFullPlayer {
+            return 0
+        }
+        return max(0, height + openPlayerTranslation)
+    }
+
+    private func closeFullPlayer() {
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.9)) {
+            showFullPlayer = false
+            isDraggingFullPlayer = false
+            openPlayerTranslation = 0
         }
     }
 }

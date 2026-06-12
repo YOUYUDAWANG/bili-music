@@ -12,7 +12,7 @@
 ## P6 Polish
 
 - [x] Shift the UI direction toward Apple Music.
-  - Shared Apple Music red accent and system background theme.
+  - Shared neutral Apple-style accent and system background theme.
   - Player actions use a compact symbol bar instead of label-heavy controls.
   - Home, Search, Favorites, Cache, Settings, Queue, and picker sheets use native grouped list styling.
 - [x] Add favorite toggle from the player.
@@ -36,10 +36,79 @@
 - [x] Fix real-device player sheet layout clipping.
   - Removed large spacer-driven layout.
   - Player page now uses a stable scrollable vertical layout so cover/title/controls stay visible.
-- [ ] Add playback history.
+- [x] Add playback history.
   - Persist recently played tracks locally.
   - Show a compact history section or page.
   - Let tapping a history item start playback.
+  - Show play counts in the Cache tab history section.
+- [x] Add playback modes.
+  - Player supports sequential, shuffle, repeat-one, and radio modes.
+  - Radio mode now picks related tracks immediately instead of waiting for the current queue to end.
+  - Favorites and Cache rows can start radio playback from the context menu.
+- [x] Show queue/recommendations as side pages in the player.
+  - The full player opens on the current song.
+  - Swipe to the left page for the current queue.
+  - Swipe to the right page for related recommendations for the current track.
+- [x] Make lyrics an optional Apple Music-style entry.
+  - The player only shows a lyrics button when online lyrics are matched.
+  - Tapping the button opens a synced lyrics sheet.
+- [x] Consolidate player controls into one icon row.
+  - Queue mode and playback quality are icon menus in the action row.
+  - Music/MV uses the YouTube Music-style segmented switch again.
+  - The player no longer shows the default favorite folder text.
+- [x] Preload MV stream URLs while in music mode.
+  - Switching to MV reuses a prepared video URL when available.
+- [x] Add MV fullscreen behavior.
+  - MV mode has a fullscreen button.
+  - iPhone landscape orientation is enabled and MV fills the player when the device is landscape.
+- [x] Make full player dismissal return to mini mode.
+  - Full player is a full-screen cover.
+  - Tapping chevron/down-dragging the handle dismisses back to the mini player.
+- [x] Add search history and reduce search field stutter.
+  - Replaced SwiftUI `.searchable` with a plain TextField.
+  - Replaced the search `List` with `ScrollView`/`LazyVStack` to reduce first-focus initialization cost.
+  - Removed BV/link parsing from the search box.
+  - Search now clears stale results immediately, ignores stale async responses, fetches multiple pages, and prewarms WBI signing.
+  - Search uses a looser search-specific music filter so normal music searches return more items.
+  - Stores recent search terms locally and allows clearing history.
+- [x] Restrict search results to music more aggressively.
+  - Decode Bilibili `typeid` from search results.
+  - Prefer Bilibili music partition ids and reject non-music partitions before title heuristics.
+  - Keep search relevance matching so unrelated videos do not appear just because their duration looks song-like.
+- [x] Improve player gesture and media controls.
+  - Down-swipe dismissal is attached to the whole player instead of only the top handle.
+  - Down-swipe dismissal threshold is higher to reduce accidental minimization.
+  - Mini-player upward swipe requires a more deliberate vertical gesture and uses spring animation.
+  - MV fullscreen button appears only after tapping the video and auto-hides.
+  - MV stream lookup now tries higher MP4 qualities before falling back.
+  - Playback quality menu shows the current audio quality and bitrate when available.
+- [x] Guard against unexpected auto-skip.
+  - End-of-track handling now verifies the notification belongs to the current player item.
+  - Automatic advance only fires when playback is actually near the expected track duration.
+- [x] Restore Cache tab focus.
+  - Cache tab shows only cached tracks again.
+  - Playback history moved to Settings → Playback History.
+- [x] Reduce tap-to-audio latency.
+  - New track playback cancels stale preload/radio prefetch tasks.
+  - New tracks start with audio first instead of blocking on MV stream lookup.
+  - Cover, lyrics, and MV availability checks now run after playback starts.
+  - AVPlayer now starts immediately with minimal forward buffering.
+  - Auto-cache, queue/radio prefetch, cover, lyrics, and MV checks are delayed so the first audio buffer gets priority.
+  - Search/result tracks use the lightweight `pagelist` endpoint to fill `cid` instead of full video info.
+- [x] Make mini-player upward drag feel interactive.
+  - Full player is now a custom overlay instead of `fullScreenCover`.
+  - While dragging up from the mini player, the full player follows the finger from the bottom.
+- [x] Improve playlist detection.
+  - The collection sheet first checks the current video's `ugc_season`.
+  - Falls back to the UP owner's public seasons/series when the current video has no detected collection.
+- [x] Show current-video playlist inside the player.
+  - When the current track belongs to a Bilibili collection, the player shows the collection near the bottom of the now-playing page.
+  - The current song is highlighted and auto-centered in that collection list.
+  - Tapping a collection item replaces the current queue with the whole collection and starts from that item.
+- [x] Reduce empty space in the player.
+  - If no current-video collection is available, the player shows a compact "up next" queue preview at the bottom.
+- [x] Tune full-player down-swipe dismissal.
+  - Lowered the dismissal threshold slightly while keeping it above the earlier accidental-trigger range.
 - [ ] Improve queue management.
   - [x] Show the current queue in the full player.
   - [x] Support jumping to a queued track.
@@ -47,17 +116,20 @@
   - [x] Support appending tracks from UP playlists.
 - [ ] Verify UP playlists on device.
   - Player has a "合集" entry for the current track's UP owner.
+  - Current-video合集 should appear first if Bilibili exposes `ugc_season`.
   - Uses public season/series playlists from the UP space.
   - Bilibili API shape may need adjustment after real-account testing.
 - [ ] Verify lyrics on device.
   - Uses LRCLIB online synced lyrics first.
-  - Falls back to Bilibili subtitle files when no online lyric match exists.
+  - Does not fall back to Bilibili auto subtitles because they frequently produce incorrect "♪音乐♪" lines.
   - Shows a clear empty state when no lyric source matches.
   - Confirm matching is conservative enough to avoid wrong song variants.
 - [ ] Verify Music/MV switching on device.
   - Player has a native segmented "音乐 / MV" switch.
   - MV mode uses a stable MP4 stream and resumes near the current timestamp.
   - Switching back to music should resume audio near the same timestamp.
+  - MV fullscreen button should open a fullscreen video layer without starting a second audio track.
+  - Rotating the phone landscape in MV should fill the player with video.
   - Wi-Fi playback can default to MV mode via Settings.
   - Entering background from MV mode switches to pure music and should keep lock-screen playback alive.
 - [ ] Add sleep timer.

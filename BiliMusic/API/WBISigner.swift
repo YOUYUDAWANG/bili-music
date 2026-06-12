@@ -26,6 +26,10 @@ enum WBISigner {
         return query + "&w_rid=" + wRid
     }
 
+    static func prewarm() async {
+        _ = try? await mixinKey()
+    }
+
     private static func mixinKey() async throws -> String {
         if let cached = cachedKey, Date().timeIntervalSince(cached.fetchedAt) < 12 * 3600 {
             return cached.key

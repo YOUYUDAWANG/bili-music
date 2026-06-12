@@ -6,7 +6,8 @@ struct SettingsView: View {
     @State private var username: String?
     @State private var showLogin = false
     @AppStorage("autoCache") private var autoCache = false
-    @AppStorage("preferredQuality") private var preferredQuality = 0
+    @AppStorage("playbackQuality") private var playbackQuality = 0
+    @AppStorage("downloadQuality") private var downloadQuality = 0
     @AppStorage("preferMVOnWiFi") private var preferMVOnWiFi = true
     @AppStorage("recommendFolderId") private var recommendFolderId = 0
     @State private var favFolders: [BiliClient.FavFolder] = []
@@ -43,9 +44,17 @@ struct SettingsView: View {
                     }
                 }
                 Section("音质") {
-                    Picker("播放与缓存音质", selection: $preferredQuality) {
+                    Picker("播放音质", selection: $playbackQuality) {
                         Text("最高可用").tag(0)
-                        Text("192K").tag(30280)
+                        Text("Hi-Res").tag(30251)
+                        Text("高码率").tag(30280)
+                        Text("132K").tag(30232)
+                        Text("64K").tag(30216)
+                    }
+                    Picker("下载音质", selection: $downloadQuality) {
+                        Text("最高可用").tag(0)
+                        Text("Hi-Res").tag(30251)
+                        Text("高码率").tag(30280)
                         Text("132K").tag(30232)
                         Text("64K").tag(30216)
                     }
@@ -64,6 +73,11 @@ struct SettingsView: View {
                     Text("进入后台会自动切回纯音乐流,保持锁屏播放体验")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    NavigationLink {
+                        PlaybackHistoryView()
+                    } label: {
+                        Label("播放历史", systemImage: "clock.arrow.circlepath")
+                    }
                 }
             }
             .scrollContentBackground(.hidden)
@@ -91,6 +105,55 @@ struct SettingsView: View {
     private func loadFolders() async {
         guard loggedIn else { return }
         favFolders = (try? await BiliClient().favFolders()) ?? []
+    }
+}
+
+private struct PlaybackHistoryView: View {
+    @Environment(PlayerEngine.self) private var engine
+    private var history: PlaybackHistoryStore { .shared }
+
+    var body: some View {
+        List {
+            ForEach(history.entries) { entry in
+                Button {
+                    let tracks = history.entries.map(\.track)
+                    let index = history.entries.firstIndex(of: entry) ?? 0
+                    Task { await engine.play(tracks: tracks, startAt: index) }
+                } label: {
+                    HStack {
+                        TrackRow(track: entry.track, isPlaying: engine.current?.bvid == entry.bvid)
+                        Text("\(entry.playCount)次")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.quaternary, in: Capsule())
+                    }
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    Button {
+                        Task { await engine.playRadio(seed: entry.track) }
+                    } label: {
+                        Label("电台播放", systemImage: PlayerEngine.QueueMode.radio.icon)
+                    }
+                }
+            }
+            if !history.entries.isEmpty {
+                Button("清空播放历史", role: .destructive) {
+                    history.clear()
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.groupedBackground)
+        .navigationTitle("播放历史")
+        .overlay {
+            if history.entries.isEmpty {
+                ContentUnavailableView("没有播放历史", systemImage: "clock")
+            }
+        }
     }
 }
 

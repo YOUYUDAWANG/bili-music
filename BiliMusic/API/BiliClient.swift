@@ -63,16 +63,49 @@ struct BiliClient {
     struct VideoInfo: Decodable {
         struct Owner: Decodable { let mid: Int; let name: String; let face: String }
         struct Page: Decodable { let cid: Int; let page: Int; let part: String; let duration: Int }
+        struct UGCSeason: Decodable {
+            struct Section: Decodable {
+                struct Episode: Decodable {
+                    struct Arc: Decodable {
+                        let bvid: String?
+                        let title: String?
+                        let pic: String?
+                        let duration: Int?
+                    }
+                    let aid: Int?
+                    let bvid: String?
+                    let cid: Int?
+                    let title: String?
+                    let arc: Arc?
+                }
+                let episodes: [Episode]?
+            }
+            let id: Int
+            let title: String
+            let sections: [Section]?
+        }
         let aid: Int
         let bvid: String
         let title: String
         let pic: String
         let owner: Owner
         let pages: [Page]
+        let ugc_season: UGCSeason?
     }
 
     func videoInfo(bvid: String) async throws -> VideoInfo {
         try await get("https://api.bilibili.com/x/web-interface/view?bvid=\(bvid)")
+    }
+
+    struct PageListItem: Decodable {
+        let cid: Int
+        let page: Int
+        let part: String
+        let duration: Int
+    }
+
+    func pageList(bvid: String) async throws -> [PageListItem] {
+        try await get("https://api.bilibili.com/x/player/pagelist?bvid=\(bvid)")
     }
 
     // MARK: - 音频流
@@ -94,16 +127,18 @@ struct BiliClient {
 
     /// 按设置里的音质偏好取音频流。返回 URL(约 2 小时过期,不可持久化)和实际选中的音质 id。
     /// 偏好 0 = 最高(含 Hi-Res);否则选不超过偏好的最高一档。
-    func audioStream(bvid: String, cid: Int) async throws -> (url: URL, quality: Int) {
+    /// preferredQuality:0 = 最高(含 Hi-Res),否则选不超过该 id 的最高一档。播放/下载各传各的偏好。
+    func audioStream(bvid: String, cid: Int, preferredQuality pref: Int) async throws -> (url: URL, quality: Int, bandwidth: Int) {
         let info: PlayInfo = try await get(
             "https://api.bilibili.com/x/player/playurl?bvid=\(bvid)&cid=\(cid)&fnval=16&fourk=1")
         guard let dash = info.dash, let audios = dash.audio, !audios.isEmpty else {
             throw APIError(code: -1, message: "无 DASH 音频流")
         }
-        let pref = UserDefaults.standard.integer(forKey: "preferredQuality")
         let chosen: PlayInfo.Dash.Audio
         if pref == 0 {
             chosen = dash.flac?.audio ?? audios.max { $0.id < $1.id }!
+        } else if pref == 30251, let flac = dash.flac?.audio {
+            chosen = flac
         } else {
             chosen = audios.filter { $0.id <= pref }.max { $0.id < $1.id }
                 ?? audios.min { $0.id < $1.id }!
@@ -111,17 +146,23 @@ struct BiliClient {
         guard let url = URL(string: chosen.baseUrl) else {
             throw APIError(code: -1, message: "音频 URL 非法")
         }
-        return (url, chosen.id)
+        return (url, chosen.id, chosen.bandwidth)
     }
 
     /// 取单文件 MP4 视频流,用于 MV 模式。优先稳定播放,不追求最高画质。
     func videoStream(bvid: String, cid: Int) async throws -> URL {
-        let info: VideoPlayInfo = try await get(
-            "https://api.bilibili.com/x/player/playurl?bvid=\(bvid)&cid=\(cid)&qn=64&fnval=0&fourk=0")
-        guard let raw = info.durl?.first?.url, let url = URL(string: raw) else {
-            throw APIError(code: -1, message: "无可播放 MP4 视频流")
+        for qn in [112, 80, 64] {
+            do {
+                let info: VideoPlayInfo = try await get(
+                    "https://api.bilibili.com/x/player/playurl?bvid=\(bvid)&cid=\(cid)&qn=\(qn)&fnval=0&fourk=1")
+                if let raw = info.durl?.first?.url, let url = URL(string: raw) {
+                    return url
+                }
+            } catch {
+                continue
+            }
         }
-        return url
+        throw APIError(code: -1, message: "无可播放 MP4 视频流")
     }
 
     /// 音质 id 的展示名
@@ -129,7 +170,7 @@ struct BiliClient {
         switch id {
         case 30216: return "64K"
         case 30232: return "132K"
-        case 30280: return "192K"
+        case 30280: return "高码率"
         case 30250: return "杜比全景声"
         case 30251: return "Hi-Res"
         default: return "\(id)"
@@ -145,11 +186,34 @@ struct BiliClient {
     struct SearchItem: Decodable {
         let aid: Int?
         let mid: Int?
+        let typeid: Int?
         let bvid: String
         let title: String
         let author: String
         let pic: String
         let duration: String
+
+        private enum CodingKeys: String, CodingKey {
+            case aid, mid, typeid, bvid, title, author, pic, duration
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            aid = try container.decodeIfPresent(Int.self, forKey: .aid)
+            mid = try container.decodeIfPresent(Int.self, forKey: .mid)
+            if let intValue = try? container.decodeIfPresent(Int.self, forKey: .typeid) {
+                typeid = intValue
+            } else if let stringValue = try? container.decodeIfPresent(String.self, forKey: .typeid) {
+                typeid = Int(stringValue)
+            } else {
+                typeid = nil
+            }
+            bvid = try container.decode(String.self, forKey: .bvid)
+            title = try container.decode(String.self, forKey: .title)
+            author = try container.decode(String.self, forKey: .author)
+            pic = try container.decode(String.self, forKey: .pic)
+            duration = try container.decode(String.self, forKey: .duration)
+        }
 
         /// 去掉关键词高亮标签的标题
         var cleanTitle: String {
@@ -345,6 +409,7 @@ struct BiliClient {
         let title: String
         let mediaCount: Int
         let type: Int
+        let items: [UPPlaylistItem]?
 
         enum CodingKeys: String, CodingKey {
             case id
@@ -352,15 +417,41 @@ struct BiliClient {
             case mediaCount = "total"
             case type
         }
+
+        init(id: Int, title: String, mediaCount: Int, type: Int, items: [UPPlaylistItem]? = nil) {
+            self.id = id
+            self.title = title
+            self.mediaCount = mediaCount
+            self.type = type
+            self.items = items
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(Int.self, forKey: .id)
+            title = try container.decode(String.self, forKey: .title)
+            mediaCount = try container.decode(Int.self, forKey: .mediaCount)
+            type = try container.decode(Int.self, forKey: .type)
+            items = nil
+        }
     }
 
-    struct UPPlaylistItem: Decodable {
+    struct UPPlaylistItem: Decodable, Hashable {
         let bvid: String
         let aid: Int?
         let cid: Int?
         let title: String
         let pic: String?
         let duration: Int?
+
+        init(bvid: String, aid: Int?, cid: Int?, title: String, pic: String?, duration: Int?) {
+            self.bvid = bvid
+            self.aid = aid
+            self.cid = cid
+            self.title = title
+            self.pic = pic
+            self.duration = duration
+        }
     }
 
     struct UPPlaylistPage {
@@ -379,7 +470,33 @@ struct BiliClient {
         return (data.seasons_list?.items_lists ?? []) + (data.series_list?.items_lists ?? [])
     }
 
+    func currentVideoPlaylist(bvid: String) async throws -> UPPlaylist? {
+        let info = try await videoInfo(bvid: bvid)
+        guard let season = info.ugc_season else { return nil }
+        let items: [UPPlaylistItem] = season.sections?
+            .flatMap { $0.episodes ?? [] }
+            .compactMap {
+                guard let bvid = $0.bvid ?? $0.arc?.bvid else { return nil }
+                return UPPlaylistItem(
+                    bvid: bvid,
+                    aid: $0.aid,
+                    cid: $0.cid,
+                    title: $0.title ?? $0.arc?.title ?? "未命名",
+                    pic: $0.arc?.pic,
+                    duration: $0.arc?.duration)
+            } ?? []
+        return UPPlaylist(
+            id: season.id,
+            title: season.title,
+            mediaCount: items.count,
+            type: 1,
+            items: items)
+    }
+
     func upPlaylistItems(mid: Int, playlist: UPPlaylist, page: Int = 1) async throws -> UPPlaylistPage {
+        if let items = playlist.items {
+            return UPPlaylistPage(items: items, hasMore: false)
+        }
         struct Data: Decodable {
             let archives: [UPPlaylistItem]?
             let page: Page?

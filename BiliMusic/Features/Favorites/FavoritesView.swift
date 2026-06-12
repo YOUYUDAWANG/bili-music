@@ -112,6 +112,18 @@ struct FavFolderDetailView: View {
                     TrackRow(track: track, isPlaying: engine.current?.bvid == track.bvid)
                 }
                 .buttonStyle(.plain)
+                .contextMenu {
+                    Button {
+                        Task { await engine.playRadio(seed: track) }
+                    } label: {
+                        Label("电台播放", systemImage: PlayerEngine.QueueMode.radio.icon)
+                    }
+                    Button {
+                        Task { await engine.play(tracks: tracks, startAt: index, queueMode: .shuffle) }
+                    } label: {
+                        Label("随机播放这个收藏夹", systemImage: PlayerEngine.QueueMode.shuffle.icon)
+                    }
+                }
                 .onAppear {
                     if track == tracks.last { Task { await loadMore() } }
                 }

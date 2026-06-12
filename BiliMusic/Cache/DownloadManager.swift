@@ -35,7 +35,9 @@ final class DownloadManager {
                 track.duration = page.duration
             }
             let cid = track.cid!
-            let stream = try await client.audioStream(bvid: track.bvid, cid: cid)
+            let stream = try await client.audioStream(
+                bvid: track.bvid, cid: cid,
+                preferredQuality: UserDefaults.standard.integer(forKey: "downloadQuality"))
 
             var req = URLRequest(url: stream.url)
             BiliClient.headers.forEach { req.setValue($1, forHTTPHeaderField: $0) }

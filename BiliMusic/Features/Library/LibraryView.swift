@@ -33,6 +33,20 @@ struct LibraryView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button {
+                            Task { await engine.playRadio(seed: entry.track) }
+                        } label: {
+                            Label("电台播放", systemImage: PlayerEngine.QueueMode.radio.icon)
+                        }
+                        Button {
+                            let tracks = cache.entries.map(\.track)
+                            let index = cache.entries.firstIndex(of: entry) ?? 0
+                            Task { await engine.play(tracks: tracks, startAt: index, queueMode: .shuffle) }
+                        } label: {
+                            Label("随机播放缓存", systemImage: PlayerEngine.QueueMode.shuffle.icon)
+                        }
+                    }
                 }
                 .onDelete { offsets in
                     offsets.map { cache.entries[$0] }.forEach { cache.remove($0) }

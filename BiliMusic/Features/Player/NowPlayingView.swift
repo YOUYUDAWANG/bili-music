@@ -4,7 +4,25 @@ import SwiftUI
 /// 全屏正在播放页(从 mini bar 上拉打开)。
 struct NowPlayingView: View {
     @Environment(PlayerEngine.self) private var engine
-    @State private var showQueue = false
+    var onDismiss: (() -> Void)? = nil
+    private enum PlayerPage: Int {
+        case queue = 0
+        case nowPlaying = 1
+        case recommendations = 2
+    }
+
+    @State private var selectedPage = PlayerPage.nowPlaying.rawValue
+    @State private var recommendedTracks: [Track] = []
+    @State private var recommendationsLoading = false
+    @State private var recommendationsError: String?
+    @State private var currentPlaylist: BiliClient.UPPlaylist?
+    @State private var currentPlaylistTracks: [Track] = []
+    @State private var currentPlaylistLoading = false
+    @State private var currentPlaylistError: String?
+    @State private var suppressNextRecommendationRefresh = false
+    @State private var showLyrics = false
+    @State private var showMVFullscreen = false
+    @State private var showMVControls = false
     @State private var showUPPlaylists = false
     @State private var showFavoriteFolders = false
     @State private var selectedMode: PlayerEngine.PlaybackMode = .music
@@ -12,161 +30,47 @@ struct NowPlayingView: View {
     @State private var favoriteLongPressTriggered = false
     @State private var scrubValue: Double = 0
     @State private var isScrubbing = false
+    @State private var dragOffset: CGFloat = 0
+    @Environment(\.dismiss) private var dismiss
     private var favorites: FavoriteManager { .shared }
 
     var body: some View {
-        @Bindable var bindableEngine = engine
         GeometryReader { proxy in
-            let coverSize = min(proxy.size.width - 48, max(230, proxy.size.height * 0.38), 340)
+            let coverSize = min(proxy.size.width - 28, max(260, proxy.size.height * 0.46), 420)
             ZStack {
-                playerBackground
-                    .ignoresSafeArea()
+                if isLandscapeMV(size: proxy.size), let player = engine.avPlayer {
+                    VideoPlayer(player: player)
+                        .ignoresSafeArea()
+                } else {
+                    playerBackground
+                        .ignoresSafeArea()
 
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 22) {
-                        Capsule()
-                            .fill(.secondary.opacity(0.32))
-                            .frame(width: 42, height: 5)
-                            .padding(.top, 8)
-
-                        Picker("播放模式", selection: $selectedMode) {
-                            ForEach(PlayerEngine.PlaybackMode.allCases) { mode in
-                                Text(mode.rawValue).tag(mode)
+                    VStack(spacing: 0) {
+                        playerHeader
+                        TabView(selection: $selectedPage) {
+                            playerListPage(title: "播放列表", systemName: "list.bullet") {
+                                queueList
                             }
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(maxWidth: 210)
-                        .tint(AppTheme.accent)
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
-                        .onChange(of: engine.playbackMode) { _, mode in
-                            selectedMode = mode
-                        }
-                        .onChange(of: selectedMode) { _, mode in
-                            guard mode != engine.playbackMode else { return }
-                            Task {
-                                switchingMode = true
-                                await engine.setPlaybackMode(mode)
-                                selectedMode = engine.playbackMode
-                                switchingMode = false
+                            .tag(PlayerPage.queue.rawValue)
+
+                            ScrollView(showsIndicators: false) {
+                                nowPlayingPage(coverSize: coverSize)
                             }
-                        }
-                        .disabled(switchingMode || (!engine.videoAvailable && engine.playbackMode == .music))
+                            .tag(PlayerPage.nowPlaying.rawValue)
 
-                        mediaView(coverSize: coverSize)
-                            .padding(.top, 8)
-
-                        VStack(spacing: 7) {
-                            Text(engine.current?.title ?? "")
-                                .font(.title2.weight(.semibold))
-                                .multilineTextAlignment(.center)
-                                .lineLimit(2)
-                            Text(engine.current?.artist ?? "")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                            if case .failed(let message) = engine.state {
-                                Text(message)
-                                    .font(.caption)
-                                    .foregroundStyle(.red)
-                                    .lineLimit(2)
+                            playerListPage(title: "推荐歌曲", systemName: "sparkles") {
+                                recommendationsList
                             }
+                            .tag(PlayerPage.recommendations.rawValue)
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, 28)
-
-                        VStack(spacing: 4) {
-                            Slider(
-                                value: Binding(
-                                    get: { isScrubbing ? scrubValue : min(engine.currentTime, engine.duration) },
-                                    set: { scrubValue = $0 }
-                                ),
-                                in: 0...max(engine.duration, 1),
-                                onEditingChanged: { editing in
-                                    if editing {
-                                        scrubValue = min(engine.currentTime, engine.duration)
-                                        isScrubbing = true
-                                        engine.beginScrub()
-                                    } else {
-                                        engine.endScrub(to: scrubValue)
-                                        isScrubbing = false
-                                    }
-                                }
-                            )
-                            .tint(AppTheme.label)
-                            HStack {
-                                Text(format(isScrubbing ? scrubValue : engine.currentTime))
-                                Spacer()
-                                Text(format(engine.duration))
-                            }
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                        }
-                        .padding(.horizontal, 28)
-
-                        HStack(spacing: 38) {
-                            PlayerIconButton(systemName: "backward.fill", size: 28) {
-                                Task { await engine.playPrevious() }
-                            }
-                            Button {
-                                engine.togglePlayPause()
-                            } label: {
-                                Image(systemName: engine.state == .playing ? "pause.fill" : "play.fill")
-                                    .font(.system(size: 36, weight: .bold))
-                                    .contentTransition(.symbolEffect(.replace))
-                                    .frame(width: 82, height: 82)
-                                    .foregroundStyle(AppTheme.background)
-                                    .background(AppTheme.label, in: Circle())
-                                    .shadow(color: .black.opacity(0.18), radius: 16, y: 8)
-                            }
-                            .overlay { if engine.state == .loading { ProgressView().tint(AppTheme.background) } }
-                            PlayerIconButton(systemName: "forward.fill", size: 28) {
-                                Task { await engine.playNext() }
-                            }
-                            .disabled(!engine.hasNext)
-                        }
-                        .foregroundStyle(AppTheme.label)
-
-                        HStack(spacing: 12) {
-                            favoriteButton
-                            downloadIconButton
-                            ActionSymbolButton(title: "队列", systemName: "list.bullet") {
-                                showQueue = true
-                            }
-                            ActionSymbolButton(title: "合集", systemName: "rectangle.stack") {
-                                showUPPlaylists = true
-                            }
-                            .disabled(engine.current?.ownerMid == nil)
-                        }
-                        .padding(.horizontal, 22)
-                        .padding(.vertical, 10)
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18))
-                        .padding(.horizontal, 24)
-
-                        if let favoriteMessage {
-                            Text(favoriteMessage)
-                                .font(.caption2)
-                                .foregroundStyle(favorites.lastError == nil ? Color.secondary : Color.red)
-                                .lineLimit(2)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 28)
-                        }
-
-                        lyricsView
-
-                        Toggle(isOn: $bindableEngine.radioMode) {
-                            Label("电台模式", systemImage: "antenna.radiowaves.left.and.right")
-                                .font(.subheadline.weight(.medium))
-                        }
-                        .padding(.horizontal, 28)
-                        .tint(AppTheme.accent)
-
-                        Spacer(minLength: 18)
+                        .tabViewStyle(.page(indexDisplayMode: .always))
+                        .indexViewStyle(.page(backgroundDisplayMode: .interactive))
                     }
                 }
             }
-        }
-        .sheet(isPresented: $showQueue) {
-            QueueView()
+            .offset(y: dragOffset)
+            .animation(.spring(response: 0.32, dampingFraction: 0.86), value: dragOffset)
+            .simultaneousGesture(dismissDrag)
         }
         .sheet(isPresented: $showUPPlaylists) {
             UPPlaylistsView()
@@ -174,8 +78,38 @@ struct NowPlayingView: View {
         .sheet(isPresented: $showFavoriteFolders) {
             FavoriteFolderPickerView()
         }
+        .sheet(isPresented: $showLyrics) {
+            LyricsSheetView()
+        }
+        .fullScreenCover(isPresented: $showMVFullscreen) {
+            MVFullscreenView()
+        }
         .onAppear {
             selectedMode = engine.playbackMode
+            Task { await loadRecommendations() }
+            Task { await loadCurrentPlaylistIfNeeded(force: true) }
+        }
+        .onChange(of: engine.playbackMode) { _, mode in
+            selectedMode = mode
+        }
+        .onChange(of: engine.current?.bvid) {
+            Task { await loadCurrentPlaylistIfNeeded(force: false) }
+            if suppressNextRecommendationRefresh {
+                suppressNextRecommendationRefresh = false
+                return
+            }
+            if selectedPage == PlayerPage.recommendations.rawValue {
+                return
+            }
+            recommendedTracks = []
+            recommendationsError = nil
+            Task { await loadRecommendations() }
+        }
+        .onChange(of: selectedPage) { _, page in
+            guard page != PlayerPage.recommendations.rawValue else { return }
+            recommendedTracks = []
+            recommendationsError = nil
+            Task { await loadRecommendations() }
         }
     }
 
@@ -184,13 +118,138 @@ struct NowPlayingView: View {
         AppTheme.playerGradient
     }
 
+    private func isLandscapeMV(size: CGSize) -> Bool {
+        engine.playbackMode == .mv && size.width > size.height
+    }
+
+    private var playerHeader: some View {
+        HStack {
+            Button {
+                closePlayer()
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, height: 44)
+            }
+            Spacer()
+        }
+        .overlay {
+            Capsule()
+                .fill(.secondary.opacity(0.32))
+                .frame(width: 42, height: 5)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+        .contentShape(Rectangle())
+        .gesture(dismissDrag)
+    }
+
+    private func nowPlayingPage(coverSize: CGFloat) -> some View {
+        VStack(spacing: 15) {
+            Picker("播放模式", selection: $selectedMode) {
+                ForEach(PlayerEngine.PlaybackMode.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 210)
+            .tint(AppTheme.accent)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .onChange(of: selectedMode) { _, mode in
+                guard mode != engine.playbackMode else { return }
+                Task {
+                    switchingMode = true
+                    await engine.setPlaybackMode(mode)
+                    selectedMode = engine.playbackMode
+                    switchingMode = false
+                }
+            }
+            .disabled(switchingMode || (!engine.videoAvailable && engine.playbackMode == .music))
+
+            mediaView(coverSize: coverSize)
+                .padding(.top, 2)
+
+            VStack(spacing: 5) {
+                Text(engine.current?.title ?? "")
+                    .font(.title2.weight(.semibold))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                Text(engine.current?.artist ?? "")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                if case .failed(let message) = engine.state {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 28)
+
+            progressView
+            transportControls
+            actionRow
+
+            if let favoriteError = favorites.lastError {
+                Text(favoriteError)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 28)
+            }
+
+            bottomContextPanel
+
+            Spacer(minLength: 0)
+        }
+        .padding(.bottom, 12)
+    }
+
     @ViewBuilder
     private func mediaView(coverSize: CGFloat) -> some View {
         if engine.playbackMode == .mv, let player = engine.avPlayer {
-            VideoPlayer(player: player)
-                .frame(width: min(coverSize + 34, 360), height: (min(coverSize + 34, 360)) * 9 / 16)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .shadow(color: .black.opacity(0.42), radius: 28, y: 18)
+            ZStack(alignment: .topTrailing) {
+                VideoPlayer(player: player)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            showMVControls.toggle()
+                        }
+                    }
+                if showMVControls {
+                    Button {
+                        showMVFullscreen = true
+                        showMVControls = false
+                    } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 15, weight: .semibold))
+                            .padding(10)
+                            .background(.thinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(8)
+                    .transition(.opacity)
+                }
+            }
+            .frame(width: min(coverSize, 430), height: min(coverSize, 430) * 9 / 16)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .shadow(color: .black.opacity(0.42), radius: 28, y: 18)
+            .onChange(of: showMVControls) { _, visible in
+                guard visible else { return }
+                Task {
+                    try? await Task.sleep(for: .seconds(2))
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showMVControls = false
+                        }
+                    }
+                }
+            }
         } else {
             AsyncImage(url: engine.current?.coverURL) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
@@ -208,47 +267,80 @@ struct NowPlayingView: View {
         }
     }
 
-    @ViewBuilder
-    private var lyricsView: some View {
-        let current = currentLyricIndex
-        VStack(alignment: .leading, spacing: 10) {
-            Label("歌词", systemImage: "text.quote")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            if engine.lyrics.isEmpty {
-                Text("这首歌没有匹配到在线歌词")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(lyricWindow, id: \.id) { line in
-                    Text(line.text)
-                        .font(line.id == engine.lyrics[safe: current]?.id ? .headline : .subheadline)
-                        .foregroundStyle(line.id == engine.lyrics[safe: current]?.id ? AppTheme.label : .secondary)
-                        .lineLimit(2)
+    private var progressView: some View {
+        VStack(spacing: 4) {
+            Slider(
+                value: Binding(
+                    get: { isScrubbing ? scrubValue : min(engine.currentTime, engine.duration) },
+                    set: { scrubValue = $0 }
+                ),
+                in: 0...max(engine.duration, 1),
+                onEditingChanged: { editing in
+                    if editing {
+                        scrubValue = min(engine.currentTime, engine.duration)
+                        isScrubbing = true
+                        engine.beginScrub()
+                    } else {
+                        engine.endScrub(to: scrubValue)
+                        isScrubbing = false
+                    }
                 }
+            )
+            .tint(AppTheme.label)
+            HStack {
+                Text(format(isScrubbing ? scrubValue : engine.currentTime))
+                Spacer()
+                Text(format(engine.duration))
             }
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(AppTheme.secondaryBackground, in: RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal, 28)
+    }
+
+    private var transportControls: some View {
+        HStack(spacing: 34) {
+            PlayerIconButton(systemName: "backward.fill", size: 28) {
+                Task { await engine.playPrevious() }
+            }
+            Button {
+                engine.togglePlayPause()
+            } label: {
+                Image(systemName: engine.state == .playing ? "pause.fill" : "play.fill")
+                    .font(.system(size: 36, weight: .bold))
+                    .contentTransition(.symbolEffect(.replace))
+                    .frame(width: 76, height: 76)
+                    .foregroundStyle(AppTheme.background)
+                    .background(AppTheme.label, in: Circle())
+                    .shadow(color: .black.opacity(0.18), radius: 16, y: 8)
+            }
+            .overlay { if engine.state == .loading { ProgressView().tint(AppTheme.background) } }
+            PlayerIconButton(systemName: "forward.fill", size: 28) {
+                Task { await engine.playNext() }
+            }
+            .disabled(!engine.hasNext)
+        }
+        .foregroundStyle(AppTheme.label)
+    }
+
+    private var actionRow: some View {
+        HStack(spacing: 12) {
+            favoriteButton
+            downloadIconButton
+            if !engine.lyrics.isEmpty {
+                lyricsButton
+            }
+            queueModeMenu
+            qualityMenu
+            ActionSymbolButton(title: "合集", systemName: "rectangle.stack") {
+                showUPPlaylists = true
+            }
+            .disabled(engine.current?.ownerMid == nil)
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 10)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18))
         .padding(.horizontal, 24)
-    }
-
-    private var currentLyricIndex: Int {
-        guard !engine.lyrics.isEmpty else { return 0 }
-        if let active = engine.lyrics.firstIndex(where: { line in
-            engine.currentTime >= line.from && engine.currentTime < line.to
-        }) {
-            return active
-        }
-        return engine.lyrics.lastIndex { line in engine.currentTime >= line.from } ?? 0
-    }
-
-    private var lyricWindow: [PlayerEngine.LyricLine] {
-        guard !engine.lyrics.isEmpty else { return [] }
-        let start = max(0, currentLyricIndex - 1)
-        let end = min(engine.lyrics.count, currentLyricIndex + 3)
-        return Array(engine.lyrics[start..<end])
     }
 
     @ViewBuilder
@@ -280,14 +372,11 @@ struct NowPlayingView: View {
         }
     }
 
-    private var favoriteMessage: String? {
-        if let error = favorites.lastError {
-            return error
+    @ViewBuilder
+    private var lyricsButton: some View {
+        ActionSymbolButton(title: "歌词", systemName: "quote.bubble") {
+            showLyrics = true
         }
-        if let title = favorites.defaultFolderTitle {
-            return "默认收藏到 \(title)"
-        }
-        return nil
     }
 
     @ViewBuilder
@@ -315,9 +404,422 @@ struct NowPlayingView: View {
         }
     }
 
+    private var queueModeMenu: some View {
+        Menu {
+            ForEach(PlayerEngine.QueueMode.allCases) { mode in
+                Button {
+                    engine.queueMode = mode
+                } label: {
+                    Label(mode.rawValue, systemImage: mode.icon).tag(mode)
+                }
+            }
+        } label: {
+            ActionSymbolLabel(title: "播放模式", systemName: engine.queueMode.icon)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var qualityMenu: some View {
+        Menu {
+            ForEach(qualityOptions, id: \.id) { option in
+                Button {
+                    Task { await engine.setPlaybackQuality(option.id) }
+                } label: {
+                    Label(option.title, systemImage: PlayerEngine.playbackQuality == option.id ? "checkmark" : "circle")
+                }
+            }
+            if let quality = engine.currentAudioQuality {
+                Divider()
+                Label("当前: \(BiliClient.qualityName(quality))", systemImage: "waveform")
+                if let bandwidth = engine.currentAudioBandwidth {
+                    Label("码率: \(formatBitrate(bandwidth))", systemImage: "speedometer")
+                }
+            } else if engine.playbackMode == .mv {
+                Divider()
+                Label("当前为 MV 视频流", systemImage: "play.rectangle")
+            }
+        } label: {
+            ActionSymbolLabel(title: "播放音质", systemName: "hifispeaker")
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var qualityOptions: [(id: Int, title: String)] {
+        [
+            (0, "最高可用"),
+            (30251, "Hi-Res"),
+            (30280, "高码率"),
+            (30232, "132K"),
+            (30216, "64K"),
+        ]
+    }
+
+    private func playerListPage<Content: View>(title: String, systemName: String, @ViewBuilder content: () -> Content) -> some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 12) {
+                Label(title, systemImage: systemName)
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 18)
+                content()
+                    .padding(.horizontal, 20)
+                Spacer(minLength: 32)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var queueList: some View {
+        if engine.queue.isEmpty {
+            ContentUnavailableView("播放列表为空", systemImage: "list.bullet")
+                .frame(minHeight: 160)
+        } else {
+            VStack(spacing: 0) {
+                ForEach(Array(engine.queue.enumerated()), id: \.element.bvid) { index, track in
+                    Button {
+                        Task { await engine.jump(to: index) }
+                    } label: {
+                        TrackRow(track: track, isPlaying: index == engine.queueIndex)
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        if engine.queue.count > 1 {
+                            Button(role: .destructive) {
+                                engine.removeFromQueue(at: index)
+                            } label: {
+                                Label("从播放列表移除", systemImage: "minus.circle")
+                            }
+                        }
+                    }
+                    if index != engine.queue.count - 1 {
+                        Divider().padding(.leading, 70)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var recommendationsList: some View {
+        if recommendationsLoading {
+            ProgressView()
+                .frame(maxWidth: .infinity, minHeight: 160)
+        } else if let recommendationsError {
+            ContentUnavailableView("推荐加载失败", systemImage: "exclamationmark.triangle",
+                                   description: Text(recommendationsError))
+            .frame(minHeight: 160)
+        } else if recommendedTracks.isEmpty {
+            ContentUnavailableView("没有推荐歌曲", systemImage: "music.note.list")
+                .frame(minHeight: 160)
+        } else {
+            VStack(spacing: 0) {
+                ForEach(Array(recommendedTracks.prefix(12).enumerated()), id: \.element.bvid) { index, track in
+                    Button {
+                        suppressNextRecommendationRefresh = true
+                        Task { await engine.play(tracks: recommendedTracks, startAt: index, queueMode: .radio) }
+                    } label: {
+                        TrackRow(track: track, isPlaying: engine.current?.bvid == track.bvid)
+                    }
+                    .buttonStyle(.plain)
+                    if index != min(recommendedTracks.count, 12) - 1 {
+                        Divider().padding(.leading, 70)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var bottomContextPanel: some View {
+        if currentPlaylistLoading && currentPlaylistTracks.isEmpty {
+            currentPlaylistPanel
+        } else if currentPlaylist != nil && !currentPlaylistTracks.isEmpty {
+            currentPlaylistPanel
+        } else {
+            queuePreviewPanel
+        }
+    }
+
+    @ViewBuilder
+    private var currentPlaylistPanel: some View {
+        if currentPlaylistLoading && currentPlaylistTracks.isEmpty {
+            HStack(spacing: 10) {
+                ProgressView().scaleEffect(0.75)
+                Text("正在检测所属合集")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(14)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .padding(.horizontal, 24)
+        } else if let currentPlaylist, !currentPlaylistTracks.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "rectangle.stack.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("所在合集")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(currentPlaylist.title)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Text(currentPlaylistPositionText)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical, showsIndicators: false) {
+                        LazyVStack(spacing: 0) {
+                            ForEach(Array(currentPlaylistTracks.enumerated()), id: \.element.bvid) { index, track in
+                                Button {
+                                    Task { await playCurrentPlaylistTrack(at: index) }
+                                } label: {
+                                    compactPlaylistRow(track: track, index: index)
+                                        .id(track.bvid)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 148)
+                    .onAppear { scrollCurrentPlaylist(proxy) }
+                    .onChange(of: engine.current?.bvid) { _, _ in
+                        scrollCurrentPlaylist(proxy)
+                    }
+                }
+            }
+            .padding(14)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18))
+            .padding(.horizontal, 24)
+        } else if let currentPlaylistError {
+            Text(currentPlaylistError)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .padding(.horizontal, 28)
+        }
+    }
+
+    @ViewBuilder
+    private var queuePreviewPanel: some View {
+        if !engine.queue.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "text.line.first.and.arrowtriangle.forward")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.accent)
+                    Text("接下来播放")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text("\(engine.queueIndex + 1)/\(engine.queue.count)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                VStack(spacing: 0) {
+                    ForEach(queuePreviewItems, id: \.track.bvid) { item in
+                        Button {
+                            Task { await engine.jump(to: item.index) }
+                        } label: {
+                            compactPlaylistRow(track: item.track, index: item.index)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(14)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18))
+            .padding(.horizontal, 24)
+        }
+    }
+
+    private func compactPlaylistRow(track: Track, index: Int) -> some View {
+        let isCurrent = track.bvid == engine.current?.bvid
+        return HStack(spacing: 10) {
+            Text("\(index + 1)")
+                .font(.caption.monospacedDigit().weight(isCurrent ? .semibold : .regular))
+                .foregroundStyle(isCurrent ? AppTheme.accent : .secondary)
+                .frame(width: 24, alignment: .trailing)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(track.title)
+                    .font(.caption.weight(isCurrent ? .semibold : .regular))
+                    .foregroundStyle(isCurrent ? AppTheme.label : .primary)
+                    .lineLimit(1)
+                Text(track.artist)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            if isCurrent {
+                Image(systemName: "waveform")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.accent)
+            } else {
+                Text(format(Double(track.duration)))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 7)
+        .contentShape(Rectangle())
+    }
+
+    private var queuePreviewItems: [(index: Int, track: Track)] {
+        guard !engine.queue.isEmpty else { return [] }
+        let start = max(0, min(engine.queueIndex, engine.queue.count - 1))
+        let end = min(engine.queue.count, start + 3)
+        return Array(engine.queue[start..<end].enumerated()).map { offset, track in
+            (start + offset, track)
+        }
+    }
+
+    private func loadRecommendations() async {
+        guard let bvid = engine.current?.bvid else { return }
+        recommendationsLoading = recommendedTracks.isEmpty
+        defer { recommendationsLoading = false }
+        do {
+            let tracks = try await BiliClient().related(bvid: bvid)
+                .map(Track.init(related:))
+                .filter(MusicFilter.isMusic)
+                .filter { $0.bvid != bvid }
+            guard engine.current?.bvid == bvid else { return }
+            recommendedTracks = dedupe(tracks)
+            engine.preload(tracks: recommendedTracks)
+        } catch {
+            guard engine.current?.bvid == bvid else { return }
+            recommendationsError = error.localizedDescription
+        }
+    }
+
+    private func loadCurrentPlaylistIfNeeded(force: Bool) async {
+        guard let current = engine.current else {
+            currentPlaylist = nil
+            currentPlaylistTracks = []
+            currentPlaylistError = nil
+            return
+        }
+        if !force, currentPlaylistTracks.contains(where: { $0.bvid == current.bvid }) {
+            return
+        }
+
+        let bvid = current.bvid
+        currentPlaylistLoading = true
+        currentPlaylistError = nil
+        defer { currentPlaylistLoading = false }
+        do {
+            guard let playlist = try await BiliClient().currentVideoPlaylist(bvid: bvid) else {
+                guard engine.current?.bvid == bvid else { return }
+                currentPlaylist = nil
+                currentPlaylistTracks = []
+                return
+            }
+            let artist = current.artist
+            let ownerMid = current.ownerMid
+            let tracks = playlist.items?.map { item in
+                Track(
+                    aid: item.aid,
+                    ownerMid: ownerMid,
+                    bvid: item.bvid,
+                    cid: item.cid,
+                    title: item.title,
+                    artist: artist,
+                    coverURL: normalizedCoverURL(item.pic),
+                    duration: item.duration ?? 0)
+            } ?? []
+            guard engine.current?.bvid == bvid else { return }
+            currentPlaylist = playlist
+            currentPlaylistTracks = tracks
+            engine.preload(tracks: tracks)
+        } catch {
+            guard engine.current?.bvid == bvid else { return }
+            currentPlaylist = nil
+            currentPlaylistTracks = []
+            currentPlaylistError = "合集检测失败: \(error.localizedDescription)"
+        }
+    }
+
+    private var currentPlaylistPositionText: String {
+        guard let bvid = engine.current?.bvid,
+              let index = currentPlaylistTracks.firstIndex(where: { $0.bvid == bvid }) else {
+            return "\(currentPlaylistTracks.count) 首"
+        }
+        return "\(index + 1)/\(currentPlaylistTracks.count)"
+    }
+
+    private func playCurrentPlaylistTrack(at index: Int) async {
+        guard currentPlaylistTracks.indices.contains(index) else { return }
+        await engine.play(tracks: currentPlaylistTracks, startAt: index, queueMode: .sequential)
+    }
+
+    private func scrollCurrentPlaylist(_ proxy: ScrollViewProxy) {
+        guard let bvid = engine.current?.bvid,
+              currentPlaylistTracks.contains(where: { $0.bvid == bvid }) else { return }
+        DispatchQueue.main.async {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                proxy.scrollTo(bvid, anchor: .center)
+            }
+        }
+    }
+
+    private func normalizedCoverURL(_ raw: String?) -> URL? {
+        guard let raw else { return nil }
+        return URL(string: raw.hasPrefix("//") ? "https:" + raw : raw)
+    }
+
+    private func dedupe(_ tracks: [Track]) -> [Track] {
+        var seen = Set<String>()
+        return tracks.filter { track in
+            guard !seen.contains(track.bvid) else { return false }
+            seen.insert(track.bvid)
+            return true
+        }
+    }
+
+    /// 从顶部抓手下拉关闭播放页;拖动时整页跟手,超过阈值松手即收起。
+    private var dismissDrag: some Gesture {
+        DragGesture(minimumDistance: 24)
+            .onChanged { value in
+                guard abs(value.translation.height) > abs(value.translation.width),
+                      value.translation.height > 0 else { return }
+                dragOffset = max(0, value.translation.height)
+            }
+            .onEnded { value in
+                if value.translation.height > 130 || value.predictedEndTranslation.height > 260 {
+                    closePlayer()
+                } else {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+                        dragOffset = 0
+                    }
+                }
+            }
+    }
+
     private func format(_ seconds: Double) -> String {
         let s = Int(seconds.isFinite ? max(seconds, 0) : 0)
         return String(format: "%d:%02d", s / 60, s % 60)
+    }
+
+    private func formatBitrate(_ bandwidth: Int) -> String {
+        if bandwidth >= 1_000_000 {
+            return String(format: "%.1f Mbps", Double(bandwidth) / 1_000_000)
+        }
+        return "\(max(1, bandwidth / 1000)) kbps"
+    }
+
+    private func closePlayer() {
+        if let onDismiss {
+            onDismiss()
+        } else {
+            dismiss()
+        }
     }
 }
 
@@ -325,6 +827,8 @@ struct NowPlayingView: View {
 struct MiniPlayerBar: View {
     @Environment(PlayerEngine.self) private var engine
     @Binding var showFullPlayer: Bool
+    @Binding var isDraggingFullPlayer: Bool
+    @Binding var openPlayerTranslation: CGFloat
 
     var body: some View {
         HStack(spacing: 12) {
@@ -366,16 +870,36 @@ struct MiniPlayerBar: View {
                 .frame(height: 0.5)
         }
         .contentShape(Rectangle())
-        .onTapGesture { showFullPlayer = true }
+        .onTapGesture { openFullPlayer() }
         // 手指按住 mini 播放器上滑即可打开全屏播放页
         .gesture(
-            DragGesture(minimumDistance: 12)
+            DragGesture(minimumDistance: 22)
+                .onChanged { value in
+                    guard abs(value.translation.height) > abs(value.translation.width),
+                          value.translation.height < 0 else { return }
+                    isDraggingFullPlayer = true
+                    openPlayerTranslation = value.translation.height
+                }
                 .onEnded { value in
-                    if value.translation.height < -24 {
-                        showFullPlayer = true
+                    guard abs(value.translation.height) > abs(value.translation.width) else { return }
+                    if value.translation.height < -110 || value.predictedEndTranslation.height < -180 {
+                        openFullPlayer()
+                    } else {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                            isDraggingFullPlayer = false
+                            openPlayerTranslation = 0
+                        }
                     }
                 }
         )
+    }
+
+    private func openFullPlayer() {
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
+            isDraggingFullPlayer = false
+            openPlayerTranslation = 0
+            showFullPlayer = true
+        }
     }
 }
 
@@ -412,46 +936,100 @@ private struct ActionSymbolButton: View {
     }
 }
 
+private struct ActionSymbolLabel: View {
+    let title: String
+    let systemName: String
+
+    var body: some View {
+        Image(systemName: systemName)
+            .font(.system(size: 19, weight: .semibold))
+            .frame(maxWidth: .infinity)
+            .frame(height: 42)
+            .contentShape(RoundedRectangle(cornerRadius: 12))
+            .foregroundStyle(AppTheme.accent)
+            .accessibilityLabel(title)
+    }
+}
+
 private extension Array {
     subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
     }
 }
 
-private struct QueueView: View {
+private struct LyricsSheetView: View {
     @Environment(PlayerEngine.self) private var engine
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
-            List {
-                ForEach(Array(engine.queue.enumerated()), id: \.element.bvid) { index, track in
-                    Button {
-                        Task {
-                            await engine.jump(to: index)
-                            dismiss()
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 18) {
+                        ForEach(Array(engine.lyrics.enumerated()), id: \.element.id) { index, line in
+                            Text(line.text)
+                                .font(index == currentLyricIndex ? .title3.weight(.semibold) : .title3.weight(.regular))
+                                .foregroundStyle(index == currentLyricIndex ? AppTheme.label : .secondary)
+                                .id(line.id)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                    } label: {
-                        TrackRow(track: track, isPlaying: index == engine.queueIndex)
                     }
-                    .buttonStyle(.plain)
-                    .swipeActions {
-                        if engine.queue.count > 1 {
-                            Button("移除", role: .destructive) {
-                                engine.removeFromQueue(at: index)
-                            }
-                        }
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 28)
+                }
+                .background(AppTheme.background)
+                .navigationTitle("歌词")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    Button("完成") { dismiss() }
+                }
+                .onChange(of: currentLyricIndex) { _, index in
+                    guard let line = engine.lyrics[safe: index] else { return }
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        proxy.scrollTo(line.id, anchor: .center)
                     }
                 }
             }
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
-            .background(AppTheme.groupedBackground)
-            .navigationTitle("播放列表")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                Button("完成") { dismiss() }
+        }
+    }
+
+    private var currentLyricIndex: Int {
+        guard !engine.lyrics.isEmpty else { return 0 }
+        if let active = engine.lyrics.firstIndex(where: { line in
+            engine.currentTime >= line.from && engine.currentTime < line.to
+        }) {
+            return active
+        }
+        return engine.lyrics.lastIndex { line in engine.currentTime >= line.from } ?? 0
+    }
+}
+
+private struct MVFullscreenView: View {
+    @Environment(PlayerEngine.self) private var engine
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.ignoresSafeArea()
+            if let player = engine.avPlayer {
+                VideoPlayer(player: player)
+                    .ignoresSafeArea()
+            } else {
+                ProgressView()
+                    .tint(.white)
             }
+
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 42, height: 42)
+                    .background(.black.opacity(0.48), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(16)
         }
     }
 }
@@ -563,16 +1141,32 @@ private struct UPPlaylistsView: View {
     }
 
     private func load() async {
-        guard let mid = engine.current?.ownerMid else {
+        guard let current = engine.current, let mid = current.ownerMid else {
             errorMessage = "当前歌曲缺少 UP 主信息"
             return
         }
         loading = true
         defer { loading = false }
         do {
-            playlists = try await BiliClient().upPlaylists(mid: mid)
+            let client = BiliClient()
+            var loaded: [BiliClient.UPPlaylist] = []
+            if let currentPlaylist = try await client.currentVideoPlaylist(bvid: current.bvid) {
+                loaded.append(currentPlaylist)
+            }
+            loaded.append(contentsOf: try await client.upPlaylists(mid: mid))
+            playlists = dedupePlaylists(loaded)
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func dedupePlaylists(_ playlists: [BiliClient.UPPlaylist]) -> [BiliClient.UPPlaylist] {
+        var seen = Set<String>()
+        return playlists.filter { playlist in
+            let key = "\(playlist.type)-\(playlist.id)"
+            guard !seen.contains(key) else { return false }
+            seen.insert(key)
+            return true
         }
     }
 }
