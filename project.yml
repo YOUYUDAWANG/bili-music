@@ -1,0 +1,25 @@
+name: BiliMusic
+options:
+  bundleIdPrefix: com.fubuki
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  BiliMusic:
+    type: application
+    platform: iOS
+    sources: [BiliMusic]
+    settings:
+      base:
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_CFBundleDisplayName: BiliMusic
+        SWIFT_VERSION: "5.10"
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: T28ATJ65TJ
+    info:
+      path: BiliMusic/Info.plist
+      properties:
+        UILaunchScreen: {}
+        UIBackgroundModes: [audio]
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true

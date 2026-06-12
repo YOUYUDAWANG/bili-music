@@ -1,0 +1,119 @@
+import SwiftUI
+
+/// 收藏夹列表(B 站收藏夹当歌单用)。
+struct FavoritesView: View {
+    @State private var folders: [BiliClient.FavFolder] = []
+    @State private var loading = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let errorMessage {
+                    Text(errorMessage).foregroundStyle(.red).font(.caption)
+                }
+                ForEach(folders) { folder in
+                    NavigationLink(value: folder.id) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(folder.title)
+                            Text("\(folder.media_count) 个内容")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .listStyle(.plain)
+            .navigationTitle("收藏夹")
+            .navigationDestination(for: Int.self) { folderId in
+                FavFolderDetailView(
+                    folderId: folderId,
+                    title: folders.first { $0.id == folderId }?.title ?? "收藏夹")
+            }
+            .overlay {
+                if loading {
+                    ProgressView()
+                } else if !CookieStore.isLoggedIn {
+                    ContentUnavailableView("需要登录", systemImage: "person.crop.circle.badge.questionmark",
+                                           description: Text("去设置页扫码登录后,这里会显示你的 B 站收藏夹"))
+                } else if folders.isEmpty && errorMessage == nil {
+                    ContentUnavailableView("没有收藏夹", systemImage: "star",
+                                           description: Text("在 B 站收藏的视频会出现在这里"))
+                }
+            }
+            .task { await load() }
+            .refreshable { await load() }
+        }
+    }
+
+    private func load() async {
+        guard CookieStore.isLoggedIn else { return }
+        loading = folders.isEmpty
+        defer { loading = false }
+        errorMessage = nil
+        do {
+            folders = try await BiliClient().favFolders()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+/// 收藏夹内容,分页加载,点击播放。
+struct FavFolderDetailView: View {
+    let folderId: Int
+    let title: String
+    @Environment(PlayerEngine.self) private var engine
+    @State private var tracks: [Track] = []
+    @State private var page = 1
+    @State private var hasMore = true
+    @State private var loading = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        List {
+            if let errorMessage {
+                Text(errorMessage).foregroundStyle(.red).font(.caption)
+            }
+            ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                Button {
+                    Task { await engine.play(tracks: tracks, startAt: index) }
+                } label: {
+                    TrackRow(track: track, isPlaying: engine.current?.bvid == track.bvid)
+                }
+                .buttonStyle(.plain)
+                .onAppear {
+                    if track == tracks.last { Task { await loadMore() } }
+                }
+            }
+            if loading {
+                ProgressView().frame(maxWidth: .infinity)
+            }
+        }
+        .listStyle(.plain)
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            if tracks.isEmpty { await loadMore() }
+        }
+    }
+
+    private func loadMore() async {
+        guard hasMore, !loading else { return }
+        loading = true
+        defer { loading = false }
+        do {
+            let result = try await BiliClient().favItems(folderId: folderId, page: page)
+            page += 1
+            hasMore = result.has_more
+            tracks += (result.medias ?? [])
+                .filter { $0.attr == 0 }   // 跳过已失效的收藏
+                .map { item in
+                    Track(bvid: item.bvid, title: item.title, artist: item.upper.name,
+                          coverURL: URL(string: item.cover), duration: item.duration)
+                }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
