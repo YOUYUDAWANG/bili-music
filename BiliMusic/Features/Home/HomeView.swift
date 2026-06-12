@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// 首页推荐:不用 B 站首页 feed,只从歌曲相关推荐/音乐搜索里取内容,避免推荐页变成大杂烩。
+/// 首页推荐:不用 B 站首页 feed(那是大杂烩)。种子优先从你的 B 站收藏夹随机抽取,
+/// 再用「相关推荐」扩展,音乐关键词兜底。未登录/无收藏夹时回退到当前在播 + 最近缓存。
 struct HomeView: View {
     @Environment(PlayerEngine.self) private var engine
     @State private var tracks: [Track] = []
@@ -54,7 +55,9 @@ struct HomeView: View {
                 if loading && tracks.isEmpty { ProgressView() }
                 else if tracks.isEmpty && errorMessage == nil {
                     ContentUnavailableView("还没有音乐推荐", systemImage: "music.note.list",
-                                           description: Text("播放或缓存几首歌后,这里会更像你的音乐电台"))
+                                           description: Text(CookieStore.isLoggedIn
+                                               ? "在 B 站收藏些喜欢的歌,这里会按收藏夹给你推荐"
+                                               : "去设置扫码登录,即可用你的收藏夹生成推荐"))
                 }
             }
             .task {
@@ -70,7 +73,7 @@ struct HomeView: View {
         do {
             var collected: [Track] = []
 
-            for seed in recommendationSeeds() {
+            for seed in await recommendationSeeds() {
                 let related = try await BiliClient().related(bvid: seed.bvid)
                     .map(Track.init(related:))
                     .filter(MusicFilter.isStrictMusic)
@@ -87,23 +90,53 @@ struct HomeView: View {
                 collected.append(contentsOf: searched)
             }
 
-            collected = dedupe(collected).filter { track in
-                engine.current?.bvid != track.bvid
-            }
-            tracks = collected
-            engine.preload(tracks: collected)
+            // 打散,让多个种子的相关推荐混在一起,"换一批" 观感更新鲜
+            let result = dedupe(collected)
+                .filter { engine.current?.bvid != $0.bvid }
+                .shuffled()
+            tracks = result
+            engine.preload(tracks: result)
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    private func recommendationSeeds() -> [Track] {
+    private func recommendationSeeds() async -> [Track] {
+        // 优先用收藏夹随机种子
+        let favSeeds = await favoriteSeeds()
+        if !favSeeds.isEmpty { return favSeeds }
+        // 兜底:当前在播 + 最近缓存
         var seeds: [Track] = []
         if let current = engine.current {
             seeds.append(current)
         }
         seeds.append(contentsOf: CacheStore.shared.entries.prefix(4).map(\.track))
         return dedupe(seeds)
+    }
+
+    /// 从设置里指定的收藏夹(默认用"默认收藏夹")随机抽几个视频当种子:
+    /// 收藏夹固定 → 随机翻一页 → 随机取 3 个,这样口味稳定、每次内容又有变化。
+    private func favoriteSeeds() async -> [Track] {
+        guard CookieStore.isLoggedIn else { return [] }
+        let manager = FavoriteManager.shared
+        if manager.folders.isEmpty { await manager.loadFolders() }
+        let chosenId = UserDefaults.standard.integer(forKey: "recommendFolderId")
+        let folder = manager.folders.first(where: { $0.id == chosenId && $0.media_count > 0 })
+            ?? manager.folders.first(where: { $0.title.contains("默认") && $0.media_count > 0 })
+            ?? manager.folders.first(where: { $0.media_count > 0 })
+        guard let folder else { return [] }
+        let pageCount = max(1, Int(ceil(Double(folder.media_count) / 40.0)))
+        let page = Int.random(in: 1...pageCount)
+        do {
+            let result = try await BiliClient().favItems(folderId: folder.id, page: page)
+            let items = (result.medias ?? [])
+                .filter { $0.attr == 0 }   // 跳过已失效收藏
+                .map { Track(bvid: $0.bvid, title: $0.title, artist: $0.upper.name,
+                             coverURL: URL(string: $0.cover), duration: $0.duration) }
+            return Array(items.shuffled().prefix(3))
+        } catch {
+            return []
+        }
     }
 
     private func dedupe(_ input: [Track]) -> [Track] {

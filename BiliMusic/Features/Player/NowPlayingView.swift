@@ -179,27 +179,9 @@ struct NowPlayingView: View {
         }
     }
 
-    /// Apple Music 风格:放大并虚化的专辑封面作背景,叠一层材质压暗,内容更聚焦。
-    @ViewBuilder
+    /// 中性渐变背景:可靠、内容对比清晰。之前整屏专辑虚化会把封面和文字洗成灰白一片。
     private var playerBackground: some View {
-        ZStack {
-            AppTheme.playerGradient
-            if let url = engine.current?.coverURL {
-                AsyncImage(url: url) { image in
-                    image.resizable().aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    Color.clear
-                }
-                .blur(radius: 70, opaque: true)
-                .overlay(.ultraThinMaterial)
-                .overlay(
-                    LinearGradient(
-                        colors: [.black.opacity(0.05), .black.opacity(0.28)],
-                        startPoint: .top, endPoint: .bottom
-                    )
-                )
-            }
-        }
+        AppTheme.playerGradient
     }
 
     @ViewBuilder

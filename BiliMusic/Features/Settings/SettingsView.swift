@@ -8,6 +8,8 @@ struct SettingsView: View {
     @AppStorage("autoCache") private var autoCache = false
     @AppStorage("preferredQuality") private var preferredQuality = 0
     @AppStorage("preferMVOnWiFi") private var preferMVOnWiFi = true
+    @AppStorage("recommendFolderId") private var recommendFolderId = 0
+    @State private var favFolders: [BiliClient.FavFolder] = []
 
     var body: some View {
         NavigationStack {
@@ -23,6 +25,19 @@ struct SettingsView: View {
                     } else {
                         Button("扫码登录 B 站账号") { showLogin = true }
                         Text("登录后可获得更高音质、个性化推荐和收藏夹")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if loggedIn {
+                    Section("推荐") {
+                        Picker("推荐种子收藏夹", selection: $recommendFolderId) {
+                            Text("默认收藏夹").tag(0)
+                            ForEach(favFolders) { folder in
+                                Text("\(folder.title)(\(folder.media_count))").tag(folder.id)
+                            }
+                        }
+                        Text("首页推荐会从这个收藏夹随机取歌当种子,建议选你的音乐收藏夹")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -61,13 +76,21 @@ struct SettingsView: View {
                     Task { await loadUsername() }
                 }
             }
-            .task { await loadUsername() }
+            .task {
+                await loadUsername()
+                await loadFolders()
+            }
         }
     }
 
     private func loadUsername() async {
         guard loggedIn else { return }
         username = try? await BiliClient().myInfo().uname
+    }
+
+    private func loadFolders() async {
+        guard loggedIn else { return }
+        favFolders = (try? await BiliClient().favFolders()) ?? []
     }
 }
 

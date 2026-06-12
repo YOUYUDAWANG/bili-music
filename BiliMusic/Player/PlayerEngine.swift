@@ -455,31 +455,11 @@ final class PlayerEngine {
     }
 
     private func loadLyrics(for track: Track, generation: UUID) async {
-        if let onlineLyrics = try? await lyricsClient.lyrics(for: track) {
-            guard playbackGeneration == generation, current?.bvid == track.bvid else { return }
-            lyrics = onlineLyrics
-            return
-        }
-
-        guard let cid = track.cid else {
-            guard playbackGeneration == generation, current?.bvid == track.bvid else { return }
-            lyrics = []
-            return
-        }
-        do {
-            let subtitles = try await client.subtitles(bvid: track.bvid, cid: cid)
-            guard let subtitle = subtitles.first(where: { $0.lan.contains("zh") }) ?? subtitles.first else {
-                guard playbackGeneration == generation, current?.bvid == track.bvid else { return }
-                lyrics = []
-                return
-            }
-            let file = try await client.subtitleFile(subtitle)
-            guard playbackGeneration == generation, current?.bvid == track.bvid else { return }
-            lyrics = file.body.map { LyricLine(from: $0.from, to: $0.to, text: $0.content) }
-        } catch {
-            guard playbackGeneration == generation, current?.bvid == track.bvid else { return }
-            lyrics = []
-        }
+        // 只用 LRCLIB 在线歌词。不再 fallback 到 B 站字幕——音乐区"字幕"多是自动生成的 CC,
+        // 把伴奏标成"♪音乐♪",当歌词用纯属错配,宁可显示"无歌词"。
+        let online = try? await lyricsClient.lyrics(for: track)
+        guard playbackGeneration == generation, current?.bvid == track.bvid else { return }
+        lyrics = online ?? []
     }
 
     private func checkVideoAvailability(for track: Track, generation: UUID) async {
