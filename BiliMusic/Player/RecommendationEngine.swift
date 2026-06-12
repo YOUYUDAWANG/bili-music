@@ -50,8 +50,8 @@ struct RecommendationEngine {
         case .home:
             // 首页刷新必须快:旧逻辑会串行请求收藏/历史/缓存/当前歌曲十几个 related,
             // 真机上点击"换一批"会明显变慢。这里按质量分层短路,够用就停止补源。
-            let favorites = await favoriteSeeds(maxCount: 3)
-            candidates += await relatedCandidates(from: favorites, source: .favoriteSeed, perSeedLimit: 12)
+            let favorites = await favoriteSeeds(maxCount: 5)
+            candidates += await relatedCandidates(from: favorites, source: .favoriteSeed, perSeedLimit: 10)
 
             if candidates.count < 12, let current = context.current {
                 candidates += await relatedCandidates(from: [current], source: .relatedCurrent, perSeedLimit: 12)
@@ -163,14 +163,25 @@ struct RecommendationEngine {
             ?? manager.folders.first(where: { $0.media_count > 0 })
         guard let folder else { return [] }
         let pageCount = max(1, Int(ceil(Double(folder.media_count) / 40.0)))
-        let page = Int.random(in: 1...pageCount)
-        guard let result = try? await client.favItems(folderId: folder.id, page: page) else { return [] }
-        let items = (result.medias ?? [])
-            .filter { $0.attr == 0 }
-            .map { Track(bvid: $0.bvid, title: $0.title, artist: $0.upper.name,
-                         coverURL: URL(string: $0.cover), duration: $0.duration) }
-            .filter(MusicFilter.isStrictMusic)
-        return Array(items.shuffled().prefix(maxCount))
+        var pageNums: Set<Int> = [Int.random(in: 1...pageCount)]
+        if pageCount > 1 {
+            while pageNums.count < 2 { pageNums.insert(Int.random(in: 1...pageCount)) }
+        }
+        var allItems: [Track] = []
+        await withTaskGroup(of: [Track].self) { group in
+            for pageNum in pageNums {
+                group.addTask {
+                    guard let result = try? await self.client.favItems(folderId: folder.id, page: pageNum) else { return [] }
+                    return (result.medias ?? [])
+                        .filter { $0.attr == 0 }
+                        .map { Track(bvid: $0.bvid, title: $0.title, artist: $0.upper.name,
+                                     coverURL: URL(string: $0.cover), duration: $0.duration) }
+                        .filter(MusicFilter.isStrictMusic)
+                }
+            }
+            for await tracks in group { allItems.append(contentsOf: tracks) }
+        }
+        return Array(allItems.shuffled().prefix(maxCount))
     }
 
     private func ranked(_ candidates: [Candidate], mode: Mode, context: Context, limit: Int) -> [Track] {
@@ -257,6 +268,7 @@ struct RecommendationEngine {
         if hasBadRecommendationHint(text) {
             score -= 48
         }
+        score += Int.random(in: -10...10)
         return score
     }
 

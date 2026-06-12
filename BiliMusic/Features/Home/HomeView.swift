@@ -7,6 +7,7 @@ struct HomeView: View {
     @State private var tracks: [Track] = []
     @State private var loading = false
     @State private var errorMessage: String?
+    @State private var shownBVIDs: Set<String> = []
 
     var body: some View {
         NavigationStack {
@@ -61,13 +62,15 @@ struct HomeView: View {
         loading = true
         defer { loading = false }
         errorMessage = nil
+        if shownBVIDs.count >= 80 { shownBVIDs = [] }
         let result = await RecommendationEngine().recommendations(
             mode: .home,
-            context: .init(current: engine.current, queue: engine.queue),
+            context: .init(current: engine.current, queue: engine.queue, excludedBVIDs: shownBVIDs),
             limit: 30)
         if result.isEmpty {
             errorMessage = CookieStore.isLoggedIn ? "暂时没有找到合适的音乐推荐" : nil
         } else {
+            shownBVIDs.formUnion(result.map(\.bvid))
             tracks = result
             engine.preload(tracks: result)
         }

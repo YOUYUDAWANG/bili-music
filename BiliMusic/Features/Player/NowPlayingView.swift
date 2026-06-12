@@ -21,6 +21,7 @@ struct NowPlayingView: View {
     @State private var currentPlaylistError: String?
     @State private var suppressNextRecommendationRefresh = false
     @State private var recommendationsStale = false
+    @State private var shownRecommendationBVIDs: Set<String> = []
     @State private var showLyrics = false
     @State private var showMVFullscreen = false
     @State private var showMVControls = false
@@ -95,6 +96,7 @@ struct NowPlayingView: View {
         }
         .onChange(of: engine.current?.bvid) {
             Task { await loadCurrentPlaylistIfNeeded(force: false) }
+            shownRecommendationBVIDs = []
             if suppressNextRecommendationRefresh {
                 suppressNextRecommendationRefresh = false
                 return
@@ -679,15 +681,17 @@ struct NowPlayingView: View {
         guard let bvid = engine.current?.bvid else { return }
         recommendationsLoading = recommendedTracks.isEmpty
         defer { recommendationsLoading = false }
+        let excluded = shownRecommendationBVIDs.union([bvid])
         let tracks = await RecommendationEngine().recommendations(
             mode: .relatedPanel,
             context: .init(
                 current: engine.current,
                 queue: engine.queue,
                 playlistTracks: currentPlaylistTracks,
-                excludedBVIDs: [bvid]),
+                excludedBVIDs: excluded),
             limit: 24)
         guard engine.current?.bvid == bvid else { return }
+        shownRecommendationBVIDs.formUnion(tracks.map(\.bvid))
         recommendedTracks = tracks
         recommendationsError = tracks.isEmpty ? "没有找到合适的推荐歌曲" : nil
         engine.preload(tracks: recommendedTracks)
