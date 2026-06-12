@@ -2,6 +2,15 @@ import Foundation
 
 /// B 站接口客户端。所有请求带 Referer + 浏览器 UA,否则 CDN 403。
 struct BiliClient {
+    static let qualityOptions: [(id: Int, title: String)] = [
+        (0,     "自动(最高)"),
+        (30251, "Hi-Res"),
+        (30250, "杜比全景声"),
+        (30280, "高码率 192K"),
+        (30232, "标准 132K"),
+        (30216, "流畅 64K"),
+    ]
+
     static let headers = [
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
         "Referer": "https://www.bilibili.com",
@@ -251,12 +260,16 @@ struct BiliClient {
         }
     }
 
-    func search(keyword: String, page: Int = 1) async throws -> [SearchItem] {
-        let query = try await WBISigner.sign([
+    func search(keyword: String, page: Int = 1, musicOnly: Bool = false) async throws -> [SearchItem] {
+        var params = [
             "search_type": "video",
             "keyword": keyword,
             "page": String(page),
-        ])
+        ]
+        if musicOnly {
+            params["tids"] = "3"
+        }
+        let query = try await WBISigner.sign(params)
         let data: SearchData = try await get(
             "https://api.bilibili.com/x/web-interface/wbi/search/type?\(query)")
         return data.result ?? []

@@ -21,6 +21,8 @@ enum MusicFilter {
         "新闻", "资讯", "评测", "开箱", "测评", "搞笑", "鬼畜", "相声", "脱口秀",
         "篮球", "足球", "比赛", "赛事", "vlog", "reaction", "review", "trailer",
         "gameplay", "walkthrough", "tutorial", "news", "movie", "drama",
+        "盘点", "排行", "top", "切片", "clip", "合集剪辑", "耐久", "作业用", "字幕组",
+        "中字", "解析", "分析",
     ]
 
     static func isMusic(_ track: Track) -> Bool {
@@ -32,14 +34,15 @@ enum MusicFilter {
     }
 
     static func isSearchResultMusic(_ track: Track, query: String? = nil) -> Bool {
-        guard (45...900).contains(track.duration) else { return false }
+        // 搜索页宁可少一点,也不要混进解说/剪辑/教程/影视/游戏等泛内容。
+        guard (60...720).contains(track.duration) else { return false }
         let text = (track.title + " " + track.artist).lowercased()
         let hasMusicHint = musicHints.contains { text.contains($0.lowercased()) }
         if let typeID = track.typeID, !musicTypeIDs.contains(typeID) {
             return false
         }
         if nonMusicHints.contains(where: { text.contains($0.lowercased()) }) {
-            return hasMusicHint
+            return false
         }
         if let query, !isRelevantToSearchQuery(track, query: query) {
             return false

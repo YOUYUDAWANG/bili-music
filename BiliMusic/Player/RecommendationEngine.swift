@@ -114,7 +114,7 @@ struct RecommendationEngine {
         guard !terms.isEmpty else { return [] }
         var candidates: [Candidate] = []
         for term in terms.prefix(2) {
-            guard let items = try? await client.search(keyword: term) else { continue }
+            guard let items = try? await client.search(keyword: term, musicOnly: true) else { continue }
             candidates.append(contentsOf: items
                 .map(Track.init(search:))
                 .filter { MusicFilter.isSearchResultMusic($0, query: term) }
@@ -133,7 +133,7 @@ struct RecommendationEngine {
         ].shuffled().prefix(keywordLimit)
         var candidates: [Candidate] = []
         for keyword in keywords {
-            guard let items = try? await client.search(keyword: keyword) else { continue }
+            guard let items = try? await client.search(keyword: keyword, musicOnly: true) else { continue }
             candidates.append(contentsOf: items
                 .map(Track.init(search:))
                 .filter { MusicFilter.isSearchResultMusic($0, query: keyword) }

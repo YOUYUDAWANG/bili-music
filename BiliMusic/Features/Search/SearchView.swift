@@ -11,6 +11,10 @@ struct SearchView: View {
     @State private var activeSearchID = UUID()
     @State private var historyLoaded = false
     @State private var resultsQuery = ""
+    @State private var activeKeywords: [String] = []
+    @State private var nextPage = 1
+    @State private var hasMoreResults = false
+    @State private var loadingMore = false
     @FocusState private var searchFocused: Bool
     @AppStorage("searchHistory") private var searchHistoryData = "[]"
 
@@ -110,6 +114,10 @@ struct SearchView: View {
                         ContentUnavailableView("搜点什么吧", systemImage: "music.note.list")
                             .frame(maxWidth: .infinity)
                             .padding(.top, 60)
+                    } else if shouldShowNoResults {
+                        ContentUnavailableView("没有找到音乐结果", systemImage: "music.note.list")
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 60)
                     }
 
                     if shouldShowResults {
@@ -125,6 +133,24 @@ struct SearchView: View {
                                 if index != results.count - 1 {
                                     Divider().padding(.leading, 84)
                                 }
+                                if index >= results.count - 6 {
+                                    Color.clear
+                                        .frame(height: 1)
+                                        .onAppear {
+                                            Task { await loadMoreIfNeeded() }
+                                        }
+                                }
+                            }
+                            if loadingMore {
+                                ProgressView()
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 16)
+                            } else if !hasMoreResults {
+                                Text("没有更多结果")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 14)
                             }
                         }
                         .background(AppTheme.background, in: RoundedRectangle(cornerRadius: 12))
@@ -157,12 +183,20 @@ struct SearchView: View {
                 errorMessage = nil
                 results = []
                 resultsQuery = ""
+                activeKeywords = []
+                nextPage = 1
+                hasMoreResults = false
+                loadingMore = false
             } else if text != resultsQuery {
                 searchTask?.cancel()
                 activeSearchID = UUID()
                 searching = false
                 errorMessage = nil
                 results = []
+                activeKeywords = []
+                nextPage = 1
+                hasMoreResults = false
+                loadingMore = false
             }
         }
     }
@@ -172,16 +206,23 @@ struct SearchView: View {
     }
 
     private var shouldShowSearchHistory: Bool {
-        historyLoaded && !searchFocused && results.isEmpty && !searchHistory.isEmpty && !searching
+        historyLoaded && results.isEmpty && !searchHistory.isEmpty && !searching && resultsQuery.isEmpty
     }
 
     private var shouldShowEmptyState: Bool {
-        historyLoaded && !searchFocused && results.isEmpty && searchHistory.isEmpty && !searching && errorMessage == nil
+        historyLoaded && !searchFocused && results.isEmpty && searchHistory.isEmpty && !searching && errorMessage == nil && resultsQuery.isEmpty
+    }
+
+    private var shouldShowNoResults: Bool {
+        !searching
+            && results.isEmpty
+            && !resultsQuery.isEmpty
+            && query.trimmingCharacters(in: .whitespacesAndNewlines) == resultsQuery
+            && errorMessage == nil
     }
 
     private var shouldShowResults: Bool {
-        !searchFocused
-            && !searching
+        !searching
             && !results.isEmpty
             && query.trimmingCharacters(in: .whitespacesAndNewlines) == resultsQuery
     }
@@ -195,6 +236,10 @@ struct SearchView: View {
         activeSearchID = searchID
         results = []
         resultsQuery = ""
+        activeKeywords = []
+        nextPage = 1
+        hasMoreResults = false
+        loadingMore = false
         errorMessage = nil
         searching = true
         rememberSearch(text)
@@ -221,34 +266,117 @@ struct SearchView: View {
         do {
             let client = BiliClient()
             let keywords = searchKeywords(for: text)
-            let pages = try await withThrowingTaskGroup(of: (Int, [BiliClient.SearchItem]).self) { group in
-                for (keywordIndex, keyword) in keywords.enumerated() {
-                    for page in 1...3 {
-                        group.addTask {
-                            (keywordIndex * 10 + page, try await client.search(keyword: keyword, page: page))
-                        }
-                    }
+            var pageStart = 1
+            var loaded: [Track] = []
+            var stillHasRawResults = false
+            for attempt in 0..<3 {
+                let pageCount = attempt == 0 ? 3 : 2
+                let batch = try await searchBatch(
+                    client: client,
+                    keywords: keywords,
+                    pages: pageStart...(pageStart + pageCount - 1),
+                    query: text)
+                pageStart += pageCount
+                stillHasRawResults = batch.rawCount > 0
+                guard stillHasRawResults else { break }
+                if !batch.tracks.isEmpty {
+                    loaded = batch.tracks
+                    break
                 }
-                var byPage: [(Int, [BiliClient.SearchItem])] = []
-                for try await pageItems in group {
-                    byPage.append(pageItems)
-                }
-                return byPage
-                    .sorted { $0.0 < $1.0 }
-                    .flatMap(\.1)
             }
             guard !Task.isCancelled else { return }
-            let filtered = await Task.detached(priority: .userInitiated) {
-                Array(dedupe(pages.map(Track.init(search:)).filter { MusicFilter.isSearchResultMusic($0, query: text) }).prefix(40))
-            }.value
             guard !Task.isCancelled, activeSearchID == searchID else { return }
-            results = filtered
+            results = loaded
             resultsQuery = text
-            engine.preload(tracks: filtered)
+            activeKeywords = keywords
+            nextPage = pageStart
+            hasMoreResults = stillHasRawResults && nextPage <= 30
+            engine.preload(tracks: loaded)
         } catch {
             guard !Task.isCancelled, activeSearchID == searchID else { return }
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func loadMoreIfNeeded() async {
+        guard shouldShowResults,
+              hasMoreResults,
+              !searching,
+              !loadingMore,
+              !activeKeywords.isEmpty else { return }
+
+        let text = resultsQuery
+        let searchID = activeSearchID
+        loadingMore = true
+        defer { loadingMore = false }
+
+        do {
+            let client = BiliClient()
+            var pageStart = nextPage
+            var excluded = Set(results.map(\.bvid))
+            var loaded: [Track] = []
+            var stillHasRawResults = false
+
+            // 严格音乐过滤后,某一批可能全被丢弃;连续跳过几批,避免底部看起来卡住。
+            for _ in 0..<3 {
+                let batch = try await searchBatch(
+                    client: client,
+                    keywords: activeKeywords,
+                    pages: pageStart...(pageStart + 1),
+                    query: text,
+                    excluding: excluded)
+                pageStart += 2
+                stillHasRawResults = batch.rawCount > 0
+                guard stillHasRawResults else { break }
+                if !batch.tracks.isEmpty {
+                    loaded = batch.tracks
+                    loaded.forEach { excluded.insert($0.bvid) }
+                    break
+                }
+            }
+
+            guard !Task.isCancelled,
+                  activeSearchID == searchID,
+                  resultsQuery == text else { return }
+            nextPage = pageStart
+            hasMoreResults = stillHasRawResults && nextPage <= 30
+            if !loaded.isEmpty {
+                results.append(contentsOf: loaded)
+                engine.preload(tracks: loaded)
+            }
+        } catch {
+            guard activeSearchID == searchID, resultsQuery == text else { return }
+            hasMoreResults = false
+        }
+    }
+
+    private struct SearchBatch {
+        let tracks: [Track]
+        let rawCount: Int
+    }
+
+    private func searchBatch(
+        client: BiliClient,
+        keywords: [String],
+        pages: ClosedRange<Int>,
+        query: String,
+        excluding excluded: Set<String> = []
+    ) async throws -> SearchBatch {
+        var pageItems: [BiliClient.SearchItem] = []
+        for keyword in keywords {
+            for page in pages {
+                let items = try await client.search(keyword: keyword, page: page, musicOnly: true)
+                pageItems.append(contentsOf: items)
+                if Task.isCancelled { break }
+            }
+            if Task.isCancelled { break }
+        }
+        let filtered = await Task.detached(priority: .userInitiated) {
+            dedupe(pageItems.map(Track.init(search:))
+                .filter { !excluded.contains($0.bvid) }
+                .filter { MusicFilter.isSearchResultMusic($0, query: query) })
+        }.value
+        return SearchBatch(tracks: filtered, rawCount: pageItems.count)
     }
 
     private func searchKeywords(for text: String) -> [String] {
