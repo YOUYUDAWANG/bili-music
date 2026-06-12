@@ -7,6 +7,7 @@ struct SettingsView: View {
     @State private var showLogin = false
     @AppStorage("autoCache") private var autoCache = false
     @AppStorage("preferredQuality") private var preferredQuality = 0
+    @AppStorage("preferMVOnWiFi") private var preferMVOnWiFi = true
 
     var body: some View {
         NavigationStack {
@@ -43,7 +44,15 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                Section("播放") {
+                    Toggle("连接 Wi-Fi 时优先播放 MV", isOn: $preferMVOnWiFi)
+                    Text("进入后台会自动切回纯音乐流,保持锁屏播放体验")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
+            .scrollContentBackground(.hidden)
+            .background(AppTheme.groupedBackground)
             .navigationTitle("设置")
             .sheet(isPresented: $showLogin) {
                 QRLoginView {

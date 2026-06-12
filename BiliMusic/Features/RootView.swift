@@ -2,23 +2,30 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(PlayerEngine.self) private var engine
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showFullPlayer = false
 
     var body: some View {
         TabView {
             withMiniBar(HomeView())
-                .tabItem { Label("推荐", systemImage: "music.house") }
+                .tabItem { Label("推荐", systemImage: "music.note.house.fill") }
             withMiniBar(SearchView())
                 .tabItem { Label("搜索", systemImage: "magnifyingglass") }
             withMiniBar(FavoritesView())
-                .tabItem { Label("收藏", systemImage: "star") }
+                .tabItem { Label("收藏", systemImage: "heart.fill") }
             withMiniBar(LibraryView())
-                .tabItem { Label("缓存", systemImage: "arrow.down.circle") }
+                .tabItem { Label("缓存", systemImage: "arrow.down.circle.fill") }
             withMiniBar(SettingsView())
-                .tabItem { Label("设置", systemImage: "gearshape") }
+                .tabItem { Label("设置", systemImage: "gearshape.fill") }
         }
+        .tint(AppTheme.accent)
         .sheet(isPresented: $showFullPlayer) {
             NowPlayingView()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background {
+                Task { await engine.handleScenePhase(isBackground: true) }
+            }
         }
         .task {
             // 调试用:simctl launch 注入 AUTOPLAY_BV 即可无交互验证播放链路

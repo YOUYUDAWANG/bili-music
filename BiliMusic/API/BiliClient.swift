@@ -33,11 +33,37 @@ struct BiliClient {
         return payload
     }
 
+    private func postVoid(_ url: String, form: [String: String]) async throws {
+        var req = URLRequest(url: URL(string: url)!)
+        req.httpMethod = "POST"
+        Self.headers.forEach { req.setValue($1, forHTTPHeaderField: $0) }
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        if let cookie = CookieStore.cookie {
+            req.setValue(cookie, forHTTPHeaderField: "Cookie")
+        }
+        var components = URLComponents()
+        components.queryItems = form.sorted { $0.key < $1.key }
+            .map { URLQueryItem(name: $0.key, value: $0.value) }
+        req.httpBody = components.percentEncodedQuery?
+            .replacingOccurrences(of: "%20", with: "+")
+            .data(using: .utf8)
+        let (data, _) = try await URLSession.shared.data(for: req)
+        struct VoidEnvelope: Decodable {
+            let code: Int
+            let message: String
+        }
+        let env = try JSONDecoder().decode(VoidEnvelope.self, from: data)
+        guard env.code == 0 else {
+            throw APIError(code: env.code, message: env.message)
+        }
+    }
+
     // MARK: - 视频信息
 
     struct VideoInfo: Decodable {
-        struct Owner: Decodable { let name: String; let face: String }
+        struct Owner: Decodable { let mid: Int; let name: String; let face: String }
         struct Page: Decodable { let cid: Int; let page: Int; let part: String; let duration: Int }
+        let aid: Int
         let bvid: String
         let title: String
         let pic: String
@@ -59,6 +85,11 @@ struct BiliClient {
             let flac: Flac?
         }
         let dash: Dash?
+    }
+
+    struct VideoPlayInfo: Decodable {
+        struct DURL: Decodable { let url: String }
+        let durl: [DURL]?
     }
 
     /// 按设置里的音质偏好取音频流。返回 URL(约 2 小时过期,不可持久化)和实际选中的音质 id。
@@ -83,6 +114,16 @@ struct BiliClient {
         return (url, chosen.id)
     }
 
+    /// 取单文件 MP4 视频流,用于 MV 模式。优先稳定播放,不追求最高画质。
+    func videoStream(bvid: String, cid: Int) async throws -> URL {
+        let info: VideoPlayInfo = try await get(
+            "https://api.bilibili.com/x/player/playurl?bvid=\(bvid)&cid=\(cid)&qn=64&fnval=0&fourk=0")
+        guard let raw = info.durl?.first?.url, let url = URL(string: raw) else {
+            throw APIError(code: -1, message: "无可播放 MP4 视频流")
+        }
+        return url
+    }
+
     /// 音质 id 的展示名
     static func qualityName(_ id: Int) -> String {
         switch id {
@@ -102,6 +143,8 @@ struct BiliClient {
     }
 
     struct SearchItem: Decodable {
+        let aid: Int?
+        let mid: Int?
         let bvid: String
         let title: String
         let author: String
@@ -141,7 +184,8 @@ struct BiliClient {
     // MARK: - 相关推荐 (电台连播数据源)
 
     struct RelatedItem: Decodable {
-        struct Owner: Decodable { let name: String }
+        struct Owner: Decodable { let mid: Int?; let name: String }
+        let aid: Int?
         let bvid: String
         let cid: Int?
         let title: String
@@ -152,6 +196,49 @@ struct BiliClient {
 
     func related(bvid: String) async throws -> [RelatedItem] {
         try await get("https://api.bilibili.com/x/web-interface/archive/related?bvid=\(bvid)")
+    }
+
+    // MARK: - 字幕/歌词
+
+    struct SubtitleInfo: Decodable {
+        struct Subtitle: Decodable {
+            struct Item: Decodable {
+                let lan: String
+                let lan_doc: String
+                let subtitle_url: String
+            }
+            let subtitles: [Item]?
+        }
+        let subtitle: Subtitle?
+    }
+
+    struct SubtitleFile: Decodable {
+        struct Line: Decodable {
+            let from: Double
+            let to: Double
+            let content: String
+        }
+        let body: [Line]
+    }
+
+    func subtitles(bvid: String, cid: Int) async throws -> [SubtitleInfo.Subtitle.Item] {
+        let info: SubtitleInfo = try await get(
+            "https://api.bilibili.com/x/player/v2?bvid=\(bvid)&cid=\(cid)")
+        return info.subtitle?.subtitles ?? []
+    }
+
+    func subtitleFile(_ subtitle: SubtitleInfo.Subtitle.Item) async throws -> SubtitleFile {
+        let raw = subtitle.subtitle_url.hasPrefix("//") ? "https:" + subtitle.subtitle_url : subtitle.subtitle_url
+        guard let url = URL(string: raw) else {
+            throw APIError(code: -1, message: "字幕 URL 非法")
+        }
+        var req = URLRequest(url: url)
+        Self.headers.forEach { req.setValue($1, forHTTPHeaderField: $0) }
+        if let cookie = CookieStore.cookie {
+            req.setValue(cookie, forHTTPHeaderField: "Cookie")
+        }
+        let (data, _) = try await URLSession.shared.data(for: req)
+        return try JSONDecoder().decode(SubtitleFile.self, from: data)
     }
 
     // MARK: - 扫码登录
@@ -234,6 +321,82 @@ struct BiliClient {
     func favItems(folderId: Int, page: Int) async throws -> FavPage {
         try await get(
             "https://api.bilibili.com/x/v3/fav/resource/list?media_id=\(folderId)&pn=\(page)&ps=40&platform=web")
+    }
+
+    func setFavorite(aid: Int, folderId: Int, add: Bool) async throws {
+        guard let csrf = CookieStore.csrf else {
+            throw APIError(code: -101, message: "未登录或缺少 bili_jct")
+        }
+        try await postVoid(
+            "https://api.bilibili.com/x/v3/fav/resource/deal",
+            form: [
+                "rid": String(aid),
+                "type": "2",
+                "add_media_ids": add ? String(folderId) : "",
+                "del_media_ids": add ? "" : String(folderId),
+                "csrf": csrf,
+            ])
+    }
+
+    // MARK: - UP 主合集/系列
+
+    struct UPPlaylist: Decodable, Identifiable, Hashable {
+        let id: Int
+        let title: String
+        let mediaCount: Int
+        let type: Int
+
+        enum CodingKeys: String, CodingKey {
+            case id
+            case title = "name"
+            case mediaCount = "total"
+            case type
+        }
+    }
+
+    struct UPPlaylistItem: Decodable {
+        let bvid: String
+        let aid: Int?
+        let cid: Int?
+        let title: String
+        let pic: String?
+        let duration: Int?
+    }
+
+    struct UPPlaylistPage {
+        let items: [UPPlaylistItem]
+        let hasMore: Bool
+    }
+
+    func upPlaylists(mid: Int) async throws -> [UPPlaylist] {
+        struct Data: Decodable {
+            struct ListBox: Decodable { let items_lists: [UPPlaylist]? }
+            let seasons_list: ListBox?
+            let series_list: ListBox?
+        }
+        let data: Data = try await get(
+            "https://api.bilibili.com/x/polymer/web-space/seasons_series_list?mid=\(mid)&page_num=1&page_size=20")
+        return (data.seasons_list?.items_lists ?? []) + (data.series_list?.items_lists ?? [])
+    }
+
+    func upPlaylistItems(mid: Int, playlist: UPPlaylist, page: Int = 1) async throws -> UPPlaylistPage {
+        struct Data: Decodable {
+            let archives: [UPPlaylistItem]?
+            let page: Page?
+            struct Page: Decodable {
+                let page_num: Int?
+                let page_size: Int?
+                let total: Int?
+            }
+        }
+        let idParam = playlist.type == 1 ? "season_id" : "series_id"
+        let data: Data = try await get(
+            "https://api.bilibili.com/x/polymer/web-space/seasons_archives_list?mid=\(mid)&\(idParam)=\(playlist.id)&page_num=\(page)&page_size=30")
+        let items = data.archives ?? []
+        let current = data.page?.page_num ?? page
+        let size = data.page?.page_size ?? 30
+        let total = data.page?.total ?? items.count
+        return UPPlaylistPage(items: items, hasMore: current * size < total)
     }
 
     // MARK: - 首页推荐 (WBI;登录后个性化)

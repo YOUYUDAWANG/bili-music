@@ -1,7 +1,7 @@
 # Bilibili Music — 架构文档
 
-个人自用的 iOS 音乐 App,把 B 站当曲库,体验对标 YouTube Music。
-只做:听歌、本地缓存、搜索、推荐、收藏夹同步。不做:弹幕、评论、视频画面、上架。
+个人自用的 iOS 音乐 App,把 B 站当曲库,UI 与交互气质向 Apple Music 看齐。
+只做:听歌、本地缓存、搜索、推荐、收藏夹同步、歌词、音乐/MV 切换。不做:弹幕、评论、上架。
 
 ## 约束与决策
 
@@ -23,6 +23,8 @@
 |---|---|---|---|
 | 视频信息/分P | `/x/web-interface/view?bvid=` | 无 | 否 |
 | 音频流地址 | `/x/player/playurl?bvid=&cid=&fnval=16` | 无 | 高码率/Hi-Res 需要 |
+| MV 视频流 | `/x/player/playurl?bvid=&cid=&qn=64&fnval=0` | 无 | 部分内容需要 |
+| 字幕/歌词 | `/x/player/v2?bvid=&cid=` + 字幕 JSON URL | 无 | 部分字幕需要 |
 | 搜索 | `/x/web-interface/wbi/search/type` | WBI | 否 |
 | 首页推荐 | `/x/web-interface/wbi/index/top/feed/rcmd` | WBI | 个性化需要 |
 | 相关推荐(电台) | `/x/web-interface/archive/related?bvid=` | 无 | 否 |
@@ -33,9 +35,11 @@
 
 ### 关键事实(脚本验证得出)
 
-- 音频流 URL 有时效(~2h),**只能持久化 BV/cid,播放时现取 URL**
+- 音频/MV 流 URL 有时效(~2h),**只能持久化 BV/cid,播放时现取 URL**
 - DASH audio id:30216=64K / 30232=132K / 30280=192K / 30251=Hi-Res(flac 字段,大多为 null,需按可选解析)
 - 未登录也能拿到 192K,Hi-Res/杜比需大会员 Cookie
+- 歌词优先使用 B 站字幕文件;很多投稿没有字幕,需要在 UI 里显示空状态
+- MV 模式优先取单文件 MP4,目标是稳定播放和快速切换,不追求最高画质
 - WBI 签名:nav 接口取 img/sub key → 64 位重排表取前 32 位 → 参数按 key 排序 + wts 时间戳 + MD5。mixin key 缓存一天即可
 - 相关推荐接口效果好,适合做自动连播;首页推荐未登录是泛化内容,需登录 + 按分区/时长过滤才像音乐推荐
 
@@ -47,21 +51,24 @@ BiliMusic/
 ├── API/              BiliClient(URLSession 封装)、WBISigner、各接口的请求/响应模型
 ├── Auth/             扫码登录、Cookie 管理(Keychain)
 ├── Player/           PlayerEngine(AVPlayer 封装)、PlayQueue、NowPlaying(锁屏/控制中心)
-├── Cache/            DownloadManager、本地文件存储(Documents/audio/{bvid}_{cid}.m4a)
-├── Models/           SwiftData: Track, Playlist, CachedAudio
+├── Cache/            CacheStore(JSON 索引)、DownloadManager、本地文件(Documents/audio/{bvid}_{cid}.m4a)
+├── Design/           AppTheme(Apple Music 红 accent + 系统背景)
 └── Features/         各页面 View + ViewModel
-    ├── Home/         推荐流
+    ├── Home/         音乐发现(相关推荐/缓存种子/关键词兜底,经 MusicFilter)
     ├── Search/
-    ├── Player/       正在播放页 + mini bar
-    └── Library/      收藏夹、缓存管理
+    ├── Favorites/    收藏夹 + FavoriteManager(短按默认夹/长按选夹)
+    ├── Player/       正在播放页(含歌词、音乐/MV 切换)+ mini bar
+    └── Library/      缓存管理
 ```
 
 ### 核心模型
 
+无 SwiftData/ORM。曲目是普通 `struct Track`;缓存索引是 `CachedEntry` 的 JSON 文件
+(`CacheStore`),播放队列在 `PlayerEngine` 内存里,收藏夹直接用 B 站的。
+
 ```swift
-@Model Track    // bvid, cid, title, artist(UP主), coverURL, duration, page
-@Model Playlist // 对应 B 站收藏夹(fid)或本地队列
-@Model CachedAudio // track 引用, 本地文件名, 音质 id, 文件大小, 下载时间
+struct Track       // bvid, cid, title, artist(UP主), coverURL, duration, ownerMid
+struct CachedEntry // bvid, cid, 元信息, 本地文件名, 音质 id, 文件大小, 下载时间
 ```
 
 ### 播放链路
@@ -86,10 +93,10 @@ Track(bvid, cid)
 
 - [x] **P1 验证**:playurl 链路、WBI 搜索、推荐接口(scripts/ 两个脚本)
 - [x] **P2 最小可播**:Xcode 工程(xcodegen)、粘贴 BV 号播放、后台播放 + 锁屏控制,真机验证通过(2026-06-12)
-- [x] **P3 可用**:扫码登录、搜索页、播放队列 + 正在播放页、相关推荐自动连播(电台)。模拟器验证:电台切歌、WBI 签名(Swift 移植 live 验证)、UI 布局;扫码登录待真机扫码验证
+- [x] **P3 可用**:扫码登录、搜索页、播放队列 + 正在播放页、相关推荐自动连播(电台)。真机验证:扫码登录、搜索播放、锁屏播放/控制均稳定
 - [x] **P4 缓存**:整曲下载(带进度)、自动缓存开关、缓存优先播放(离线可用)、缓存管理页(删除/清空/占用)。模拟器验证:自动缓存落盘 + 索引正确、重启后走本地文件播放
-- [x] **P5 推荐与收藏**:收藏 tab(收藏夹→歌单,分页、过滤失效稿件)、推荐 tab(推荐流按时长 1~11 分钟过滤,换一批);另修复下载慢(改 URLSessionDownloadTask,3MB 约 1~2 秒)、新增音质选择(设置页,同时作用于播放与下载,缓存条目记录音质)。收藏夹需登录,真机验证
-- [ ] **P6 打磨**:历史记录、定时关闭(CarPlay 不做,用户明确不需要)
+- [x] **P5 推荐与收藏**:收藏 tab(收藏夹→歌单,分页、过滤失效稿件)、推荐 tab(推荐流按时长 1~11 分钟过滤,换一批);另修复下载慢(改 URLSessionDownloadTask,3MB 约 1~2 秒)、新增音质选择(设置页,同时作用于播放与下载,缓存条目记录音质)。真机验证:本地缓存与离线播放稳定
+- [~] **P6 打磨**:已实现并通过模拟器构建 — UI 向 Apple Music 看齐(AppTheme 红 accent + grouped 列表)、队列管理、收藏(短按默认夹/长按选夹)、在线歌词(LRCLIB+B站字幕兜底)、音乐/MV 切换、Wi-Fi 优先 MV、音乐内容过滤(MusicFilter)、预取提速。**待真机验证**:歌词匹配质量、MV 切换与后台、收藏写入、UP 合集。未做:历史记录、定时关闭、错误提示打磨、缓存搜索/排序。详见 [TODO.md](TODO.md)。CarPlay 不做(用户明确不需要)
 
 ## 风险
 

@@ -3,27 +3,44 @@ import SwiftUI
 /// 收藏夹列表(B 站收藏夹当歌单用)。
 struct FavoritesView: View {
     @State private var folders: [BiliClient.FavFolder] = []
+    @State private var path: [Int] = []
     @State private var loading = false
     @State private var errorMessage: String?
+    @State private var restoredLastFolder = false
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 if let errorMessage {
                     Text(errorMessage).foregroundStyle(.red).font(.caption)
                 }
                 ForEach(folders) { folder in
                     NavigationLink(value: folder.id) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(folder.title)
-                            Text("\(folder.media_count) 个内容")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        HStack(spacing: 12) {
+                            RoundedRectangle(cornerRadius: 7)
+                                .fill(AppTheme.accent.opacity(0.14))
+                                .frame(width: 46, height: 46)
+                                .overlay {
+                                    Image(systemName: "music.note.list")
+                                        .foregroundStyle(AppTheme.accent)
+                                }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(folder.title)
+                                    .font(.subheadline)
+                                Text("\(folder.media_count) 个内容")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
+                    .simultaneousGesture(TapGesture().onEnded {
+                        FavoriteManager.shared.remember(folderId: folder.id, title: folder.title)
+                    })
                 }
             }
-            .listStyle(.plain)
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(AppTheme.groupedBackground)
             .navigationTitle("收藏夹")
             .navigationDestination(for: Int.self) { folderId in
                 FavFolderDetailView(
@@ -42,6 +59,12 @@ struct FavoritesView: View {
                 }
             }
             .task { await load() }
+            .onChange(of: path) { _, newValue in
+                if let folderId = newValue.last {
+                    let title = folders.first { $0.id == folderId }?.title ?? "收藏夹"
+                    FavoriteManager.shared.remember(folderId: folderId, title: title)
+                }
+            }
             .refreshable { await load() }
         }
     }
@@ -53,6 +76,13 @@ struct FavoritesView: View {
         errorMessage = nil
         do {
             folders = try await BiliClient().favFolders()
+            if !restoredLastFolder,
+               path.isEmpty,
+               let last = FavoriteManager.shared.lastFolderId,
+               folders.contains(where: { $0.id == last }) {
+                path = [last]
+            }
+            restoredLastFolder = true
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -90,7 +120,9 @@ struct FavFolderDetailView: View {
                 ProgressView().frame(maxWidth: .infinity)
             }
         }
-        .listStyle(.plain)
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.groupedBackground)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .task {
@@ -112,6 +144,9 @@ struct FavFolderDetailView: View {
                     Track(bvid: item.bvid, title: item.title, artist: item.upper.name,
                           coverURL: URL(string: item.cover), duration: item.duration)
                 }
+                .filter(MusicFilter.isMusic)
+            FavoriteManager.shared.markLoaded(folderId: folderId, title: title, tracks: tracks)
+            engine.preload(tracks: tracks)
         } catch {
             errorMessage = error.localizedDescription
         }

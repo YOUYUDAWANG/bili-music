@@ -39,4 +39,12 @@ enum CookieStore {
             .first { $0.hasPrefix("DedeUserID=") }
             .map { String($0.dropFirst("DedeUserID=".count)) }
     }
+
+    /// Cookie 里的 CSRF Token,收藏/取消收藏等写操作需要
+    static var csrf: String? {
+        cookie?.split(separator: ";")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { $0.hasPrefix("bili_jct=") }
+            .map { String($0.dropFirst("bili_jct=".count)) }
+    }
 }

@@ -6,6 +6,7 @@ struct SearchView: View {
     @State private var results: [Track] = []
     @State private var searching = false
     @State private var errorMessage: String?
+    @State private var searchTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -22,10 +23,15 @@ struct SearchView: View {
                     .buttonStyle(.plain)
                 }
             }
-            .listStyle(.plain)
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(AppTheme.groupedBackground)
             .navigationTitle("搜索")
             .searchable(text: $query, prompt: "歌名、UP主,或直接粘贴 BV 号/链接")
-            .onSubmit(of: .search) { Task { await search() } }
+            .onSubmit(of: .search) {
+                searchTask?.cancel()
+                searchTask = Task { await search() }
+            }
             .overlay {
                 if searching { ProgressView() }
                 else if results.isEmpty && errorMessage == nil {
@@ -48,8 +54,16 @@ struct SearchView: View {
         searching = true
         defer { searching = false }
         do {
-            results = try await BiliClient().search(keyword: text).map(Track.init(search:))
+            let items = try await BiliClient().search(keyword: text)
+            guard !Task.isCancelled else { return }
+            let filtered = await Task.detached(priority: .userInitiated) {
+                items.map(Track.init(search:)).filter(MusicFilter.isMusic)
+            }.value
+            guard !Task.isCancelled else { return }
+            results = filtered
+            engine.preload(tracks: filtered)
         } catch {
+            guard !Task.isCancelled else { return }
             errorMessage = error.localizedDescription
         }
     }
@@ -60,22 +74,25 @@ struct TrackRow: View {
     var isPlaying = false
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
             AsyncImage(url: track.coverURL) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
-                Color.gray.opacity(0.2)
+                ZStack {
+                    AppTheme.secondaryBackground
+                    Image(systemName: "music.note").font(.caption).foregroundStyle(.secondary)
+                }
             }
-            .frame(width: 80, height: 50)
+            .frame(width: 56, height: 56)
             .clipShape(RoundedRectangle(cornerRadius: 6))
             VStack(alignment: .leading, spacing: 4) {
                 Text(track.title)
                     .font(.subheadline)
                     .lineLimit(2)
-                    .foregroundStyle(isPlaying ? Color.accentColor : .primary)
+                    .foregroundStyle(isPlaying ? AppTheme.accent : .primary)
                 HStack(spacing: 6) {
                     if isPlaying {
-                        Image(systemName: "waveform").font(.caption2).foregroundStyle(Color.accentColor)
+                        Image(systemName: "waveform").font(.caption2).foregroundStyle(AppTheme.accent)
                     }
                     Text(track.artist)
                     Text(format(track.duration))
@@ -84,7 +101,12 @@ struct TrackRow: View {
                 .foregroundStyle(.secondary)
             }
             Spacer()
+            Image(systemName: isPlaying ? "speaker.wave.2.fill" : "ellipsis")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(isPlaying ? AppTheme.accent : .secondary)
+                .frame(width: 28, height: 28)
         }
+        .padding(.vertical, 5)
         .contentShape(Rectangle())
     }
 

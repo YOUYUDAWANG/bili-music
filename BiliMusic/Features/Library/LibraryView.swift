@@ -14,7 +14,6 @@ struct LibraryView: View {
                     Text("\(cache.entries.count) 首 · \(format(bytes: cache.totalSize))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .listRowSeparator(.hidden)
                 }
                 ForEach(cache.entries) { entry in
                     Button {
@@ -39,7 +38,9 @@ struct LibraryView: View {
                     offsets.map { cache.entries[$0] }.forEach { cache.remove($0) }
                 }
             }
-            .listStyle(.plain)
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(AppTheme.groupedBackground)
             .navigationTitle("缓存")
             .toolbar {
                 if !cache.entries.isEmpty {
