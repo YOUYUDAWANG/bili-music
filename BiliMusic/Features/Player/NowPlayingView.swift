@@ -715,14 +715,25 @@ struct NowPlayingView: View {
         currentPlaylistError = nil
         defer { currentPlaylistLoading = false }
         do {
-            guard let playlist = try await BiliClient().currentVideoPlaylist(bvid: bvid) else {
+            let client = BiliClient()
+            var resolvedOwnerMid = current.ownerMid
+            var playlist = try await client.currentVideoPlaylist(bvid: bvid)
+            if playlist == nil {
+                if resolvedOwnerMid == nil {
+                    resolvedOwnerMid = try? await client.videoInfo(bvid: bvid).owner.mid
+                }
+                if let ownerMid = resolvedOwnerMid {
+                    playlist = try? await client.upPlaylistContaining(bvid: bvid, mid: ownerMid)
+                }
+            }
+            guard let playlist else {
                 guard engine.current?.bvid == bvid else { return }
                 currentPlaylist = nil
                 currentPlaylistTracks = []
                 return
             }
             let artist = current.artist
-            let ownerMid = current.ownerMid
+            let ownerMid = resolvedOwnerMid
             let tracks = playlist.items?.map { item in
                 Track(
                     aid: item.aid,
@@ -1065,6 +1076,9 @@ private struct MVFullscreenView: View {
             }
             .buttonStyle(.plain)
             .padding(16)
+        }
+        .task {
+            await engine.upgradeMVForFullscreen()
         }
     }
 }

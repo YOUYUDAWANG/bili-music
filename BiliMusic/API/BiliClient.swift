@@ -122,6 +122,7 @@ struct BiliClient {
 
     struct VideoPlayInfo: Decodable {
         struct DURL: Decodable { let url: String }
+        let quality: Int?
         let durl: [DURL]?
     }
 
@@ -149,9 +150,25 @@ struct BiliClient {
         return (url, chosen.id, chosen.bandwidth)
     }
 
-    /// 取单文件 MP4 视频流,用于 MV 模式。优先稳定播放,不追求最高画质。
-    func videoStream(bvid: String, cid: Int) async throws -> URL {
-        for qn in [112, 80, 64] {
+    enum VideoStreamProfile {
+        case inline
+        case fullscreen
+
+        var qualityCandidates: [Int] {
+            switch self {
+            case .inline:
+                // 内嵌播放器优先快速、稳定。
+                [112, 80, 64]
+            case .fullscreen:
+                // 全屏时优先尝试更高清晰度,失败或账号权限不足时自动降级。
+                [120, 116, 112, 80, 64]
+            }
+        }
+    }
+
+    /// 取单文件 MP4 视频流,用于 MV 模式。全屏路径会优先尝试更高 qn。
+    func videoStream(bvid: String, cid: Int, profile: VideoStreamProfile = .inline) async throws -> URL {
+        for qn in profile.qualityCandidates {
             do {
                 let info: VideoPlayInfo = try await get(
                     "https://api.bilibili.com/x/player/playurl?bvid=\(bvid)&cid=\(cid)&qn=\(qn)&fnval=0&fourk=1")
@@ -514,6 +531,31 @@ struct BiliClient {
         let size = data.page?.page_size ?? 30
         let total = data.page?.total ?? items.count
         return UPPlaylistPage(items: items, hasMore: current * size < total)
+    }
+
+    /// 在 UP 主公开的合集/系列里查找包含某个 BV 的列表。
+    /// 限制扫描范围,避免正在播放页为了 UI 检测发过多请求。
+    func upPlaylistContaining(bvid: String, mid: Int, maxPlaylists: Int = 12, maxPages: Int = 5) async throws -> UPPlaylist? {
+        let playlists = try await upPlaylists(mid: mid)
+        for playlist in playlists.prefix(maxPlaylists) {
+            var page = 1
+            var collected: [UPPlaylistItem] = []
+            while page <= maxPages {
+                let result = try await upPlaylistItems(mid: mid, playlist: playlist, page: page)
+                collected.append(contentsOf: result.items)
+                if collected.contains(where: { $0.bvid == bvid }) {
+                    return UPPlaylist(
+                        id: playlist.id,
+                        title: playlist.title,
+                        mediaCount: playlist.mediaCount,
+                        type: playlist.type,
+                        items: collected)
+                }
+                guard result.hasMore else { break }
+                page += 1
+            }
+        }
+        return nil
     }
 
     // MARK: - 首页推荐 (WBI;登录后个性化)

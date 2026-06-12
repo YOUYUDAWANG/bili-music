@@ -10,6 +10,7 @@ struct SearchView: View {
     @State private var searchTask: Task<Void, Never>?
     @State private var activeSearchID = UUID()
     @State private var historyLoaded = false
+    @State private var resultsQuery = ""
     @FocusState private var searchFocused: Bool
     @AppStorage("searchHistory") private var searchHistoryData = "[]"
 
@@ -111,7 +112,7 @@ struct SearchView: View {
                             .padding(.top, 60)
                     }
 
-                    if !results.isEmpty {
+                    if shouldShowResults {
                         VStack(spacing: 0) {
                             ForEach(Array(results.enumerated()), id: \.element.id) { index, track in
                                 Button {
@@ -148,7 +149,15 @@ struct SearchView: View {
             searchHistory = decodeSearchHistory()
         }
         .onChange(of: query) {
-            if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            if text.isEmpty {
+                searchTask?.cancel()
+                activeSearchID = UUID()
+                searching = false
+                errorMessage = nil
+                results = []
+                resultsQuery = ""
+            } else if text != resultsQuery {
                 searchTask?.cancel()
                 activeSearchID = UUID()
                 searching = false
@@ -170,13 +179,22 @@ struct SearchView: View {
         historyLoaded && !searchFocused && results.isEmpty && searchHistory.isEmpty && !searching && errorMessage == nil
     }
 
+    private var shouldShowResults: Bool {
+        !searchFocused
+            && !searching
+            && !results.isEmpty
+            && query.trimmingCharacters(in: .whitespacesAndNewlines) == resultsQuery
+    }
+
     private func submitSearch() {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        searchFocused = false
         searchTask?.cancel()
         let searchID = UUID()
         activeSearchID = searchID
         results = []
+        resultsQuery = ""
         errorMessage = nil
         searching = true
         rememberSearch(text)
@@ -225,6 +243,7 @@ struct SearchView: View {
             }.value
             guard !Task.isCancelled, activeSearchID == searchID else { return }
             results = filtered
+            resultsQuery = text
             engine.preload(tracks: filtered)
         } catch {
             guard !Task.isCancelled, activeSearchID == searchID else { return }

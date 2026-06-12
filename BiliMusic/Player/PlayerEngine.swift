@@ -115,10 +115,12 @@ final class PlayerEngine {
     private var playedBVs: Set<String> = []   // 电台去重
     private var prefetchTask: Task<Void, Never>?
     private var preloadTask: Task<Void, Never>?
+    private var autoMVTask: Task<Void, Never>?
     private var preparedStreams: [String: PreparedStream] = [:]
     private var preparedVideoStreams: [String: PreparedVideoStream] = [:]
     private var prefetchedRadio: (seed: String, track: Track)?
     private var playbackGeneration = UUID()
+    private var manualPlaybackModeOverride: PlaybackMode?
 
     private struct PreparedStream {
         let url: URL
@@ -137,6 +139,7 @@ final class PlayerEngine {
 
     init() {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+        _ = NetworkMonitor.shared
         setUpRemoteCommands()
     }
 
@@ -146,9 +149,11 @@ final class PlayerEngine {
     func play(tracks: [Track], startAt index: Int, queueMode: QueueMode? = nil) async {
         preloadTask?.cancel()
         prefetchTask?.cancel()
+        autoMVTask?.cancel()
         queue = tracks
         queueIndex = index
         playedBVs = []
+        manualPlaybackModeOverride = nil
         if let queueMode {
             self.queueMode = queueMode
         }
@@ -159,9 +164,11 @@ final class PlayerEngine {
     func playRadio(seed track: Track) async {
         preloadTask?.cancel()
         prefetchTask?.cancel()
+        autoMVTask?.cancel()
         queue = [track]
         queueIndex = 0
         playedBVs = []
+        manualPlaybackModeOverride = nil
         queueMode = .radio
         playbackMode = preferredModeForNewTrack()
         await startCurrent()
@@ -183,6 +190,7 @@ final class PlayerEngine {
     func play(bvid: String) async {
         preloadTask?.cancel()
         prefetchTask?.cancel()
+        autoMVTask?.cancel()
         state = .loading
         do {
             let track = try await resolve(bvid: bvid)
@@ -213,10 +221,12 @@ final class PlayerEngine {
                 let insertIndex = min(queueIndex + 1, queue.count)
                 queue.insert(next, at: insertIndex)
                 queueIndex = insertIndex
+                manualPlaybackModeOverride = nil
                 playbackMode = preferredModeForNewTrack()
                 await startCurrent()
             } else if queueIndex + 1 < queue.count {
                 queueIndex += 1
+                manualPlaybackModeOverride = nil
                 playbackMode = preferredModeForNewTrack()
                 await startCurrent()
             } else {
@@ -225,10 +235,12 @@ final class PlayerEngine {
         } else if queueMode == .shuffle, queue.count > 1 {
             let candidates = queue.indices.filter { $0 != queueIndex }
             queueIndex = candidates.randomElement() ?? queueIndex
+            manualPlaybackModeOverride = nil
             playbackMode = preferredModeForNewTrack()
             await startCurrent()
         } else if queueIndex + 1 < queue.count {
             queueIndex += 1
+            manualPlaybackModeOverride = nil
             playbackMode = preferredModeForNewTrack()
             await startCurrent()
         }
@@ -241,6 +253,7 @@ final class PlayerEngine {
             return
         }
         queueIndex -= 1
+        manualPlaybackModeOverride = nil
         playbackMode = preferredModeForNewTrack()
         await startCurrent()
     }
@@ -249,7 +262,9 @@ final class PlayerEngine {
         guard queue.indices.contains(index) else { return }
         preloadTask?.cancel()
         prefetchTask?.cancel()
+        autoMVTask?.cancel()
         queueIndex = index
+        manualPlaybackModeOverride = nil
         playbackMode = preferredModeForNewTrack()
         await startCurrent()
     }
@@ -273,14 +288,24 @@ final class PlayerEngine {
     }
 
     func togglePlayPause() {
-        guard let player else { return }
         if state == .playing {
-            player.pause()
-            state = .paused
+            pause()
         } else if state == .paused {
-            player.play()
-            state = .playing
+            play()
         }
+    }
+
+    func play() {
+        guard let player else { return }
+        player.play()
+        state = .playing
+        updateNowPlayingInfo()
+    }
+
+    func pause() {
+        guard let player else { return }
+        player.pause()
+        state = .paused
         updateNowPlayingInfo()
     }
 
@@ -314,12 +339,35 @@ final class PlayerEngine {
 
     func setPlaybackMode(_ mode: PlaybackMode) async {
         guard mode != playbackMode else { return }
+        manualPlaybackModeOverride = mode
         playbackMode = mode
         await startCurrent(resumeAt: currentTime)
     }
 
+    func upgradeMVForFullscreen() async {
+        guard playbackMode == .mv, var track = current else { return }
+        let resumeAt = currentTime
+        do {
+            if track.cid == nil {
+                track = try await fillPlaybackPage(for: track)
+                if current?.bvid == track.bvid {
+                    queue[queueIndex] = track
+                }
+            }
+            guard let cid = track.cid else { return }
+            let url = try await client.videoStream(bvid: track.bvid, cid: cid, profile: .fullscreen)
+            guard current?.bvid == track.bvid, playbackMode == .mv else { return }
+            preparedVideoStreams[track.bvid] = PreparedVideoStream(url: url, cid: cid, fetchedAt: Date())
+            await startCurrent(resumeAt: resumeAt)
+        } catch {
+            // 全屏提质失败不影响当前 MV 播放。
+        }
+    }
+
     func handleScenePhase(isBackground: Bool) async {
-        guard isBackground, playbackMode == .mv, state == .playing else { return }
+        guard isBackground else { return }
+        autoMVTask?.cancel()
+        guard playbackMode == .mv, state == .playing else { return }
         playbackMode = .music
         await startCurrent(resumeAt: currentTime)
     }
@@ -336,6 +384,7 @@ final class PlayerEngine {
         videoAvailable = false
         currentAudioQuality = nil
         currentAudioBandwidth = nil
+        autoMVTask?.cancel()
         do {
             let url: URL
             let isLocal: Bool
@@ -408,9 +457,9 @@ final class PlayerEngine {
                 try? await Task.sleep(for: .seconds(2))
                 await loadLyrics(for: track, generation: generation)
             }
-            Task { [track, generation] in
-                try? await Task.sleep(for: .seconds(4))
-                await checkVideoAvailability(for: track, generation: generation)
+            autoMVTask = Task { [weak self, track, generation] in
+                try? await Task.sleep(for: .seconds(1))
+                await self?.prepareVideoIfUseful(for: track, generation: generation)
             }
             scheduleRadioPrefetch()
             scheduleQueuePrefetch()
@@ -454,8 +503,22 @@ final class PlayerEngine {
 
     /// 电台选歌:用统一推荐引擎打分,避免 related 第一条把队列带偏。
     private func radioPick(after bvid: String) async -> Track? {
+        if let track = await fastRelatedRadioPick(after: bvid) {
+            return track
+        }
         let excluded = playedBVs.union(queue.map(\.bvid))
         return await RecommendationEngine().nextRadioTrack(after: current, excludedBVIDs: excluded)
+    }
+
+    /// 自动下一首必须先保证速度:related 接口通常最快,且返回 cid 时能少一次 pagelist 请求。
+    private func fastRelatedRadioPick(after bvid: String) async -> Track? {
+        let excluded = playedBVs.union(queue.map(\.bvid))
+        guard let items = try? await client.related(bvid: bvid) else { return nil }
+        let tracks = items
+            .map(Track.init(related:))
+            .filter { !excluded.contains($0.bvid) }
+        return tracks.first(where: MusicFilter.isStrictMusic)
+            ?? tracks.first(where: MusicFilter.isMusic)
     }
 
     private func scheduleRadioPrefetch() {
@@ -464,7 +527,7 @@ final class PlayerEngine {
         let expectedIndex = queueIndex
         prefetchTask = Task { [weak self] in
             guard let self else { return }
-            try? await Task.sleep(for: .seconds(3))
+            try? await Task.sleep(for: .milliseconds(700))
             guard let next = await self.radioPick(after: bvid) else { return }
             guard !Task.isCancelled else { return }
             if self.queueIndex == expectedIndex {
@@ -478,7 +541,7 @@ final class PlayerEngine {
         guard queue.indices.contains(queueIndex + 1) else { return }
         let next = queue[queueIndex + 1]
         Task { [weak self] in
-            try? await Task.sleep(for: .seconds(3))
+            try? await Task.sleep(for: .milliseconds(900))
             await self?.prepare(track: next)
         }
     }
@@ -610,7 +673,7 @@ final class PlayerEngine {
         lyrics = online ?? []
     }
 
-    private func checkVideoAvailability(for track: Track, generation: UUID) async {
+    private func prepareVideoIfUseful(for track: Track, generation: UUID) async {
         guard playbackMode == .music, let cid = track.cid else { return }
         let videoURL = try? await client.videoStream(bvid: track.bvid, cid: cid)
         guard playbackGeneration == generation, current?.bvid == track.bvid else { return }
@@ -619,6 +682,21 @@ final class PlayerEngine {
         }
         let available = videoURL != nil
         videoAvailable = available
+        if available, shouldAutoSwitchToMV(generation: generation, bvid: track.bvid) {
+            playbackMode = .mv
+            await startCurrent(resumeAt: currentTime)
+        }
+    }
+
+    private func shouldAutoSwitchToMV(generation: UUID, bvid: String) -> Bool {
+        UserDefaults.standard.bool(forKey: "preferMVOnWiFi")
+            && NetworkMonitor.shared.isWiFi
+            && manualPlaybackModeOverride == nil
+            && playbackMode == .music
+            && state == .playing
+            && UIApplication.shared.applicationState == .active
+            && playbackGeneration == generation
+            && current?.bvid == bvid
     }
 
     // MARK: - 锁屏 / 控制中心
@@ -626,11 +704,11 @@ final class PlayerEngine {
     private func setUpRemoteCommands() {
         let center = MPRemoteCommandCenter.shared()
         center.playCommand.addTarget { [weak self] _ in
-            Task { @MainActor in self?.togglePlayPause() }
+            Task { @MainActor in self?.play() }
             return .success
         }
         center.pauseCommand.addTarget { [weak self] _ in
-            Task { @MainActor in self?.togglePlayPause() }
+            Task { @MainActor in self?.pause() }
             return .success
         }
         center.nextTrackCommand.addTarget { [weak self] _ in

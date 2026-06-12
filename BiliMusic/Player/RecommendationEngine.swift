@@ -48,17 +48,24 @@ struct RecommendationEngine {
 
         switch mode {
         case .home:
-            let favorites = await favoriteSeeds()
-            let history = PlaybackHistoryStore.shared.entries.prefix(5).map(\.track)
-            let cache = CacheStore.shared.entries.prefix(4).map(\.track)
-            candidates += await relatedCandidates(from: favorites, source: .favoriteSeed)
-            candidates += await relatedCandidates(from: Array(history), source: .relatedHistory)
-            candidates += await relatedCandidates(from: Array(cache), source: .relatedHistory)
-            if let current = context.current {
-                candidates += await relatedCandidates(from: [current], source: .relatedCurrent)
+            // 首页刷新必须快:旧逻辑会串行请求收藏/历史/缓存/当前歌曲十几个 related,
+            // 真机上点击"换一批"会明显变慢。这里按质量分层短路,够用就停止补源。
+            let favorites = await favoriteSeeds(maxCount: 3)
+            candidates += await relatedCandidates(from: favorites, source: .favoriteSeed, perSeedLimit: 12)
+
+            if candidates.count < 12, let current = context.current {
+                candidates += await relatedCandidates(from: [current], source: .relatedCurrent, perSeedLimit: 12)
             }
-            if candidates.count < limit {
-                candidates += await fallbackSearchCandidates()
+            if candidates.count < 12 {
+                let history = PlaybackHistoryStore.shared.entries.prefix(2).map(\.track)
+                candidates += await relatedCandidates(from: Array(history), source: .relatedHistory, perSeedLimit: 8)
+            }
+            if candidates.count < 12 {
+                let cache = CacheStore.shared.entries.prefix(2).map(\.track)
+                candidates += await relatedCandidates(from: Array(cache), source: .relatedHistory, perSeedLimit: 8)
+            }
+            if candidates.isEmpty {
+                candidates += await fallbackSearchCandidates(keywordLimit: 1)
             }
 
         case .radio:
@@ -89,14 +96,14 @@ struct RecommendationEngine {
         return tracks.first
     }
 
-    private func relatedCandidates(from seeds: [Track], source: Source) async -> [Candidate] {
+    private func relatedCandidates(from seeds: [Track], source: Source, perSeedLimit: Int = 18) async -> [Candidate] {
         var candidates: [Candidate] = []
         for seed in seeds {
             guard let items = try? await client.related(bvid: seed.bvid) else { continue }
             candidates.append(contentsOf: items
                 .map(Track.init(related:))
                 .filter(MusicFilter.isMusic)
-                .prefix(18)
+                .prefix(perSeedLimit)
                 .map { Candidate(track: $0, source: source, seed: seed) })
         }
         return candidates
@@ -117,13 +124,13 @@ struct RecommendationEngine {
         return candidates
     }
 
-    private func fallbackSearchCandidates() async -> [Candidate] {
+    private func fallbackSearchCandidates(keywordLimit: Int = 2) async -> [Candidate] {
         let keywords = [
             "华语音乐 MV",
             "日语歌 翻唱",
             "粤语歌 live",
             "动漫 OST 音乐",
-        ].shuffled().prefix(2)
+        ].shuffled().prefix(keywordLimit)
         var candidates: [Candidate] = []
         for keyword in keywords {
             guard let items = try? await client.search(keyword: keyword) else { continue }
@@ -144,7 +151,7 @@ struct RecommendationEngine {
             .map { Candidate(track: $0, source: .playlistNeighbor, seed: current) }
     }
 
-    private func favoriteSeeds() async -> [Track] {
+    private func favoriteSeeds(maxCount: Int = 4) async -> [Track] {
         guard CookieStore.isLoggedIn else { return [] }
         let manager = FavoriteManager.shared
         if manager.folders.isEmpty {
@@ -163,7 +170,7 @@ struct RecommendationEngine {
             .map { Track(bvid: $0.bvid, title: $0.title, artist: $0.upper.name,
                          coverURL: URL(string: $0.cover), duration: $0.duration) }
             .filter(MusicFilter.isStrictMusic)
-        return Array(items.shuffled().prefix(4))
+        return Array(items.shuffled().prefix(maxCount))
     }
 
     private func ranked(_ candidates: [Candidate], mode: Mode, context: Context, limit: Int) -> [Track] {
