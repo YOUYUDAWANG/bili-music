@@ -9,6 +9,8 @@ struct SearchView: View {
     @State private var errorMessage: String?
     @State private var searchTask: Task<Void, Never>?
     @State private var activeSearchID = UUID()
+    @State private var historyLoaded = false
+    @FocusState private var searchFocused: Bool
     @AppStorage("searchHistory") private var searchHistoryData = "[]"
 
     var body: some View {
@@ -25,6 +27,7 @@ struct SearchView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .submitLabel(.search)
+                        .focused($searchFocused)
                         .onSubmit { submitSearch() }
                     if !query.isEmpty {
                         Button {
@@ -45,7 +48,7 @@ struct SearchView: View {
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    if results.isEmpty, !searchHistory.isEmpty, !searching {
+                    if shouldShowSearchHistory {
                         Text("搜索历史")
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(.secondary)
@@ -102,7 +105,7 @@ struct SearchView: View {
                             .font(.caption)
                             .padding(.horizontal, 20)
                             .padding(.vertical, 8)
-                    } else if results.isEmpty && searchHistory.isEmpty {
+                    } else if shouldShowEmptyState {
                         ContentUnavailableView("搜点什么吧", systemImage: "music.note.list")
                             .frame(maxWidth: .infinity)
                             .padding(.top, 60)
@@ -130,13 +133,18 @@ struct SearchView: View {
                 }
                 .padding(.bottom, 24)
             }
+            .scrollDismissesKeyboard(.immediately)
         }
         .background(AppTheme.groupedBackground)
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .task {
+            guard !historyLoaded else { return }
+            try? await Task.sleep(for: .milliseconds(180))
             searchHistory = decodeSearchHistory()
-            await WBISigner.prewarm()
+            historyLoaded = true
         }
         .onChange(of: searchHistoryData) {
+            guard historyLoaded else { return }
             searchHistory = decodeSearchHistory()
         }
         .onChange(of: query) {
@@ -152,6 +160,14 @@ struct SearchView: View {
 
     private func decodeSearchHistory() -> [String] {
         (try? JSONDecoder().decode([String].self, from: Data(searchHistoryData.utf8))) ?? []
+    }
+
+    private var shouldShowSearchHistory: Bool {
+        historyLoaded && !searchFocused && results.isEmpty && !searchHistory.isEmpty && !searching
+    }
+
+    private var shouldShowEmptyState: Bool {
+        historyLoaded && !searchFocused && results.isEmpty && searchHistory.isEmpty && !searching && errorMessage == nil
     }
 
     private func submitSearch() {
@@ -205,7 +221,7 @@ struct SearchView: View {
             }
             guard !Task.isCancelled else { return }
             let filtered = await Task.detached(priority: .userInitiated) {
-                dedupe(pages.map(Track.init(search:)).filter { MusicFilter.isSearchResultMusic($0, query: text) })
+                Array(dedupe(pages.map(Track.init(search:)).filter { MusicFilter.isSearchResultMusic($0, query: text) }).prefix(40))
             }.value
             guard !Task.isCancelled, activeSearchID == searchID else { return }
             results = filtered
@@ -240,7 +256,7 @@ struct TrackRow: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            AsyncImage(url: track.coverURL) { image in
+            AsyncImage(url: thumbnailURL(track.coverURL, size: 160)) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
                 ZStack {
@@ -279,5 +295,12 @@ struct TrackRow: View {
         seconds >= 3600
             ? String(format: "%d:%02d:%02d", seconds / 3600, seconds % 3600 / 60, seconds % 60)
             : String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+
+    private func thumbnailURL(_ url: URL?, size: Int) -> URL? {
+        guard let url else { return nil }
+        let raw = url.absoluteString
+        guard raw.contains("hdslb.com"), !raw.contains("@") else { return url }
+        return URL(string: raw + "@\(size)w_\(size)h_1c.webp")
     }
 }

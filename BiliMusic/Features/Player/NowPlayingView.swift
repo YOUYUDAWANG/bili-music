@@ -70,7 +70,7 @@ struct NowPlayingView: View {
             }
             .offset(y: dragOffset)
             .animation(.spring(response: 0.32, dampingFraction: 0.86), value: dragOffset)
-            .simultaneousGesture(dismissDrag)
+            .simultaneousGesture(pageDismissDrag)
         }
         .sheet(isPresented: $showUPPlaylists) {
             UPPlaylistsView()
@@ -251,7 +251,7 @@ struct NowPlayingView: View {
                 }
             }
         } else {
-            AsyncImage(url: engine.current?.coverURL) { image in
+            AsyncImage(url: thumbnailURL(engine.current?.coverURL, width: 960, height: 540)) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
                 ZStack {
@@ -685,18 +685,18 @@ struct NowPlayingView: View {
         guard let bvid = engine.current?.bvid else { return }
         recommendationsLoading = recommendedTracks.isEmpty
         defer { recommendationsLoading = false }
-        do {
-            let tracks = try await BiliClient().related(bvid: bvid)
-                .map(Track.init(related:))
-                .filter(MusicFilter.isMusic)
-                .filter { $0.bvid != bvid }
-            guard engine.current?.bvid == bvid else { return }
-            recommendedTracks = dedupe(tracks)
-            engine.preload(tracks: recommendedTracks)
-        } catch {
-            guard engine.current?.bvid == bvid else { return }
-            recommendationsError = error.localizedDescription
-        }
+        let tracks = await RecommendationEngine().recommendations(
+            mode: .relatedPanel,
+            context: .init(
+                current: engine.current,
+                queue: engine.queue,
+                playlistTracks: currentPlaylistTracks,
+                excludedBVIDs: [bvid]),
+            limit: 24)
+        guard engine.current?.bvid == bvid else { return }
+        recommendedTracks = tracks
+        recommendationsError = tracks.isEmpty ? "没有找到合适的推荐歌曲" : nil
+        engine.preload(tracks: recommendedTracks)
     }
 
     private func loadCurrentPlaylistIfNeeded(force: Bool) async {
@@ -802,6 +802,27 @@ struct NowPlayingView: View {
             }
     }
 
+    /// 只在当前播放主页面启用整页下滑收起;左右列表页保留正常列表滚动。
+    private var pageDismissDrag: some Gesture {
+        DragGesture(minimumDistance: 24)
+            .onChanged { value in
+                guard selectedPage == PlayerPage.nowPlaying.rawValue,
+                      abs(value.translation.height) > abs(value.translation.width),
+                      value.translation.height > 0 else { return }
+                dragOffset = max(0, value.translation.height)
+            }
+            .onEnded { value in
+                guard selectedPage == PlayerPage.nowPlaying.rawValue else { return }
+                if value.translation.height > 130 || value.predictedEndTranslation.height > 260 {
+                    closePlayer()
+                } else {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+                        dragOffset = 0
+                    }
+                }
+            }
+    }
+
     private func format(_ seconds: Double) -> String {
         let s = Int(seconds.isFinite ? max(seconds, 0) : 0)
         return String(format: "%d:%02d", s / 60, s % 60)
@@ -821,6 +842,13 @@ struct NowPlayingView: View {
             dismiss()
         }
     }
+
+    private func thumbnailURL(_ url: URL?, width: Int, height: Int) -> URL? {
+        guard let url else { return nil }
+        let raw = url.absoluteString
+        guard raw.contains("hdslb.com"), !raw.contains("@") else { return url }
+        return URL(string: raw + "@\(width)w_\(height)h_1c.webp")
+    }
 }
 
 /// 底部常驻迷你播放条。
@@ -832,7 +860,7 @@ struct MiniPlayerBar: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            AsyncImage(url: engine.current?.coverURL) { image in
+            AsyncImage(url: thumbnailURL(engine.current?.coverURL, width: 160, height: 90)) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
                 AppTheme.secondaryBackground
@@ -900,6 +928,13 @@ struct MiniPlayerBar: View {
             openPlayerTranslation = 0
             showFullPlayer = true
         }
+    }
+
+    private func thumbnailURL(_ url: URL?, width: Int, height: Int) -> URL? {
+        guard let url else { return nil }
+        let raw = url.absoluteString
+        guard raw.contains("hdslb.com"), !raw.contains("@") else { return url }
+        return URL(string: raw + "@\(width)w_\(height)h_1c.webp")
     }
 }
 

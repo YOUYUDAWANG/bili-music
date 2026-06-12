@@ -170,7 +170,7 @@ final class PlayerEngine {
     /// 提前取 cid + playurl,减少点击歌曲后等待时间。URL 有时效,只做短期缓存。
     func preload(tracks: [Track]) {
         preloadTask?.cancel()
-        let candidates = tracks.prefix(5)
+        let candidates = tracks.prefix(3)
         preloadTask = Task { [weak self] in
             for track in candidates {
                 guard !Task.isCancelled else { return }
@@ -452,12 +452,10 @@ final class PlayerEngine {
         .music
     }
 
-    /// 电台选歌:相关推荐里挑 1~11 分钟、没播过的第一条
+    /// 电台选歌:用统一推荐引擎打分,避免 related 第一条把队列带偏。
     private func radioPick(after bvid: String) async -> Track? {
-        guard let items = try? await client.related(bvid: bvid) else { return nil }
-        return items.first {
-            !playedBVs.contains($0.bvid) && MusicFilter.isMusic(title: $0.title, artist: $0.owner.name, duration: $0.duration)
-        }.map(Track.init(related:))
+        let excluded = playedBVs.union(queue.map(\.bvid))
+        return await RecommendationEngine().nextRadioTrack(after: current, excludedBVIDs: excluded)
     }
 
     private func scheduleRadioPrefetch() {
@@ -587,14 +585,21 @@ final class PlayerEngine {
 
     private func loadCover(for track: Track, generation: UUID) async {
         coverImage = nil
-        guard let coverURL = track.coverURL else { return }
+        guard let coverURL = artworkURL(track.coverURL) else { return }
         var req = URLRequest(url: coverURL)
         BiliClient.headers.forEach { req.setValue($1, forHTTPHeaderField: $0) }
         if let (data, _) = try? await URLSession.shared.data(for: req) {
             guard playbackGeneration == generation, current?.bvid == track.bvid else { return }
-            coverImage = UIImage(data: data)
+            coverImage = UIImage(data: data)?.resized(maxDimension: 600)
             updateNowPlayingInfo()
         }
+    }
+
+    private func artworkURL(_ url: URL?) -> URL? {
+        guard let url else { return nil }
+        let raw = url.absoluteString
+        guard raw.contains("hdslb.com"), !raw.contains("@") else { return url }
+        return URL(string: raw + "@600w_600h_1c.webp")
     }
 
     private func loadLyrics(for track: Track, generation: UUID) async {
@@ -656,5 +661,18 @@ final class PlayerEngine {
             info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: coverImage.size) { _ in coverImage }
         }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+    }
+}
+
+private extension UIImage {
+    func resized(maxDimension: CGFloat) -> UIImage {
+        let longest = max(size.width, size.height)
+        guard longest > maxDimension, longest > 0 else { return self }
+        let scale = maxDimension / longest
+        let targetSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        return renderer.image { _ in
+            draw(in: CGRect(origin: .zero, size: targetSize))
+        }
     }
 }

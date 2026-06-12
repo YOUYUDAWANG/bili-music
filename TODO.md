@@ -151,6 +151,10 @@
 ## Recommendation Tuning
 
 - [x] Keep related-video radio as the primary music recommendation path.
+- [x] Centralize recommendation logic.
+  - Added a shared `RecommendationEngine` used by Home, radio auto-pick, and the player's related panel.
+  - Recommendations now merge current-song related videos, recent history, favorite-folder seeds, playlist neighbors, and artist/title search where appropriate.
+  - Candidate ranking now scores source quality, music-likeness, duration, artist/title relevance, favorites/cache signals, recent-play penalties, queue duplicates, and obvious non-music hints.
 - [x] Replace Bilibili home feed with music-only discovery sources.
   - Home now uses current track/cache seeds and related videos first.
   - Falls back to explicit music keyword search instead of generic Bilibili feed.

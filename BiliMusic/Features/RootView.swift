@@ -40,6 +40,9 @@ struct RootView: View {
             }
         }
         .task {
+            Task(priority: .utility) {
+                await WBISigner.prewarm()
+            }
             // 调试用:simctl launch 注入 AUTOPLAY_BV 即可无交互验证播放链路
             if let bv = ProcessInfo.processInfo.environment["AUTOPLAY_BV"] {
                 await engine.play(bvid: bv)
