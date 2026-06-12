@@ -1,7 +1,9 @@
 import SwiftUI
 
 enum AppTheme {
-    static let accent = Color(red: 1.0, green: 0.18, blue: 0.32)
+    /// 单色控件语言:不强加品牌色,tint/高亮用自适应的 primary(黑/白),
+    /// 唯一的色彩来自正在播放页的专辑封面虚化背景。更接近 Apple Music 的克制感。
+    static let accent = Color.primary
     static let background = Color(uiColor: .systemBackground)
     static let groupedBackground = Color(uiColor: .systemGroupedBackground)
     static let secondaryBackground = Color(uiColor: .secondarySystemGroupedBackground)
@@ -9,10 +11,10 @@ enum AppTheme {
     static let label = Color(uiColor: .label)
     static let secondaryLabel = Color(uiColor: .secondaryLabel)
 
+    /// 没有封面时的中性兜底背景(不含红色)。
     static let playerGradient = LinearGradient(
         colors: [
-            accent.opacity(0.28),
-            Color(uiColor: .systemBackground),
+            Color(uiColor: .secondarySystemBackground),
             Color(uiColor: .systemBackground),
         ],
         startPoint: .top,

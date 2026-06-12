@@ -10,6 +10,8 @@ struct NowPlayingView: View {
     @State private var selectedMode: PlayerEngine.PlaybackMode = .music
     @State private var switchingMode = false
     @State private var favoriteLongPressTriggered = false
+    @State private var scrubValue: Double = 0
+    @State private var isScrubbing = false
     private var favorites: FavoriteManager { .shared }
 
     var body: some View {
@@ -17,7 +19,7 @@ struct NowPlayingView: View {
         GeometryReader { proxy in
             let coverSize = min(proxy.size.width - 48, max(230, proxy.size.height * 0.38), 340)
             ZStack {
-                AppTheme.playerGradient
+                playerBackground
                     .ignoresSafeArea()
 
                 ScrollView(showsIndicators: false) {
@@ -75,14 +77,24 @@ struct NowPlayingView: View {
                         VStack(spacing: 4) {
                             Slider(
                                 value: Binding(
-                                    get: { min(engine.currentTime, engine.duration) },
-                                    set: { engine.seek(to: $0) }
+                                    get: { isScrubbing ? scrubValue : min(engine.currentTime, engine.duration) },
+                                    set: { scrubValue = $0 }
                                 ),
-                                in: 0...max(engine.duration, 1)
+                                in: 0...max(engine.duration, 1),
+                                onEditingChanged: { editing in
+                                    if editing {
+                                        scrubValue = min(engine.currentTime, engine.duration)
+                                        isScrubbing = true
+                                        engine.beginScrub()
+                                    } else {
+                                        engine.endScrub(to: scrubValue)
+                                        isScrubbing = false
+                                    }
+                                }
                             )
-                            .tint(.white)
+                            .tint(AppTheme.label)
                             HStack {
-                                Text(format(engine.currentTime))
+                                Text(format(isScrubbing ? scrubValue : engine.currentTime))
                                 Spacer()
                                 Text(format(engine.duration))
                             }
@@ -100,12 +112,13 @@ struct NowPlayingView: View {
                             } label: {
                                 Image(systemName: engine.state == .playing ? "pause.fill" : "play.fill")
                                     .font(.system(size: 36, weight: .bold))
+                                    .contentTransition(.symbolEffect(.replace))
                                     .frame(width: 82, height: 82)
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(AppTheme.background)
                                     .background(AppTheme.label, in: Circle())
                                     .shadow(color: .black.opacity(0.18), radius: 16, y: 8)
                             }
-                            .overlay { if engine.state == .loading { ProgressView() } }
+                            .overlay { if engine.state == .loading { ProgressView().tint(AppTheme.background) } }
                             PlayerIconButton(systemName: "forward.fill", size: 28) {
                                 Task { await engine.playNext() }
                             }
@@ -166,6 +179,29 @@ struct NowPlayingView: View {
         }
     }
 
+    /// Apple Music 风格:放大并虚化的专辑封面作背景,叠一层材质压暗,内容更聚焦。
+    @ViewBuilder
+    private var playerBackground: some View {
+        ZStack {
+            AppTheme.playerGradient
+            if let url = engine.current?.coverURL {
+                AsyncImage(url: url) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    Color.clear
+                }
+                .blur(radius: 70, opaque: true)
+                .overlay(.ultraThinMaterial)
+                .overlay(
+                    LinearGradient(
+                        colors: [.black.opacity(0.05), .black.opacity(0.28)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+            }
+        }
+    }
+
     @ViewBuilder
     private func mediaView(coverSize: CGFloat) -> some View {
         if engine.playbackMode == .mv, let player = engine.avPlayer {
@@ -184,7 +220,7 @@ struct NowPlayingView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .frame(width: coverSize, height: coverSize)
+            .frame(width: coverSize, height: coverSize * 9 / 16)
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .shadow(color: .black.opacity(0.42), radius: 28, y: 18)
         }
@@ -315,8 +351,8 @@ struct MiniPlayerBar: View {
             } placeholder: {
                 AppTheme.secondaryBackground
             }
-            .frame(width: 44, height: 44)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .frame(width: 52, height: 30)
+            .clipShape(RoundedRectangle(cornerRadius: 5))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(engine.current?.title ?? "").font(.subheadline.weight(.semibold)).lineLimit(1)
@@ -328,13 +364,16 @@ struct MiniPlayerBar: View {
             } label: {
                 Image(systemName: engine.state == .playing ? "pause.fill" : "play.fill")
                     .font(.title3)
+                    .contentTransition(.symbolEffect(.replace))
             }
+            .buttonStyle(.plain)
             .overlay { if engine.state == .loading { ProgressView().scaleEffect(0.7) } }
             Button {
                 Task { await engine.playNext() }
             } label: {
                 Image(systemName: "forward.fill").font(.title3)
             }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -344,10 +383,17 @@ struct MiniPlayerBar: View {
                 .fill(AppTheme.separator.opacity(0.7))
                 .frame(height: 0.5)
         }
-        .padding(.horizontal, 0)
-        .padding(.bottom, 0)
         .contentShape(Rectangle())
         .onTapGesture { showFullPlayer = true }
+        // 手指按住 mini 播放器上滑即可打开全屏播放页
+        .gesture(
+            DragGesture(minimumDistance: 12)
+                .onEnded { value in
+                    if value.translation.height < -24 {
+                        showFullPlayer = true
+                    }
+                }
+        )
     }
 }
 

@@ -67,6 +67,8 @@ final class PlayerEngine {
     private(set) var queue: [Track] = []
     private(set) var queueIndex = 0
     private(set) var currentTime: Double = 0
+    /// 用户正在拖动进度条:期间不让时间观察器回写 currentTime,避免与手指打架
+    private(set) var isScrubbing = false
     private(set) var lyrics: [LyricLine] = []
     private(set) var videoAvailable = false
     /// 电台模式:队列播到末尾时用相关推荐自动续歌
@@ -84,6 +86,7 @@ final class PlayerEngine {
     private var player: AVPlayer?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
+    private var statusObserver: NSKeyValueObservation?
     private var coverImage: UIImage?
     private var playedBVs: Set<String> = []   // 电台去重
     private var prefetchTask: Task<Void, Never>?
@@ -204,8 +207,20 @@ final class PlayerEngine {
     }
 
     func seek(to seconds: Double) {
-        player?.seek(to: CMTime(seconds: seconds, preferredTimescale: 600))
+        player?.seek(to: CMTime(seconds: seconds, preferredTimescale: 600),
+                     toleranceBefore: .zero, toleranceAfter: .zero)
+        currentTime = seconds
         updateNowPlayingInfo()
+    }
+
+    /// 进度条交互:开始拖动时冻结时间回写,只更新显示;松手时一次性 seek。
+    func beginScrub() {
+        isScrubbing = true
+    }
+
+    func endScrub(to seconds: Double) {
+        isScrubbing = false
+        seek(to: seconds)
     }
 
     func setPlaybackMode(_ mode: PlaybackMode) async {
@@ -377,10 +392,12 @@ final class PlayerEngine {
     private func startPlayback(url: URL, isLocal: Bool = false, resumeAt: Double = 0) {
         if let timeObserver, let player { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        statusObserver?.invalidate()
         player?.pause()
         player?.replaceCurrentItem(with: nil)
         timeObserver = nil
         endObserver = nil
+        statusObserver = nil
         let asset = isLocal
             ? AVURLAsset(url: url)
             : AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": BiliClient.headers])
@@ -391,7 +408,24 @@ final class PlayerEngine {
             forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main
         ) { [weak self] time in
             Task { @MainActor in
-                self?.currentTime = time.seconds
+                guard let self, !self.isScrubbing else { return }
+                self.currentTime = time.seconds
+            }
+        }
+        // 让播放/暂停状态始终跟随播放器真实状态(缓冲、卡顿、自动暂停都能同步 UI)
+        statusObserver = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
+            Task { @MainActor in
+                guard let self else { return }
+                switch player.timeControlStatus {
+                case .playing:
+                    self.state = .playing
+                case .paused:
+                    if self.state == .playing { self.state = .paused }
+                case .waitingToPlayAtSpecifiedRate:
+                    break
+                @unknown default:
+                    break
+                }
             }
         }
         endObserver = NotificationCenter.default.addObserver(
