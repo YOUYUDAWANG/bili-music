@@ -519,15 +519,16 @@ final class PlayerEngine {
                      coverURL: track.coverURL, duration: page.duration)
     }
 
-    /// Resolve cid and audio stream URL in one combined call.
-    private func resolveStream(bvid: String, cid: Int?) async throws -> (url: URL, cid: Int, duration: Int, quality: Int, bandwidth: Int) {
-        let info = try await client.videoInfo(bvid: bvid)
-        guard let page = info.pages.first else {
+    /// 解析音频流前先拿到 cid 和时长。已知 cid+时长就直接跳过元数据请求;
+    /// 否则用轻量的 pagelist(而非完整的 view 接口,后者会带回整个合集树白白解析)。
+    private static func resolveCidDuration(client: BiliClient, bvid: String, cid: Int?, duration: Int) async throws -> (cid: Int, duration: Int) {
+        if let cid, duration > 0 {
+            return (cid, duration)
+        }
+        guard let page = try await client.pageList(bvid: bvid).first else {
             throw BiliClient.APIError(code: -1, message: "无分P")
         }
-        let resolvedCid = cid ?? page.cid
-        let stream = try await client.audioStream(bvid: bvid, cid: resolvedCid, preferredQuality: Self.playbackQuality)
-        return (url: stream.url, cid: resolvedCid, duration: page.duration, quality: stream.quality, bandwidth: stream.bandwidth)
+        return (cid ?? page.cid, duration > 0 ? duration : page.duration)
     }
 
     private func preparedStreamValue(for track: Track) async throws -> PreparedStream {
@@ -539,21 +540,18 @@ final class PlayerEngine {
         }
         let task = Task<PreparedStream, Error> { [client] in
             let start = CFAbsoluteTimeGetCurrent()
-            let info = try await client.videoInfo(bvid: track.bvid)
-            guard let page = info.pages.first else {
-                throw BiliClient.APIError(code: -1, message: "无分P")
-            }
-            let resolvedCid = track.cid ?? page.cid
+            let meta = try await Self.resolveCidDuration(
+                client: client, bvid: track.bvid, cid: track.cid, duration: track.duration)
             let stream = try await client.audioStream(
                 bvid: track.bvid,
-                cid: resolvedCid,
+                cid: meta.cid,
                 preferredQuality: Self.playbackQuality)
             let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
             log.debug("prepare stream(bvid:\(track.bvid)) \(elapsed, format: .fixed(precision: 1))ms")
             return PreparedStream(
                 url: stream.url,
-                cid: resolvedCid,
-                duration: page.duration,
+                cid: meta.cid,
+                duration: meta.duration,
                 quality: stream.quality,
                 bandwidth: stream.bandwidth,
                 fetchedAt: Date())

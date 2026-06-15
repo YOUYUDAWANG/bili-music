@@ -97,16 +97,25 @@ final class CacheStore {
         entries.reduce(0) { $0 + $1.fileSize }
     }
 
+    private var saveTask: Task<Void, Never>?
+
+    /// 防抖写盘:短时间内多次 add/remove 只在末尾写一次,encode 也挪到后台,
+    /// 不再每次改动都在主线程全量序列化整张索引。
     private func save() {
-        let start = CFAbsoluteTimeGetCurrent()
-        let count = entries.count
-        if let data = try? JSONEncoder().encode(entries) {
-            let url = indexURL
-            Task.detached(priority: .background) {
+        let snapshot = entries
+        let url = indexURL
+        saveTask?.cancel()
+        saveTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            await Task.detached(priority: .background) {
+                let start = CFAbsoluteTimeGetCurrent()
+                guard let data = try? JSONEncoder().encode(snapshot) else { return }
                 try? data.write(to: url, options: .atomic)
                 let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
-                log.debug("save() \(elapsed, format: .fixed(precision: 1))ms entries=\(count)")
-            }
+                log.debug("save() \(elapsed, format: .fixed(precision: 1))ms entries=\(snapshot.count)")
+            }.value
+            self?.saveTask = nil
         }
     }
 }

@@ -46,15 +46,25 @@ final class PlaybackHistoryStore {
         entries = decoded.sorted { $0.lastPlayedAt > $1.lastPlayedAt }
     }
 
+    private var saveTask: Task<Void, Never>?
+
+    /// 防抖写盘:record() 每播一首都会调,连续切歌时只在停下来后写一次,
+    /// encode 也挪到后台,不再每次都在主线程全量序列化 300 条历史。
     private func save() {
-        let start = CFAbsoluteTimeGetCurrent()
-        let count = entries.count
-        guard let data = try? JSONEncoder().encode(entries) else { return }
+        let snapshot = entries
         let url = fileURL
-        Task.detached(priority: .background) {
-            try? data.write(to: url, options: .atomic)
-            let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
-            log.debug("save() \(elapsed, format: .fixed(precision: 1))ms entries=\(count)")
+        saveTask?.cancel()
+        saveTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            await Task.detached(priority: .background) {
+                let start = CFAbsoluteTimeGetCurrent()
+                guard let data = try? JSONEncoder().encode(snapshot) else { return }
+                try? data.write(to: url, options: .atomic)
+                let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+                log.debug("save() \(elapsed, format: .fixed(precision: 1))ms entries=\(snapshot.count)")
+            }.value
+            self?.saveTask = nil
         }
     }
 }
