@@ -1,4 +1,7 @@
 import Foundation
+import OSLog
+
+private let log = Logger(subsystem: "com.fubuki.BiliMusic", category: "download")
 import Observation
 
 /// 整曲下载到本地缓存,带进度。用 URLSessionDownloadTask(逐字节 AsyncBytes 读流吞吐太低)。

@@ -143,10 +143,10 @@
 - [ ] Further reduce first-play latency if the stream still feels slow.
   - Consider preparing an `AVPlayerItem` for the highlighted/next track, not just fetching playurl.
   - Keep the previous visual state visible while the new item buffers.
-- [ ] Improve cache browsing.
-  - Add sorting by recently cached, title, artist, size, or quality.
-  - Add search/filter for cached tracks.
-  - Consider showing cache quality and file size more consistently.
+- [x] Improve cache browsing.
+  - Added sorting by recently cached, title, artist, size, or quality.
+  - Added search/filter for cached tracks.
+  - Cache rows show quality and file size more consistently.
 
 ## Recommendation Tuning
 

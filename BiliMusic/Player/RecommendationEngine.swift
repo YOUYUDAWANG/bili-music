@@ -1,4 +1,7 @@
 import Foundation
+import OSLog
+
+private let log = Logger(subsystem: "com.fubuki.BiliMusic", category: "recommend")
 
 @MainActor
 struct RecommendationEngine {
@@ -97,31 +100,45 @@ struct RecommendationEngine {
     }
 
     private func relatedCandidates(from seeds: [Track], source: Source, perSeedLimit: Int = 18) async -> [Candidate] {
-        var candidates: [Candidate] = []
-        for seed in seeds {
-            guard let items = try? await client.related(bvid: seed.bvid) else { continue }
-            candidates.append(contentsOf: items
-                .map(Track.init(related:))
-                .filter(MusicFilter.isMusic)
-                .prefix(perSeedLimit)
-                .map { Candidate(track: $0, source: source, seed: seed) })
+        await withTaskGroup(of: [Candidate].self) { group in
+            for seed in seeds {
+                group.addTask {
+                    guard let items = try? await client.related(bvid: seed.bvid) else { return [] }
+                    return items
+                        .map(Track.init(related:))
+                        .filter(MusicFilter.isMusic)
+                        .prefix(perSeedLimit)
+                        .map { Candidate(track: $0, source: source, seed: seed) }
+                }
+            }
+            var candidates: [Candidate] = []
+            for await batch in group {
+                candidates.append(contentsOf: batch)
+            }
+            return candidates
         }
-        return candidates
     }
 
     private func artistSearchCandidates(for track: Track) async -> [Candidate] {
         let terms = searchTerms(for: track)
         guard !terms.isEmpty else { return [] }
-        var candidates: [Candidate] = []
-        for term in terms.prefix(2) {
-            guard let items = try? await client.search(keyword: term, musicOnly: true) else { continue }
-            candidates.append(contentsOf: items
-                .map(Track.init(search:))
-                .filter { MusicFilter.isSearchResultMusic($0, query: term) }
-                .prefix(10)
-                .map { Candidate(track: $0, source: .artistSearch, seed: track) })
+        return await withTaskGroup(of: [Candidate].self) { group in
+            for term in terms.prefix(2) {
+                group.addTask {
+                    guard let items = try? await client.search(keyword: term, musicOnly: true) else { return [] }
+                    return items
+                        .map(Track.init(search:))
+                        .filter { MusicFilter.isSearchResultMusic($0, query: term) }
+                        .prefix(10)
+                        .map { Candidate(track: $0, source: .artistSearch, seed: track) }
+                }
+            }
+            var candidates: [Candidate] = []
+            for await batch in group {
+                candidates.append(contentsOf: batch)
+            }
+            return candidates
         }
-        return candidates
     }
 
     private func fallbackSearchCandidates(keywordLimit: Int = 2) async -> [Candidate] {
@@ -131,16 +148,23 @@ struct RecommendationEngine {
             "粤语歌 live",
             "动漫 OST 音乐",
         ].shuffled().prefix(keywordLimit)
-        var candidates: [Candidate] = []
-        for keyword in keywords {
-            guard let items = try? await client.search(keyword: keyword, musicOnly: true) else { continue }
-            candidates.append(contentsOf: items
-                .map(Track.init(search:))
-                .filter { MusicFilter.isSearchResultMusic($0, query: keyword) }
-                .prefix(12)
-                .map { Candidate(track: $0, source: .fallbackSearch, seed: nil) })
+        return await withTaskGroup(of: [Candidate].self) { group in
+            for keyword in keywords {
+                group.addTask {
+                    guard let items = try? await client.search(keyword: keyword, musicOnly: true) else { return [] }
+                    return items
+                        .map(Track.init(search:))
+                        .filter { MusicFilter.isSearchResultMusic($0, query: keyword) }
+                        .prefix(12)
+                        .map { Candidate(track: $0, source: .fallbackSearch, seed: nil) }
+                }
+            }
+            var candidates: [Candidate] = []
+            for await batch in group {
+                candidates.append(contentsOf: batch)
+            }
+            return candidates
         }
-        return candidates
     }
 
     private func playlistNeighborCandidates(current: Track?, playlistTracks: [Track]) -> [Candidate] {

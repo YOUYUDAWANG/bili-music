@@ -1,5 +1,9 @@
 import Foundation
+import OSLog
 import Observation
+
+private let log = Logger(subsystem: "com.fubuki.BiliMusic", category: "history")
+
 
 @Observable
 @MainActor
@@ -43,8 +47,15 @@ final class PlaybackHistoryStore {
     }
 
     private func save() {
+        let start = CFAbsoluteTimeGetCurrent()
+        let count = entries.count
         guard let data = try? JSONEncoder().encode(entries) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        let url = fileURL
+        Task.detached(priority: .background) {
+            try? data.write(to: url, options: .atomic)
+            let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+            log.debug("save() \(elapsed, format: .fixed(precision: 1))ms entries=\(count)")
+        }
     }
 }
 

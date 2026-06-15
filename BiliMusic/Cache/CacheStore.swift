@@ -1,5 +1,9 @@
 import Foundation
+import OSLog
 import Observation
+
+private let log = Logger(subsystem: "com.fubuki.BiliMusic", category: "cache")
+
 
 struct CachedEntry: Codable, Identifiable, Equatable {
     let bvid: String
@@ -27,7 +31,17 @@ struct CachedEntry: Codable, Identifiable, Equatable {
 final class CacheStore {
     static let shared = CacheStore()
 
-    private(set) var entries: [CachedEntry] = []
+    private(set) var entries: [CachedEntry] = [] {
+        didSet { rebuildIndex() }
+    }
+
+    // bvid → entry 的 O(1) 索引。entry(bvid:) 在 body 重渲染时频繁调用,
+    // 缓存上百首后线性扫描会拖慢列表/播放页。
+    private var index: [String: CachedEntry] = [:]
+
+    private func rebuildIndex() {
+        index = Dictionary(entries.map { ($0.bvid, $0) }, uniquingKeysWith: { first, _ in first })
+    }
 
     nonisolated static var audioDir: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -48,10 +62,11 @@ final class CacheStore {
                 FileManager.default.fileExists(atPath: Self.audioDir.appendingPathComponent($0.fileName).path)
             }
         }
+        rebuildIndex()   // didSet 在 init 内不触发,手动建一次
     }
 
     func entry(bvid: String) -> CachedEntry? {
-        entries.first { $0.bvid == bvid }
+        index[bvid]
     }
 
     func localURL(bvid: String) -> URL? {
@@ -83,8 +98,15 @@ final class CacheStore {
     }
 
     private func save() {
+        let start = CFAbsoluteTimeGetCurrent()
+        let count = entries.count
         if let data = try? JSONEncoder().encode(entries) {
-            try? data.write(to: indexURL, options: .atomic)
+            let url = indexURL
+            Task.detached(priority: .background) {
+                try? data.write(to: url, options: .atomic)
+                let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+                log.debug("save() \(elapsed, format: .fixed(precision: 1))ms entries=\(count)")
+            }
         }
     }
 }

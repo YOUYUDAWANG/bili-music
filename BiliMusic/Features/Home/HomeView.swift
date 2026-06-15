@@ -24,6 +24,7 @@ struct HomeView: View {
                                 TrackRow(track: track, isPlaying: engine.current?.bvid == track.bvid)
                             }
                             .buttonStyle(.plain)
+                            .onAppear { engine.schedulePreload(track) }
                         }
                     } header: {
                         Text("为你推荐")

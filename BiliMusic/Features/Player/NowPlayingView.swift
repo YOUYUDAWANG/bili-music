@@ -30,8 +30,6 @@ struct NowPlayingView: View {
     @State private var selectedMode: PlayerEngine.PlaybackMode = .music
     @State private var switchingMode = false
     @State private var favoriteLongPressTriggered = false
-    @State private var scrubValue: Double = 0
-    @State private var isScrubbing = false
     @State private var dragOffset: CGFloat = 0
     @Environment(\.dismiss) private var dismiss
     private var favorites: FavoriteManager { .shared }
@@ -274,34 +272,9 @@ struct NowPlayingView: View {
     }
 
     private var progressView: some View {
-        VStack(spacing: 4) {
-            Slider(
-                value: Binding(
-                    get: { isScrubbing ? scrubValue : min(engine.currentTime, engine.duration) },
-                    set: { scrubValue = $0 }
-                ),
-                in: 0...max(engine.duration, 1),
-                onEditingChanged: { editing in
-                    if editing {
-                        scrubValue = min(engine.currentTime, engine.duration)
-                        isScrubbing = true
-                        engine.beginScrub()
-                    } else {
-                        engine.endScrub(to: scrubValue)
-                        isScrubbing = false
-                    }
-                }
-            )
-            .tint(AppTheme.label)
-            HStack {
-                Text(format(isScrubbing ? scrubValue : engine.currentTime))
-                Spacer()
-                Text(format(engine.duration))
-            }
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 28)
+        // 独立子视图:只有它订阅 engine.currentTime(每 0.5s 变),
+        // 避免整个播放器 body(封面、操作栏、TabView)跟着每半秒重渲染。
+        PlayerProgressBar()
     }
 
     private var transportControls: some View {
@@ -1001,19 +974,67 @@ private extension Array {
     }
 }
 
+/// 进度条独立成视图,把对 `engine.currentTime` 的订阅限制在这里。
+/// scrub 状态也只在本视图持有,避免拖动时反复刷新外层播放器。
+private struct PlayerProgressBar: View {
+    @Environment(PlayerEngine.self) private var engine
+    @State private var scrubValue: Double = 0
+    @State private var isScrubbing = false
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Slider(
+                value: Binding(
+                    get: { isScrubbing ? scrubValue : min(engine.currentTime, engine.duration) },
+                    set: { scrubValue = $0 }
+                ),
+                in: 0...max(engine.duration, 1),
+                onEditingChanged: { editing in
+                    if editing {
+                        scrubValue = min(engine.currentTime, engine.duration)
+                        isScrubbing = true
+                        engine.beginScrub()
+                    } else {
+                        engine.endScrub(to: scrubValue)
+                        isScrubbing = false
+                    }
+                }
+            )
+            .tint(AppTheme.label)
+            HStack {
+                Text(format(isScrubbing ? scrubValue : engine.currentTime))
+                Spacer()
+                Text(format(engine.duration))
+            }
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 28)
+    }
+
+    private func format(_ seconds: Double) -> String {
+        let s = Int(seconds.isFinite ? max(seconds, 0) : 0)
+        return String(format: "%d:%02d", s / 60, s % 60)
+    }
+}
+
 private struct LyricsSheetView: View {
     @Environment(PlayerEngine.self) private var engine
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
+        // 每次 body 求值只算一次高亮行,循环里直接比较 index。
+        // 之前每行都读 computed currentLyricIndex(内部线性扫描)→ O(N²),
+        // 配合 currentTime 每 0.5s 变更,长歌词会发烫掉帧。
+        let active = currentLyricIndex
+        return NavigationStack {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 18) {
                         ForEach(Array(engine.lyrics.enumerated()), id: \.element.id) { index, line in
                             Text(line.text)
-                                .font(index == currentLyricIndex ? .title3.weight(.semibold) : .title3.weight(.regular))
-                                .foregroundStyle(index == currentLyricIndex ? AppTheme.label : .secondary)
+                                .font(index == active ? .title3.weight(.semibold) : .title3.weight(.regular))
+                                .foregroundStyle(index == active ? AppTheme.label : .secondary)
                                 .id(line.id)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }

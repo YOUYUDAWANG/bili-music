@@ -3,6 +3,7 @@ import Foundation
 
 /// WBI 参数签名,算法来自 bilibili-API-collect。
 /// nav 接口取 img/sub key → 重排表混淆出 mixin key → 参数排序 + wts + MD5。
+@MainActor
 enum WBISigner {
     private static let mixinKeyTable = [
         46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5,

@@ -1,4 +1,7 @@
+import OSLog
 import SwiftUI
+
+private let log = Logger(subsystem: "com.fubuki.BiliMusic", category: "search")
 
 struct SearchView: View {
     @Environment(PlayerEngine.self) private var engine
@@ -130,6 +133,7 @@ struct SearchView: View {
                                         .padding(.horizontal, 14)
                                 }
                                 .buttonStyle(.plain)
+                                .onAppear { engine.schedulePreload(track) }
                                 if index != results.count - 1 {
                                     Divider().padding(.leading, 84)
                                 }
@@ -266,32 +270,22 @@ struct SearchView: View {
         do {
             let client = BiliClient()
             let keywords = searchKeywords(for: text)
-            var pageStart = 1
-            var loaded: [Track] = []
-            var stillHasRawResults = false
-            for attempt in 0..<3 {
-                let pageCount = attempt == 0 ? 3 : 2
-                let batch = try await searchBatch(
-                    client: client,
-                    keywords: keywords,
-                    pages: pageStart...(pageStart + pageCount - 1),
-                    query: text)
-                pageStart += pageCount
-                stillHasRawResults = batch.rawCount > 0
-                guard stillHasRawResults else { break }
-                if !batch.tracks.isEmpty {
-                    loaded = batch.tracks
-                    break
-                }
-            }
+            let pageStart = 1
+            let pageCount = 3
+            let batch = try await searchBatch(
+                client: client,
+                keywords: keywords,
+                pages: pageStart...(pageStart + pageCount - 1),
+                query: text)
+            
             guard !Task.isCancelled else { return }
             guard !Task.isCancelled, activeSearchID == searchID else { return }
-            results = loaded
+            results = batch.tracks
             resultsQuery = text
             activeKeywords = keywords
-            nextPage = pageStart
-            hasMoreResults = stillHasRawResults && nextPage <= 30
-            engine.preload(tracks: loaded)
+            nextPage = pageStart + pageCount
+            hasMoreResults = batch.rawCount > 0 && nextPage <= 30
+            engine.preload(tracks: batch.tracks)
         } catch {
             guard !Task.isCancelled, activeSearchID == searchID else { return }
             errorMessage = error.localizedDescription
@@ -362,14 +356,19 @@ struct SearchView: View {
         query: String,
         excluding excluded: Set<String> = []
     ) async throws -> SearchBatch {
-        var pageItems: [BiliClient.SearchItem] = []
-        for keyword in keywords {
-            for page in pages {
-                let items = try await client.search(keyword: keyword, page: page, musicOnly: true)
-                pageItems.append(contentsOf: items)
-                if Task.isCancelled { break }
+        let pageItems = try await withThrowingTaskGroup(of: [BiliClient.SearchItem].self) { group in
+            for keyword in keywords {
+                for page in pages {
+                    group.addTask {
+                        try await client.search(keyword: keyword, page: page, musicOnly: true)
+                    }
+                }
             }
-            if Task.isCancelled { break }
+            var allItems: [BiliClient.SearchItem] = []
+            for try await items in group {
+                allItems.append(contentsOf: items)
+            }
+            return allItems
         }
         let filtered = await Task.detached(priority: .userInitiated) {
             dedupe(pageItems.map(Track.init(search:))

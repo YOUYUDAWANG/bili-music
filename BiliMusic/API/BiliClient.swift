@@ -1,4 +1,7 @@
 import Foundation
+import OSLog
+
+private let log = Logger(subsystem: "com.fubuki.BiliMusic", category: "network")
 
 /// B 站接口客户端。所有请求带 Referer + 浏览器 UA,否则 CDN 403。
 struct BiliClient {
@@ -16,6 +19,15 @@ struct BiliClient {
         "Referer": "https://www.bilibili.com",
     ]
 
+    // 默认 URLSession.shared 的请求超时是 60s——某个接口卡住时用户要干等一分钟,
+    // 预取任务也会一直挂着。元数据接口都很轻,12s 足够,失败快速暴露。
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 12
+        config.waitsForConnectivity = true
+        return URLSession(configuration: config)
+    }()
+
     struct APIError: LocalizedError {
         let code: Int
         let message: String
@@ -29,12 +41,20 @@ struct BiliClient {
     }
 
     private func get<T: Decodable>(_ url: String) async throws -> T {
-        var req = URLRequest(url: URL(string: url)!)
+        let start = CFAbsoluteTimeGetCurrent()
+        guard let encodedUrl = url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let urlObj = URL(string: encodedUrl) else {
+            throw APIError(code: -1, message: "URL 非法")
+        }
+        var req = URLRequest(url: urlObj)
         Self.headers.forEach { req.setValue($1, forHTTPHeaderField: $0) }
         if let cookie = CookieStore.cookie {
             req.setValue(cookie, forHTTPHeaderField: "Cookie")
         }
-        let (data, _) = try await URLSession.shared.data(for: req)
+        let (data, _) = try await Self.session.data(for: req)
+        let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+        let truncated = url.count > 80 ? String(url.prefix(80)) + "…" : url
+        log.debug("GET \(elapsed, format: .fixed(precision: 1))ms \(truncated)")
         let env = try JSONDecoder().decode(Envelope<T>.self, from: data)
         guard env.code == 0, let payload = env.data else {
             throw APIError(code: env.code, message: env.message)
@@ -43,7 +63,12 @@ struct BiliClient {
     }
 
     private func postVoid(_ url: String, form: [String: String]) async throws {
-        var req = URLRequest(url: URL(string: url)!)
+        let start = CFAbsoluteTimeGetCurrent()
+        guard let encodedUrl = url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let urlObj = URL(string: encodedUrl) else {
+            throw APIError(code: -1, message: "URL 非法")
+        }
+        var req = URLRequest(url: urlObj)
         req.httpMethod = "POST"
         Self.headers.forEach { req.setValue($1, forHTTPHeaderField: $0) }
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
@@ -56,7 +81,10 @@ struct BiliClient {
         req.httpBody = components.percentEncodedQuery?
             .replacingOccurrences(of: "%20", with: "+")
             .data(using: .utf8)
-        let (data, _) = try await URLSession.shared.data(for: req)
+        let (data, _) = try await Self.session.data(for: req)
+        let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+        let truncated = url.count > 80 ? String(url.prefix(80)) + "…" : url
+        log.debug("POST \(elapsed, format: .fixed(precision: 1))ms \(truncated)")
         struct VoidEnvelope: Decodable {
             let code: Int
             let message: String
@@ -331,7 +359,7 @@ struct BiliClient {
         if let cookie = CookieStore.cookie {
             req.setValue(cookie, forHTTPHeaderField: "Cookie")
         }
-        let (data, _) = try await URLSession.shared.data(for: req)
+        let (data, _) = try await Self.session.data(for: req)
         return try JSONDecoder().decode(SubtitleFile.self, from: data)
     }
 

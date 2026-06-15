@@ -1,4 +1,7 @@
 import Foundation
+import OSLog
+
+private let log = Logger(subsystem: "com.fubuki.BiliMusic", category: "lyrics")
 
 /// 在线歌词:LRCLIB 同步歌词。B 站标题噪声多、artist 是 UP主而非歌手,
 /// 所以先从标题解析真实歌名/歌手,再用「标题相似 + 时长门槛」严格匹配,宁可没有也不错配。

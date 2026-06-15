@@ -121,6 +121,8 @@ final class PlayerEngine {
     private var autoMVTask: Task<Void, Never>?
     private var preparedStreams: [String: PreparedStream] = [:]
     private var preparingStreams: [String: Task<PreparedStream, Error>] = [:]
+    private var schedulePreloadInflight = 0   // 限制滚动触发的预加载并发,避免一次划过几十行齐发请求被限流
+    private static let maxSchedulePreloadInflight = 3
     private var preparedVideoStreams: [String: PreparedVideoStream] = [:]
     private var prefetchedRadio: (seed: String, track: Track)?
     private var playbackGeneration = UUID()
@@ -196,8 +198,15 @@ final class PlayerEngine {
     /// 单曲预加载:列表行滚入视野时调用。不影响 preloadTask,多次调用安全。
     /// prepare() 内部通过 preparingStreams 去重,play() 点击时可直接 await 同一 Task。
     func schedulePreload(_ track: Track) {
+        // 已缓存/已预加载的直接跳过,不占并发名额。
+        guard CacheStore.shared.entry(bvid: track.bvid) == nil,
+              preparedStream(for: track.bvid) == nil,
+              preparingStreams[track.bvid] == nil,
+              schedulePreloadInflight < Self.maxSchedulePreloadInflight else { return }
+        schedulePreloadInflight += 1
         Task { [weak self] in
             await self?.prepare(track: track)
+            self?.schedulePreloadInflight -= 1
         }
     }
 
@@ -691,9 +700,18 @@ final class PlayerEngine {
                 guard let self,
                       self.playbackGeneration == generation,
                       self.player?.currentItem === item else { return }
-                let expectedDuration = self.duration
+                // 只有真正播到资源结尾才切歌。弱网时 didPlayToEnd 可能在缓冲
+                // 耗尽处提前触发,若按旧逻辑(播过 5s 就切)会在线放歌时随机跳曲。
+                // 以资源自身时长 item.duration 为准,缺失时退回元数据时长。
+                let assetDuration = item.duration.seconds
+                let reference = assetDuration.isFinite && assetDuration > 0 ? assetDuration : self.duration
                 let actualTime = item.currentTime().seconds
-                guard actualTime >= 5 || expectedDuration <= 30 else { return }
+                let reachedEnd = reference <= 0 || actualTime >= reference - 2
+                guard reachedEnd else {
+                    // 提前触发 = 弱网缓冲断流,不切歌,尝试续播让它自行恢复。
+                    self.player?.play()
+                    return
+                }
                 await self.advance(automatic: true)
             }
         }

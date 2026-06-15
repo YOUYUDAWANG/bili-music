@@ -13,8 +13,10 @@ final class NetworkMonitor {
 
     private init() {
         monitor.pathUpdateHandler = { [weak self] path in
+            let isSatisfied = path.status == .satisfied
+            let usesWiFi = path.usesInterfaceType(.wifi)
             Task { @MainActor in
-                self?.isWiFi = path.status == .satisfied && path.usesInterfaceType(.wifi)
+                self?.isWiFi = isSatisfied && usesWiFi
             }
         }
         monitor.start(queue: queue)
