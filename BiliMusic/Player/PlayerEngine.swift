@@ -1,7 +1,10 @@
 import AVFoundation
 import MediaPlayer
 import Observation
+import OSLog
 import UIKit
+
+private let log = Logger(subsystem: "com.fubuki.BiliMusic", category: "player")
 
 struct Track: Identifiable, Equatable, Codable {
     let aid: Int?
@@ -117,6 +120,7 @@ final class PlayerEngine {
     private var preloadTask: Task<Void, Never>?
     private var autoMVTask: Task<Void, Never>?
     private var preparedStreams: [String: PreparedStream] = [:]
+    private var preparingStreams: [String: Task<PreparedStream, Error>] = [:]
     private var preparedVideoStreams: [String: PreparedVideoStream] = [:]
     private var prefetchedRadio: (seed: String, track: Track)?
     private var playbackGeneration = UUID()
@@ -147,7 +151,6 @@ final class PlayerEngine {
 
     /// 用一组曲目替换队列并从指定位置开播(搜索页点击)
     func play(tracks: [Track], startAt index: Int, queueMode: QueueMode? = nil) async {
-        preloadTask?.cancel()
         prefetchTask?.cancel()
         autoMVTask?.cancel()
         queue = tracks
@@ -162,7 +165,6 @@ final class PlayerEngine {
     }
 
     func playRadio(seed track: Track) async {
-        preloadTask?.cancel()
         prefetchTask?.cancel()
         autoMVTask?.cancel()
         queue = [track]
@@ -177,12 +179,25 @@ final class PlayerEngine {
     /// 提前取 cid + playurl,减少点击歌曲后等待时间。URL 有时效,只做短期缓存。
     func preload(tracks: [Track]) {
         preloadTask?.cancel()
-        let candidates = tracks.prefix(3)
+        let candidates = tracks.prefix(5)
         preloadTask = Task { [weak self] in
-            for track in candidates {
-                guard !Task.isCancelled else { return }
-                await self?.prepare(track: track)
+            guard let self else { return }
+            await withTaskGroup(of: Void.self) { group in
+                for track in candidates {
+                    group.addTask { [weak self] in
+                        guard !Task.isCancelled else { return }
+                        await self?.prepare(track: track)
+                    }
+                }
             }
+        }
+    }
+
+    /// 单曲预加载:列表行滚入视野时调用。不影响 preloadTask,多次调用安全。
+    /// prepare() 内部通过 preparingStreams 去重,play() 点击时可直接 await 同一 Task。
+    func schedulePreload(_ track: Track) {
+        Task { [weak self] in
+            await self?.prepare(track: track)
         }
     }
 
@@ -420,17 +435,14 @@ final class PlayerEngine {
                 currentAudioQuality = prepared.quality
                 currentAudioBandwidth = prepared.bandwidth
             } else {
-                if track.cid == nil {
-                    track = try await fillPlaybackPage(for: track)
-                    queue[queueIndex] = track
-                }
-                let stream = try await client.audioStream(
-                    bvid: track.bvid, cid: track.cid!,
-                    preferredQuality: Self.playbackQuality)
-                url = stream.url
+                let prepared = try await preparedStreamValue(for: track)
+                track.cid = prepared.cid
+                track.duration = prepared.duration
+                queue[queueIndex] = track
+                url = prepared.url
                 isLocal = false
-                currentAudioQuality = stream.quality
-                currentAudioBandwidth = stream.bandwidth
+                currentAudioQuality = prepared.quality
+                currentAudioBandwidth = prepared.bandwidth
             }
             guard playbackGeneration == generation, current?.bvid == track.bvid else { return }
             startPlayback(url: url, isLocal: isLocal, resumeAt: resumeAt)
@@ -476,23 +488,77 @@ final class PlayerEngine {
     }
 
     private func resolve(bvid: String) async throws -> Track {
+        let start = CFAbsoluteTimeGetCurrent()
         let info = try await client.videoInfo(bvid: bvid)
         guard let page = info.pages.first else {
             throw BiliClient.APIError(code: -1, message: "无分P")
         }
+        let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+        log.debug("resolve(bvid:\(bvid)) \(elapsed, format: .fixed(precision: 1))ms")
         return Track(aid: info.aid, ownerMid: info.owner.mid, bvid: info.bvid, cid: page.cid, title: info.title,
                      artist: info.owner.name, coverURL: URL(string: info.pic),
                      duration: page.duration)
     }
 
     private func fillPlaybackPage(for track: Track) async throws -> Track {
-        let pages = try await client.pageList(bvid: track.bvid)
-        guard let page = pages.first else {
+        let info = try await client.videoInfo(bvid: track.bvid)
+        guard let page = info.pages.first else {
             throw BiliClient.APIError(code: -1, message: "无分P")
         }
-        return Track(aid: track.aid, ownerMid: track.ownerMid, typeID: track.typeID, bvid: track.bvid,
+        return Track(aid: info.aid, ownerMid: info.owner.mid, typeID: track.typeID, bvid: track.bvid,
                      cid: page.cid, title: track.title, artist: track.artist,
                      coverURL: track.coverURL, duration: page.duration)
+    }
+
+    /// Resolve cid and audio stream URL in one combined call.
+    private func resolveStream(bvid: String, cid: Int?) async throws -> (url: URL, cid: Int, duration: Int, quality: Int, bandwidth: Int) {
+        let info = try await client.videoInfo(bvid: bvid)
+        guard let page = info.pages.first else {
+            throw BiliClient.APIError(code: -1, message: "无分P")
+        }
+        let resolvedCid = cid ?? page.cid
+        let stream = try await client.audioStream(bvid: bvid, cid: resolvedCid, preferredQuality: Self.playbackQuality)
+        return (url: stream.url, cid: resolvedCid, duration: page.duration, quality: stream.quality, bandwidth: stream.bandwidth)
+    }
+
+    private func preparedStreamValue(for track: Track) async throws -> PreparedStream {
+        if let prepared = preparedStream(for: track.bvid) {
+            return prepared
+        }
+        if let task = preparingStreams[track.bvid] {
+            return try await task.value
+        }
+        let task = Task<PreparedStream, Error> { [client] in
+            let start = CFAbsoluteTimeGetCurrent()
+            let info = try await client.videoInfo(bvid: track.bvid)
+            guard let page = info.pages.first else {
+                throw BiliClient.APIError(code: -1, message: "无分P")
+            }
+            let resolvedCid = track.cid ?? page.cid
+            let stream = try await client.audioStream(
+                bvid: track.bvid,
+                cid: resolvedCid,
+                preferredQuality: Self.playbackQuality)
+            let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+            log.debug("prepare stream(bvid:\(track.bvid)) \(elapsed, format: .fixed(precision: 1))ms")
+            return PreparedStream(
+                url: stream.url,
+                cid: resolvedCid,
+                duration: page.duration,
+                quality: stream.quality,
+                bandwidth: stream.bandwidth,
+                fetchedAt: Date())
+        }
+        preparingStreams[track.bvid] = task
+        do {
+            let prepared = try await task.value
+            preparedStreams[track.bvid] = prepared
+            preparingStreams[track.bvid] = nil
+            return prepared
+        } catch {
+            preparingStreams[track.bvid] = nil
+            throw error
+        }
     }
 
     private func preferredModeForNewTrack() -> PlaybackMode {
@@ -552,6 +618,7 @@ final class PlayerEngine {
             return prepared
         }
         preparedStreams[bvid] = nil
+        preparingStreams[bvid] = nil
         return nil
     }
 
@@ -568,16 +635,7 @@ final class PlayerEngine {
         guard CacheStore.shared.entry(bvid: track.bvid) == nil,
               preparedStream(for: track.bvid) == nil else { return }
         do {
-            var track = track
-            if track.cid == nil {
-                track = try await fillPlaybackPage(for: track)
-            }
-            guard let cid = track.cid else { return }
-            let stream = try await client.audioStream(
-                bvid: track.bvid, cid: cid, preferredQuality: Self.playbackQuality)
-            preparedStreams[track.bvid] = PreparedStream(
-                url: stream.url, cid: cid, duration: track.duration,
-                quality: stream.quality, bandwidth: stream.bandwidth, fetchedAt: Date())
+            _ = try await preparedStreamValue(for: track)
         } catch {
             // 预加载失败不影响手动播放,真正播放时会再取一次。
         }
@@ -597,10 +655,10 @@ final class PlayerEngine {
             ? AVURLAsset(url: url)
             : AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": BiliClient.headers])
         let item = AVPlayerItem(asset: asset)
-        item.preferredForwardBufferDuration = 0
+        item.preferredForwardBufferDuration = 2
         item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
         let player = AVPlayer(playerItem: item)
-        player.automaticallyWaitsToMinimizeStalling = true
+        player.automaticallyWaitsToMinimizeStalling = false
         self.player = player
         timeObserver = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main
