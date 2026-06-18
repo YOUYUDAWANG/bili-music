@@ -44,25 +44,27 @@ struct LibraryView: View {
     }
 
     var body: some View {
+        let entries = visibleEntries
+        let isFiltered = !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         NavigationStack {
             List {
                 if !cache.entries.isEmpty {
                     Section {
-                        CacheSummaryView(count: visibleEntries.count,
+                        CacheSummaryView(count: entries.count,
                                          totalCount: cache.entries.count,
-                                         bytes: visibleEntries.reduce(0) { $0 + $1.fileSize },
-                                         isFiltered: !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                         bytes: entries.reduce(0) { $0 + $1.fileSize },
+                                         isFiltered: isFiltered)
                     }
                 }
 
-                ForEach(visibleEntries) { entry in
+                ForEach(entries) { entry in
                     Button {
-                        let tracks = visibleEntries.map(\.track)
-                        let index = visibleEntries.firstIndex(of: entry) ?? 0
+                        let tracks = entries.map(\.track)
+                        let index = entries.firstIndex(of: entry) ?? 0
                         Task { await engine.play(tracks: tracks, startAt: index) }
                     } label: {
                         HStack(alignment: .center, spacing: 10) {
-                            TrackRow(track: entry.track, isPlaying: engine.current?.bvid == entry.bvid)
+                            TrackRow(track: entry.track, isPlaying: engine.current.map { entry.track.key.matches($0) } ?? false)
                             VStack(alignment: .trailing, spacing: 6) {
                                 if let q = entry.quality {
                                     Text(BiliClient.qualityName(q))
@@ -85,8 +87,8 @@ struct LibraryView: View {
                             Label("电台播放", systemImage: PlayerEngine.QueueMode.radio.icon)
                         }
                         Button {
-                            let tracks = visibleEntries.map(\.track)
-                            let index = visibleEntries.firstIndex(of: entry) ?? 0
+                            let tracks = entries.map(\.track)
+                            let index = entries.firstIndex(of: entry) ?? 0
                             Task { await engine.play(tracks: tracks, startAt: index, queueMode: .shuffle) }
                         } label: {
                             Label("随机播放当前列表", systemImage: PlayerEngine.QueueMode.shuffle.icon)
@@ -94,7 +96,7 @@ struct LibraryView: View {
                     }
                 }
                 .onDelete { offsets in
-                    offsets.map { visibleEntries[$0] }.forEach { cache.remove($0) }
+                    offsets.map { entries[$0] }.forEach { cache.remove($0) }
                 }
             }
             .listStyle(.insetGrouped)
@@ -130,7 +132,7 @@ struct LibraryView: View {
                 if cache.entries.isEmpty {
                     ContentUnavailableView("还没有缓存", systemImage: "arrow.down.circle",
                                            description: Text("在播放页点下载,或在设置里打开自动缓存"))
-                } else if visibleEntries.isEmpty {
+                } else if entries.isEmpty {
                     ContentUnavailableView.search(text: searchText)
                 }
             }

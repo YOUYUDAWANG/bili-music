@@ -7,7 +7,7 @@ struct HomeView: View {
     @State private var tracks: [Track] = []
     @State private var loading = false
     @State private var errorMessage: String?
-    @State private var shownBVIDs: Set<String> = []
+    @State private var shownKeys: Set<TrackKey> = []
 
     var body: some View {
         NavigationStack {
@@ -21,7 +21,7 @@ struct HomeView: View {
                             Button {
                                 Task { await engine.play(tracks: tracks, startAt: index) }
                             } label: {
-                                TrackRow(track: track, isPlaying: engine.current?.bvid == track.bvid)
+                                TrackRow(track: track, isPlaying: engine.current.map { track.key.matches($0) } ?? false)
                             }
                             .buttonStyle(.plain)
                             .onAppear { engine.schedulePreload(track) }
@@ -64,15 +64,15 @@ struct HomeView: View {
         loading = true
         defer { loading = false }
         errorMessage = nil
-        if shownBVIDs.count >= 80 { shownBVIDs = [] }
+        if shownKeys.count >= 80 { shownKeys = [] }
         let result = await RecommendationEngine().recommendations(
             mode: .home,
-            context: .init(current: engine.current, queue: engine.queue, excludedBVIDs: shownBVIDs),
+            context: .init(current: engine.current, queue: engine.queue, excludedKeys: shownKeys),
             limit: 30)
         if result.isEmpty {
             errorMessage = CookieStore.isLoggedIn ? "暂时没有找到合适的音乐推荐" : nil
         } else {
-            shownBVIDs.formUnion(result.map(\.bvid))
+            shownKeys.formUnion(result.map(\.key))
             tracks = result
             engine.preload(tracks: result)
         }

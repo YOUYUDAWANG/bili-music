@@ -110,7 +110,7 @@ struct FavFolderDetailView: View {
                 Button {
                     Task { await engine.play(tracks: tracks, startAt: index) }
                 } label: {
-                    TrackRow(track: track, isPlaying: engine.current?.bvid == track.bvid)
+                    TrackRow(track: track, isPlaying: engine.current.map { track.key.matches($0) } ?? false)
                 }
                 .buttonStyle(.plain)
                 .contextMenu {

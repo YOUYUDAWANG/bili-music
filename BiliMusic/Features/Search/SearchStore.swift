@@ -1,0 +1,251 @@
+import Foundation
+import Observation
+
+@Observable
+@MainActor
+final class SearchStore {
+    private(set) var results: [Track] = []
+    private(set) var searchHistory: [String] = []
+    private(set) var searching = false
+    private(set) var errorMessage: String?
+    private(set) var historyLoaded = false
+    private(set) var resultsQuery = ""
+    private(set) var hasMoreResults = false
+    private(set) var loadingMore = false
+
+    private var searchTask: Task<Void, Never>?
+    private var activeSearchID = UUID()
+    private var activeKeywords: [String] = []
+    private var nextPage = 1
+    private let historyKey = "searchHistory"
+
+    func loadHistory() async {
+        guard !historyLoaded else { return }
+        let raw = UserDefaults.standard.string(forKey: historyKey) ?? "[]"
+        searchHistory = await Self.decodeSearchHistory(raw)
+        historyLoaded = true
+    }
+
+    func reloadHistoryIfNeeded() {
+        guard historyLoaded else { return }
+        let raw = UserDefaults.standard.string(forKey: historyKey) ?? "[]"
+        Task {
+            searchHistory = await Self.decodeSearchHistory(raw)
+        }
+    }
+
+    func clearHistory() {
+        searchHistory = []
+        UserDefaults.standard.set("[]", forKey: historyKey)
+    }
+
+    func queryDidChange(_ query: String) {
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty {
+            resetTransientState(cancelTask: true)
+        } else if text != resultsQuery {
+            resetTransientState(cancelTask: true)
+        }
+    }
+
+    func submitSearch(_ query: String, preload: @escaping @MainActor ([Track]) -> Void) {
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        searchTask?.cancel()
+        let searchID = UUID()
+        activeSearchID = searchID
+        resetTransientState(cancelTask: false)
+        searching = true
+        rememberSearch(text)
+        searchTask = Task { [weak self] in
+            await self?.search(text: text, searchID: searchID, preload: preload)
+        }
+    }
+
+    func loadMoreIfNeeded(preload: @escaping @MainActor ([Track]) -> Void) async {
+        guard shouldShowResults(query: resultsQuery),
+              hasMoreResults,
+              !searching,
+              !loadingMore,
+              !activeKeywords.isEmpty else { return }
+
+        let text = resultsQuery
+        let searchID = activeSearchID
+        loadingMore = true
+        defer { loadingMore = false }
+
+        do {
+            let client = BiliClient()
+            var pageStart = nextPage
+            var excluded = Set(results.map(\.bvid))
+            var loaded: [Track] = []
+            var stillHasRawResults = false
+
+            // 严格音乐过滤后,某一批可能全被丢弃;连续跳过几批,避免底部看起来卡住。
+            for _ in 0..<3 {
+                let batch = try await Self.searchBatch(
+                    client: client,
+                    keywords: activeKeywords,
+                    pages: pageStart...(pageStart + 1),
+                    query: text,
+                    excluding: excluded)
+                pageStart += 2
+                stillHasRawResults = batch.rawCount > 0
+                guard stillHasRawResults else { break }
+                if !batch.tracks.isEmpty {
+                    loaded = batch.tracks
+                    loaded.forEach { excluded.insert($0.bvid) }
+                    break
+                }
+            }
+
+            guard !Task.isCancelled,
+                  activeSearchID == searchID,
+                  resultsQuery == text else { return }
+            nextPage = pageStart
+            hasMoreResults = stillHasRawResults && nextPage <= 30
+            if !loaded.isEmpty {
+                results.append(contentsOf: loaded)
+                preload(loaded)
+            }
+        } catch {
+            guard activeSearchID == searchID, resultsQuery == text else { return }
+            hasMoreResults = false
+        }
+    }
+
+    func shouldShowSearchHistory() -> Bool {
+        historyLoaded && results.isEmpty && !searchHistory.isEmpty && !searching && resultsQuery.isEmpty
+    }
+
+    func shouldShowEmptyState(searchFocused: Bool) -> Bool {
+        historyLoaded && !searchFocused && results.isEmpty && searchHistory.isEmpty && !searching && errorMessage == nil && resultsQuery.isEmpty
+    }
+
+    func shouldShowNoResults(query: String) -> Bool {
+        !searching
+            && results.isEmpty
+            && !resultsQuery.isEmpty
+            && query.trimmingCharacters(in: .whitespacesAndNewlines) == resultsQuery
+            && errorMessage == nil
+    }
+
+    func shouldShowResults(query: String) -> Bool {
+        !searching
+            && !results.isEmpty
+            && query.trimmingCharacters(in: .whitespacesAndNewlines) == resultsQuery
+    }
+
+    private func resetTransientState(cancelTask: Bool) {
+        if cancelTask {
+            searchTask?.cancel()
+        }
+        activeSearchID = UUID()
+        searching = false
+        errorMessage = nil
+        results = []
+        resultsQuery = ""
+        activeKeywords = []
+        nextPage = 1
+        hasMoreResults = false
+        loadingMore = false
+    }
+
+    private static func decodeSearchHistory(_ raw: String) async -> [String] {
+        await Task.detached(priority: .utility) {
+            (try? JSONDecoder().decode([String].self, from: Data(raw.utf8))) ?? []
+        }.value
+    }
+
+    private func rememberSearch(_ text: String) {
+        var items = searchHistory.filter { $0.caseInsensitiveCompare(text) != .orderedSame }
+        items.insert(text, at: 0)
+        items = Array(items.prefix(20))
+        searchHistory = items
+        if let data = try? JSONEncoder().encode(items),
+           let string = String(data: data, encoding: .utf8) {
+            UserDefaults.standard.set(string, forKey: historyKey)
+        }
+    }
+
+    private func search(text: String, searchID: UUID, preload: @escaping @MainActor ([Track]) -> Void) async {
+        defer {
+            if activeSearchID == searchID {
+                searching = false
+            }
+        }
+        do {
+            let client = BiliClient()
+            let keywords = Self.searchKeywords(for: text)
+            let pageStart = 1
+            let pageCount = 3
+            let batch = try await Self.searchBatch(
+                client: client,
+                keywords: keywords,
+                pages: pageStart...(pageStart + pageCount - 1),
+                query: text)
+
+            guard !Task.isCancelled, activeSearchID == searchID else { return }
+            results = batch.tracks
+            resultsQuery = text
+            activeKeywords = keywords
+            nextPage = pageStart + pageCount
+            hasMoreResults = batch.rawCount > 0 && nextPage <= 30
+            preload(batch.tracks)
+        } catch {
+            guard !Task.isCancelled, activeSearchID == searchID else { return }
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private struct SearchBatch {
+        let tracks: [Track]
+        let rawCount: Int
+    }
+
+    private static func searchBatch(
+        client: BiliClient,
+        keywords: [String],
+        pages: ClosedRange<Int>,
+        query: String,
+        excluding excluded: Set<String> = []
+    ) async throws -> SearchBatch {
+        let pageItems = try await withThrowingTaskGroup(of: [BiliClient.SearchItem].self) { group in
+            for keyword in keywords {
+                for page in pages {
+                    group.addTask {
+                        try await client.search(keyword: keyword, page: page, musicOnly: true)
+                    }
+                }
+            }
+            var allItems: [BiliClient.SearchItem] = []
+            for try await items in group {
+                allItems.append(contentsOf: items)
+            }
+            return allItems
+        }
+        let filtered = await Task.detached(priority: .userInitiated) {
+            dedupeSearchTracks(pageItems.map(Track.init(search:))
+                .filter { !excluded.contains($0.bvid) }
+                .filter { MusicFilter.isSearchResultMusic($0, query: query) })
+        }.value
+        return SearchBatch(tracks: filtered, rawCount: pageItems.count)
+    }
+
+    private static func searchKeywords(for text: String) -> [String] {
+        let compact = text.replacingOccurrences(of: #"\s+"#, with: "", options: .regularExpression)
+        guard compact != text, compact.range(of: #"^[A-Za-z0-9]+$"#, options: .regularExpression) != nil else {
+            return [text]
+        }
+        return [compact, text]
+    }
+}
+
+private func dedupeSearchTracks(_ tracks: [Track]) -> [Track] {
+    var seen = Set<String>()
+    return tracks.filter { track in
+        guard !seen.contains(track.bvid) else { return false }
+        seen.insert(track.bvid)
+        return true
+    }
+}

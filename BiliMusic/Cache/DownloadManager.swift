@@ -10,8 +10,8 @@ import Observation
 final class DownloadManager {
     static let shared = DownloadManager()
 
-    /// bvid → 0...1 下载进度;不在字典里 = 没在下载
-    private(set) var progress: [String: Double] = [:]
+    /// TrackKey → 0...1 下载进度;不在字典里 = 没在下载
+    private(set) var progress: [TrackKey: Double] = [:]
     private(set) var lastError: String?
 
     private let client = BiliClient()
@@ -20,15 +20,25 @@ final class DownloadManager {
 
     /// 该 bvid 是否正在下载。
     func isDownloading(_ bvid: String) -> Bool {
-        progress[bvid] != nil
+        progress.keys.contains { $0.bvid == bvid }
+    }
+
+    func isDownloading(_ track: Track) -> Bool {
+        progress[track.key] != nil || (track.cid == nil && progress.keys.contains { $0.bvid == track.bvid })
+    }
+
+    func progress(for track: Track) -> Double? {
+        progress[track.key] ?? progress.first { $0.key.matches(track) }?.value
     }
 
     /// 下载整曲到本地缓存：补全 cid → 取流 → 边下边报进度 → 落盘并写索引。已在下载或已缓存则跳过。
     func download(track: Track) async {
-        guard progress[track.bvid] == nil,
-              CacheStore.shared.entry(bvid: track.bvid) == nil else { return }
-        progress[track.bvid] = 0
-        defer { progress[track.bvid] = nil }
+        guard !isDownloading(track),
+              CacheStore.shared.entry(for: track) == nil else { return }
+        let initialKey = track.key
+        progress[initialKey] = 0
+        var activeKey = initialKey
+        defer { progress[activeKey] = nil }
         do {
             var track = track
             if track.cid == nil {
@@ -40,19 +50,23 @@ final class DownloadManager {
                 track.duration = page.duration
             }
             let cid = track.cid!
+            activeKey = track.key
+            if activeKey != initialKey {
+                progress[activeKey] = progress.removeValue(forKey: initialKey) ?? 0
+            }
             let stream = try await client.audioStream(
                 bvid: track.bvid, cid: cid,
                 preferredQuality: UserDefaults.standard.integer(forKey: "downloadQuality"))
 
             var req = URLRequest(url: stream.url)
             BiliClient.headers.forEach { req.setValue($1, forHTTPHeaderField: $0) }
-            let bvid = track.bvid
+            let key = track.key
             let watcher = ProgressWatcher { [weak self] fraction in
-                Task { @MainActor in self?.progress[bvid] = fraction }
+                Task { @MainActor in self?.progress[key] = fraction }
             }
             let (tempURL, _) = try await URLSession.shared.download(for: req, delegate: watcher)
 
-            let fileName = "\(track.bvid)_\(cid).m4a"
+            let fileName = "\(track.key.fileStem).m4a"
             let finalURL = CacheStore.audioDir.appendingPathComponent(fileName)
             try? FileManager.default.removeItem(at: finalURL)
             try FileManager.default.moveItem(at: tempURL, to: finalURL)

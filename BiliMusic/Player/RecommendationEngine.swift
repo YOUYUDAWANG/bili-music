@@ -3,26 +3,20 @@ import OSLog
 
 private let log = Logger(subsystem: "com.fubuki.BiliMusic", category: "recommend")
 
-/// 统一推荐引擎（无状态）。融合相关视频、收藏夹种子、历史、歌单相邻、歌手搜索等多来源，
-/// 确定性打分 + 随机扰动后排序。供首页、电台自动选歌、播放器相关面板共用。
-@MainActor
 struct RecommendationEngine {
-    /// 推荐场景：首页发现 / 电台连播 / 播放器相关面板。
     enum Mode {
         case home
         case radio
         case relatedPanel
     }
 
-    /// 一次推荐的上下文：当前曲目、队列、歌单曲目、跨调用排除集。
     struct Context {
         var current: Track?
         var queue: [Track] = []
         var playlistTracks: [Track] = []
-        var excludedBVIDs: Set<String> = []
+        var excludedKeys: Set<TrackKey> = []
     }
 
-    /// 候选来源，决定基础分。
     private enum Source {
         case relatedCurrent
         case relatedHistory
@@ -49,29 +43,41 @@ struct RecommendationEngine {
         let seed: Track?
     }
 
+    private struct FavoriteFolderSnapshot {
+        let id: Int
+        let mediaCount: Int
+    }
+
+    private struct Snapshot {
+        let historyTracks: [Track]
+        let recentKeys: Set<TrackKey>
+        let cachedTracks: [Track]
+        let cachedKeys: Set<TrackKey>
+        let favoriteBVIDs: Set<String>
+        let favoriteFolder: FavoriteFolderSnapshot?
+    }
+
     private let client = BiliClient()
 
-    /// 按场景汇集候选并排序。首页按质量分层短路，够用就停止补源。
     func recommendations(mode: Mode, context: Context, limit: Int = 24) async -> [Track] {
+        let snapshot = await Self.makeSnapshot(mode: mode)
         var candidates: [Candidate] = []
 
         switch mode {
         case .home:
             // 首页刷新必须快:旧逻辑会串行请求收藏/历史/缓存/当前歌曲十几个 related,
             // 真机上点击"换一批"会明显变慢。这里按质量分层短路,够用就停止补源。
-            let favorites = await favoriteSeeds(maxCount: 5)
+            let favorites = await favoriteSeeds(maxCount: 5, snapshot: snapshot)
             candidates += await relatedCandidates(from: favorites, source: .favoriteSeed, perSeedLimit: 10)
 
             if candidates.count < 12, let current = context.current {
                 candidates += await relatedCandidates(from: [current], source: .relatedCurrent, perSeedLimit: 12)
             }
             if candidates.count < 12 {
-                let history = PlaybackHistoryStore.shared.entries.prefix(2).map(\.track)
-                candidates += await relatedCandidates(from: Array(history), source: .relatedHistory, perSeedLimit: 8)
+                candidates += await relatedCandidates(from: Array(snapshot.historyTracks.prefix(2)), source: .relatedHistory, perSeedLimit: 8)
             }
             if candidates.count < 12 {
-                let cache = CacheStore.shared.entries.prefix(2).map(\.track)
-                candidates += await relatedCandidates(from: Array(cache), source: .relatedHistory, perSeedLimit: 8)
+                candidates += await relatedCandidates(from: Array(snapshot.cachedTracks.prefix(2)), source: .relatedHistory, perSeedLimit: 8)
             }
             if candidates.isEmpty {
                 candidates += await fallbackSearchCandidates(keywordLimit: 1)
@@ -90,23 +96,23 @@ struct RecommendationEngine {
                 candidates += await artistSearchCandidates(for: current)
             }
             candidates += playlistNeighborCandidates(current: context.current, playlistTracks: context.playlistTracks)
-            candidates += await relatedCandidates(from: PlaybackHistoryStore.shared.entries.prefix(2).map(\.track), source: .relatedHistory)
+            candidates += await relatedCandidates(from: Array(snapshot.historyTracks.prefix(2)), source: .relatedHistory)
         }
 
-        return ranked(candidates, mode: mode, context: context, limit: limit)
+        return await Task.detached(priority: .userInitiated) {
+            Self.ranked(candidates, mode: mode, context: context, snapshot: snapshot, limit: limit)
+        }.value
     }
 
-    /// 电台模式取下一首：用 .radio 场景跑一遍取第一名。
-    func nextRadioTrack(after current: Track?, excludedBVIDs: Set<String>) async -> Track? {
+    func nextRadioTrack(after current: Track?, excludedKeys: Set<TrackKey>) async -> Track? {
         guard let current else { return nil }
         let tracks = await recommendations(
             mode: .radio,
-            context: Context(current: current, excludedBVIDs: excludedBVIDs),
+            context: Context(current: current, excludedKeys: excludedKeys),
             limit: 8)
         return tracks.first
     }
 
-    /// 并发拉取多个种子的相关视频，过滤出音乐后作候选。
     private func relatedCandidates(from seeds: [Track], source: Source, perSeedLimit: Int = 18) async -> [Candidate] {
         await withTaskGroup(of: [Candidate].self) { group in
             for seed in seeds {
@@ -127,7 +133,6 @@ struct RecommendationEngine {
         }
     }
 
-    /// 用歌手/歌名搜索补充候选。
     private func artistSearchCandidates(for track: Track) async -> [Candidate] {
         let terms = searchTerms(for: track)
         guard !terms.isEmpty else { return [] }
@@ -150,7 +155,6 @@ struct RecommendationEngine {
         }
     }
 
-    /// 兜底：用泛音乐关键词搜索（无任何种子时）。
     private func fallbackSearchCandidates(keywordLimit: Int = 2) async -> [Candidate] {
         let keywords = [
             "华语音乐 MV",
@@ -177,7 +181,6 @@ struct RecommendationEngine {
         }
     }
 
-    /// 取当前曲目在歌单里的相邻曲目作候选。
     private func playlistNeighborCandidates(current: Track?, playlistTracks: [Track]) -> [Candidate] {
         guard let current, let index = playlistTracks.firstIndex(where: { $0.bvid == current.bvid }) else { return [] }
         let bounds = max(0, index - 3)..<min(playlistTracks.count, index + 4)
@@ -186,19 +189,9 @@ struct RecommendationEngine {
             .map { Candidate(track: $0, source: .playlistNeighbor, seed: current) }
     }
 
-    /// 从收藏夹随机页抽取种子曲目（需登录）。
-    private func favoriteSeeds(maxCount: Int = 4) async -> [Track] {
-        guard CookieStore.isLoggedIn else { return [] }
-        let manager = FavoriteManager.shared
-        if manager.folders.isEmpty {
-            await manager.loadFolders()
-        }
-        let chosenId = UserDefaults.standard.integer(forKey: "recommendFolderId")
-        let folder = manager.folders.first(where: { $0.id == chosenId && $0.media_count > 0 })
-            ?? manager.folders.first(where: { $0.title.contains("默认") && $0.media_count > 0 })
-            ?? manager.folders.first(where: { $0.media_count > 0 })
-        guard let folder else { return [] }
-        let pageCount = max(1, Int(ceil(Double(folder.media_count) / 40.0)))
+    private func favoriteSeeds(maxCount: Int = 4, snapshot: Snapshot) async -> [Track] {
+        guard let folder = snapshot.favoriteFolder else { return [] }
+        let pageCount = max(1, Int(ceil(Double(folder.mediaCount) / 40.0)))
         var pageNums: Set<Int> = [Int.random(in: 1...pageCount)]
         if pageCount > 1 {
             while pageNums.count < 2 { pageNums.insert(Int.random(in: 1...pageCount)) }
@@ -220,25 +213,56 @@ struct RecommendationEngine {
         return Array(allItems.shuffled().prefix(maxCount))
     }
 
-    /// 打分、去重、排序，并对非电台场景的尾部做随机化。
-    private func ranked(_ candidates: [Candidate], mode: Mode, context: Context, limit: Int) -> [Track] {
-        let recent = Set(PlaybackHistoryStore.shared.entries.prefix(mode == .radio ? 20 : 8).map(\.bvid))
-        let queueSet = Set(context.queue.map(\.bvid))
+    @MainActor
+    private static func makeSnapshot(mode: Mode) async -> Snapshot {
+        let historyEntries = PlaybackHistoryStore.shared.entries
+        let cacheEntries = CacheStore.shared.entries
+        let favoriteBVIDs = FavoriteManager.shared.favoriteBVIDs
+        let favoriteFolder = await favoriteFolderSnapshot(mode: mode)
+        return Snapshot(
+            historyTracks: historyEntries.map(\.track),
+            recentKeys: Set(historyEntries.prefix(mode == .radio ? 20 : 8).map(\.key)),
+            cachedTracks: cacheEntries.map(\.track),
+            cachedKeys: Set(cacheEntries.map(\.key)),
+            favoriteBVIDs: favoriteBVIDs,
+            favoriteFolder: favoriteFolder)
+    }
+
+    @MainActor
+    private static func favoriteFolderSnapshot(mode: Mode) async -> FavoriteFolderSnapshot? {
+        guard mode == .home, CookieStore.isLoggedIn else { return nil }
+        let manager = FavoriteManager.shared
+        if manager.folders.isEmpty {
+            await manager.loadFolders()
+        }
+        let chosenId = UserDefaults.standard.integer(forKey: "recommendFolderId")
+        let folder = manager.folders.first(where: { $0.id == chosenId && $0.media_count > 0 })
+            ?? manager.folders.first(where: { $0.title.contains("默认") && $0.media_count > 0 })
+            ?? manager.folders.first(where: { $0.media_count > 0 })
+        guard let folder else { return nil }
+        return FavoriteFolderSnapshot(id: folder.id, mediaCount: folder.media_count)
+    }
+
+    private static func ranked(_ candidates: [Candidate], mode: Mode, context: Context, snapshot: Snapshot, limit: Int) -> [Track] {
         let current = context.current
 
         let scored = candidates
-            .filter { $0.track.bvid != current?.bvid }
-            .filter { !context.excludedBVIDs.contains($0.track.bvid) }
+            .filter { candidate in
+                guard let current else { return true }
+                return !candidate.track.key.matches(current)
+            }
+            .filter { !Self.contains(context.excludedKeys, matching: $0.track) }
             .map { candidate in
-                (candidate.track, score(candidate, current: current, recent: recent, queueSet: queueSet, mode: mode))
+                (candidate.track, score(candidate, current: current, queue: context.queue, mode: mode, snapshot: snapshot))
             }
             .filter { $0.1 > 0 }
 
-        var best: [String: (track: Track, score: Int)] = [:]
+        var best: [TrackKey: (track: Track, score: Int)] = [:]
         for item in scored {
-            let previous = best[item.0.bvid]
+            let key = best.keys.first { $0.matches(item.0) } ?? item.0.key
+            let previous = best[key]
             if previous == nil || item.1 > previous!.score {
-                best[item.0.bvid] = (item.0, item.1)
+                best[key] = (item.0, item.1)
             }
         }
 
@@ -260,8 +284,7 @@ struct RecommendationEngine {
         return Array((head + tail).prefix(limit))
     }
 
-    /// 单个候选的综合打分：来源 + 音乐度 + 时长 + 歌手/歌名相关 + 收藏/缓存信号 − 最近/重复/非音乐惩罚。
-    private func score(_ candidate: Candidate, current: Track?, recent: Set<String>, queueSet: Set<String>, mode: Mode) -> Int {
+    private static func score(_ candidate: Candidate, current: Track?, queue: [Track], mode: Mode, snapshot: Snapshot) -> Int {
         let track = candidate.track
         let text = normalized(track.title + " " + track.artist)
         var score = candidate.source.baseScore
@@ -291,16 +314,16 @@ struct RecommendationEngine {
             }
         }
 
-        if FavoriteManager.shared.favoriteBVIDs.contains(track.bvid) {
+        if snapshot.favoriteBVIDs.contains(track.bvid) {
             score += 12
         }
-        if CacheStore.shared.entry(bvid: track.bvid) != nil {
+        if contains(snapshot.cachedKeys, matching: track) {
             score += 6
         }
-        if recent.contains(track.bvid) {
+        if contains(snapshot.recentKeys, matching: track) {
             score -= mode == .radio ? 80 : 24
         }
-        if queueSet.contains(track.bvid) {
+        if queue.contains(where: { $0.key.matches(track) }) {
             score -= 18
         }
         if hasBadRecommendationHint(text) {
@@ -310,7 +333,10 @@ struct RecommendationEngine {
         return score
     }
 
-    /// 为某曲目生成搜索词（歌手 + 解析出的歌名）。
+    private static func contains(_ keys: Set<TrackKey>, matching track: Track) -> Bool {
+        keys.contains(track.key) || keys.contains { $0.matches(track) }
+    }
+
     private func searchTerms(for track: Track) -> [String] {
         let artist = track.artist.trimmingCharacters(in: .whitespacesAndNewlines)
         let parsed = parsedTitle(track.title)
@@ -324,7 +350,6 @@ struct RecommendationEngine {
         return Array(Set(terms)).filter { !$0.isEmpty }
     }
 
-    /// 从标题里抽出《》内或「 - 」前的歌名。
     private func parsedTitle(_ title: String) -> String? {
         if let start = title.firstIndex(of: "《"),
            let end = title[start...].firstIndex(of: "》"),
@@ -337,24 +362,21 @@ struct RecommendationEngine {
         return nil
     }
 
-    /// 标题是否含解说/切片/鬼畜等明显非音乐信号。
-    private func hasBadRecommendationHint(_ text: String) -> Bool {
+    private static func hasBadRecommendationHint(_ text: String) -> Bool {
         [
             "解说", "评论", "reaction", "clip", "切片", "教程", "中字", "字幕组",
             "耐久", "作业用", "排行", "top", "合集剪辑", "鬼畜", "mad", "amv",
         ].contains { text.contains($0) }
     }
 
-    /// 取标题里有意义的关键词（用于相关性加分）。
-    private func importantTokens(_ text: String) -> [String] {
+    private static func importantTokens(_ text: String) -> [String] {
         normalized(text)
             .split(separator: " ")
             .map(String.init)
             .filter { $0.count >= 2 && !["official", "music", "video", "mv", "live", "cover"].contains($0) }
     }
 
-    /// 归一化文本，便于包含匹配。
-    private func normalized(_ text: String) -> String {
+    private static func normalized(_ text: String) -> String {
         text
             .lowercased()
             .folding(options: [.diacriticInsensitive, .widthInsensitive, .caseInsensitive], locale: .current)

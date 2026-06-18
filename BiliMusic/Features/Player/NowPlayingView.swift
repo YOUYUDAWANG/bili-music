@@ -21,7 +21,10 @@ struct NowPlayingView: View {
     @State private var currentPlaylistError: String?
     @State private var suppressNextRecommendationRefresh = false
     @State private var recommendationsStale = false
-    @State private var shownRecommendationBVIDs: Set<String> = []
+    @State private var shownRecommendationKeys: Set<TrackKey> = []
+    @State private var recommendationTask: Task<Void, Never>?
+    @State private var playlistLookupTask: Task<Void, Never>?
+    @State private var playlistLookupCache: [String: PlaylistLookupResult] = [:]
     @State private var showLyrics = false
     @State private var showMVFullscreen = false
     @State private var showMVControls = false
@@ -33,6 +36,12 @@ struct NowPlayingView: View {
     @State private var dragOffset: CGFloat = 0
     @Environment(\.dismiss) private var dismiss
     private var favorites: FavoriteManager { .shared }
+
+    private struct PlaylistLookupResult {
+        let playlist: BiliClient.UPPlaylist?
+        let tracks: [Track]
+        let error: String?
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -86,34 +95,35 @@ struct NowPlayingView: View {
         }
         .onAppear {
             selectedMode = engine.playbackMode
-            Task { await loadRecommendations() }
-            Task { await loadCurrentPlaylistIfNeeded(force: true) }
+            scheduleCurrentPlaylistLookup(force: false, delay: .milliseconds(1600))
         }
         .onChange(of: engine.playbackMode) { _, mode in
             selectedMode = mode
         }
         .onChange(of: engine.current?.bvid) {
-            Task { await loadCurrentPlaylistIfNeeded(force: false) }
-            shownRecommendationBVIDs = []
+            recommendationTask?.cancel()
+            playlistLookupTask?.cancel()
+            scheduleCurrentPlaylistLookup(force: false, delay: .milliseconds(1800))
+            shownRecommendationKeys = []
             if suppressNextRecommendationRefresh {
                 suppressNextRecommendationRefresh = false
                 return
             }
             recommendationsStale = true
             if selectedPage == PlayerPage.recommendations.rawValue {
-                recommendedTracks = []
-                recommendationsError = nil
-                Task { await loadRecommendations() }
+                scheduleRecommendationLoad(clear: true)
                 recommendationsStale = false
             }
         }
         .onChange(of: selectedPage) { _, page in
             guard page == PlayerPage.recommendations.rawValue else { return }
             guard recommendationsStale || recommendedTracks.isEmpty else { return }
-            recommendedTracks = []
-            recommendationsError = nil
             recommendationsStale = false
-            Task { await loadRecommendations() }
+            scheduleRecommendationLoad(clear: true)
+        }
+        .onDisappear {
+            recommendationTask?.cancel()
+            playlistLookupTask?.cancel()
         }
     }
 
@@ -122,7 +132,6 @@ struct NowPlayingView: View {
         AppTheme.playerGradient
     }
 
-    /// 是否处于 MV 横屏（决定整屏铺满视频）。
     private func isLandscapeMV(size: CGSize) -> Bool {
         engine.playbackMode == .mv && size.width > size.height
     }
@@ -150,7 +159,6 @@ struct NowPlayingView: View {
         .gesture(dismissDrag)
     }
 
-    /// 中间主页面：模式切换 + 封面/MV + 标题 + 进度 + 控件 + 底部面板。
     private func nowPlayingPage(coverSize: CGFloat) -> some View {
         VStack(spacing: 15) {
             Picker("播放模式", selection: $selectedMode) {
@@ -215,7 +223,6 @@ struct NowPlayingView: View {
         .padding(.bottom, 12)
     }
 
-    /// 主视觉区：MV 模式放视频（带全屏按钮），否则放封面。
     @ViewBuilder
     private func mediaView(coverSize: CGFloat) -> some View {
         if engine.playbackMode == .mv, let player = engine.avPlayer {
@@ -258,7 +265,7 @@ struct NowPlayingView: View {
                 }
             }
         } else {
-            AsyncImage(url: thumbnailURL(engine.current?.coverURL, width: 960, height: 540)) { image in
+            CachedAsyncImage(url: thumbnailURL(engine.current?.coverURL, width: 960, height: 540)) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
                 ZStack {
@@ -365,10 +372,10 @@ struct NowPlayingView: View {
     private var downloadIconButton: some View {
         let downloads = DownloadManager.shared
         if let track = engine.current {
-            if CacheStore.shared.entry(bvid: track.bvid) != nil {
+            if CacheStore.shared.entry(for: track) != nil {
                 ActionSymbolButton(title: "已缓存", systemName: "arrow.down.circle.fill") {}
                     .foregroundStyle(.green)
-            } else if downloads.progress[track.bvid] != nil {
+            } else if downloads.progress(for: track) != nil {
                 VStack(spacing: 6) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 12)
@@ -426,7 +433,6 @@ struct NowPlayingView: View {
         .buttonStyle(.plain)
     }
 
-    /// 左右两个列表页（队列 / 推荐）的统一容器。
     private func playerListPage<Content: View>(title: String, systemName: String, @ViewBuilder content: () -> Content) -> some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 12) {
@@ -449,7 +455,7 @@ struct NowPlayingView: View {
                 .frame(minHeight: 160)
         } else {
             VStack(spacing: 0) {
-                ForEach(Array(engine.queue.enumerated()), id: \.element.bvid) { index, track in
+                ForEach(Array(engine.queue.enumerated()), id: \.element.id) { index, track in
                     Button {
                         Task { await engine.jump(to: index) }
                     } label: {
@@ -487,12 +493,12 @@ struct NowPlayingView: View {
                 .frame(minHeight: 160)
         } else {
             VStack(spacing: 0) {
-                ForEach(Array(recommendedTracks.prefix(12).enumerated()), id: \.element.bvid) { index, track in
+                ForEach(Array(recommendedTracks.prefix(12).enumerated()), id: \.element.id) { index, track in
                     Button {
                         suppressNextRecommendationRefresh = true
                         Task { await engine.play(tracks: recommendedTracks, startAt: index, queueMode: .radio) }
                     } label: {
-                        TrackRow(track: track, isPlaying: engine.current?.bvid == track.bvid)
+                        TrackRow(track: track, isPlaying: engine.current.map { track.key.matches($0) } ?? false)
                     }
                     .buttonStyle(.plain)
                     if index != min(recommendedTracks.count, 12) - 1 {
@@ -550,12 +556,12 @@ struct NowPlayingView: View {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: false) {
                         LazyVStack(spacing: 0) {
-                            ForEach(Array(currentPlaylistTracks.enumerated()), id: \.element.bvid) { index, track in
+                            ForEach(Array(currentPlaylistTracks.enumerated()), id: \.element.id) { index, track in
                                 Button {
                                     Task { await playCurrentPlaylistTrack(at: index) }
                                 } label: {
                                     compactPlaylistRow(track: track, index: index)
-                                        .id(track.bvid)
+                                        .id(track.id)
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -563,7 +569,7 @@ struct NowPlayingView: View {
                     }
                     .frame(maxHeight: 148)
                     .onAppear { scrollCurrentPlaylist(proxy) }
-                    .onChange(of: engine.current?.bvid) { _, _ in
+                    .onChange(of: engine.current?.id) { _, _ in
                         scrollCurrentPlaylist(proxy)
                     }
                 }
@@ -597,7 +603,7 @@ struct NowPlayingView: View {
                 }
 
                 VStack(spacing: 0) {
-                    ForEach(queuePreviewItems, id: \.track.bvid) { item in
+                    ForEach(queuePreviewItems, id: \.track.id) { item in
                         Button {
                             Task { await engine.jump(to: item.index) }
                         } label: {
@@ -613,9 +619,8 @@ struct NowPlayingView: View {
         }
     }
 
-    /// 合集/队列里的紧凑行（序号 + 标题 + 时长或播放指示）。
     private func compactPlaylistRow(track: Track, index: Int) -> some View {
-        let isCurrent = track.bvid == engine.current?.bvid
+        let isCurrent = engine.current.map { track.key.matches($0) } ?? false
         return HStack(spacing: 10) {
             Text("\(index + 1)")
                 .font(.caption.monospacedDigit().weight(isCurrent ? .semibold : .regular))
@@ -655,28 +660,84 @@ struct NowPlayingView: View {
         }
     }
 
-    /// 加载播放器右侧的相关推荐（.relatedPanel 场景，累计去重）。
+    private func scheduleRecommendationLoad(clear: Bool) {
+        recommendationTask?.cancel()
+        recommendationsError = nil
+        if clear {
+            recommendedTracks = []
+        }
+        guard selectedPage == PlayerPage.recommendations.rawValue,
+              engine.current?.bvid != nil else {
+            recommendationsLoading = false
+            return
+        }
+        if recommendedTracks.isEmpty {
+            recommendationsLoading = true
+        }
+        recommendationTask = Task {
+            try? await Task.sleep(for: .milliseconds(clear ? 260 : 0))
+            guard !Task.isCancelled else { return }
+            await loadRecommendations()
+        }
+    }
+
+    private func scheduleCurrentPlaylistLookup(force: Bool, delay: Duration) {
+        playlistLookupTask?.cancel()
+        guard let current = engine.current else {
+            currentPlaylist = nil
+            currentPlaylistTracks = []
+            currentPlaylistError = nil
+            currentPlaylistLoading = false
+            return
+        }
+
+        let bvid = current.bvid
+        if !force, let cached = playlistLookupCache[bvid] {
+            applyPlaylistLookup(cached, for: bvid)
+            return
+        }
+
+        currentPlaylist = nil
+        currentPlaylistTracks = []
+        currentPlaylistError = nil
+        currentPlaylistLoading = false
+        playlistLookupTask = Task {
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled,
+                  engine.current?.bvid == bvid else { return }
+            await loadCurrentPlaylistIfNeeded(force: force)
+        }
+    }
+
+    private func applyPlaylistLookup(_ result: PlaylistLookupResult, for bvid: String) {
+        guard engine.current?.bvid == bvid else { return }
+        currentPlaylist = result.playlist
+        currentPlaylistTracks = result.tracks
+        currentPlaylistError = result.error
+        currentPlaylistLoading = false
+    }
+
     private func loadRecommendations() async {
         guard let bvid = engine.current?.bvid else { return }
         recommendationsLoading = recommendedTracks.isEmpty
         defer { recommendationsLoading = false }
-        let excluded = shownRecommendationBVIDs.union([bvid])
+        let currentKey = engine.current?.key ?? TrackKey(bvid: bvid, cid: nil)
+        let excluded = shownRecommendationKeys.union([currentKey])
         let tracks = await RecommendationEngine().recommendations(
             mode: .relatedPanel,
             context: .init(
                 current: engine.current,
                 queue: engine.queue,
                 playlistTracks: currentPlaylistTracks,
-                excludedBVIDs: excluded),
+                excludedKeys: excluded),
             limit: 24)
         guard engine.current?.bvid == bvid else { return }
-        shownRecommendationBVIDs.formUnion(tracks.map(\.bvid))
+        shownRecommendationKeys.formUnion(tracks.map(\.key))
         recommendedTracks = tracks
         recommendationsError = tracks.isEmpty ? "没有找到合适的推荐歌曲" : nil
         engine.preload(tracks: recommendedTracks)
     }
 
-    /// 检测当前曲所属合集：先看 ugc_season，再回退 UP 主公开合集。
     private func loadCurrentPlaylistIfNeeded(force: Bool) async {
         guard let current = engine.current else {
             currentPlaylist = nil
@@ -689,6 +750,11 @@ struct NowPlayingView: View {
         }
 
         let bvid = current.bvid
+        if !force, let cached = playlistLookupCache[bvid] {
+            applyPlaylistLookup(cached, for: bvid)
+            return
+        }
+
         currentPlaylistLoading = true
         currentPlaylistError = nil
         defer { currentPlaylistLoading = false }
@@ -706,8 +772,9 @@ struct NowPlayingView: View {
             }
             guard let playlist else {
                 guard engine.current?.bvid == bvid else { return }
-                currentPlaylist = nil
-                currentPlaylistTracks = []
+                let result = PlaylistLookupResult(playlist: nil, tracks: [], error: nil)
+                playlistLookupCache[bvid] = result
+                applyPlaylistLookup(result, for: bvid)
                 return
             }
             let artist = current.artist
@@ -724,14 +791,18 @@ struct NowPlayingView: View {
                     duration: item.duration ?? 0)
             } ?? []
             guard engine.current?.bvid == bvid else { return }
-            currentPlaylist = playlist
-            currentPlaylistTracks = tracks
+            let result = PlaylistLookupResult(playlist: playlist, tracks: tracks, error: nil)
+            playlistLookupCache[bvid] = result
+            applyPlaylistLookup(result, for: bvid)
             engine.preload(tracks: tracks)
         } catch {
             guard engine.current?.bvid == bvid else { return }
-            currentPlaylist = nil
-            currentPlaylistTracks = []
-            currentPlaylistError = "合集检测失败: \(error.localizedDescription)"
+            let result = PlaylistLookupResult(
+                playlist: nil,
+                tracks: [],
+                error: "合集检测失败: \(error.localizedDescription)")
+            playlistLookupCache[bvid] = result
+            applyPlaylistLookup(result, for: bvid)
         }
     }
 
@@ -743,13 +814,11 @@ struct NowPlayingView: View {
         return "\(index + 1)/\(currentPlaylistTracks.count)"
     }
 
-    /// 从底部合集面板点击播放（用整个合集替换队列）。
     private func playCurrentPlaylistTrack(at index: Int) async {
         guard currentPlaylistTracks.indices.contains(index) else { return }
         await engine.play(tracks: currentPlaylistTracks, startAt: index, queueMode: .sequential)
     }
 
-    /// 把合集面板滚动到当前曲并居中。
     private func scrollCurrentPlaylist(_ proxy: ScrollViewProxy) {
         guard let bvid = engine.current?.bvid,
               currentPlaylistTracks.contains(where: { $0.bvid == bvid }) else { return }
@@ -760,13 +829,11 @@ struct NowPlayingView: View {
         }
     }
 
-    /// 把协议相对封面地址补成 https。
     private func normalizedCoverURL(_ raw: String?) -> URL? {
         guard let raw else { return nil }
         return URL(string: raw.hasPrefix("//") ? "https:" + raw : raw)
     }
 
-    /// 按 bvid 去重，保留首次出现顺序。
     private func dedupe(_ tracks: [Track]) -> [Track] {
         var seen = Set<String>()
         return tracks.filter { track in
@@ -816,13 +883,11 @@ struct NowPlayingView: View {
             }
     }
 
-    /// 秒数格式化为 mm:ss。
     private func format(_ seconds: Double) -> String {
         let s = Int(seconds.isFinite ? max(seconds, 0) : 0)
         return String(format: "%d:%02d", s / 60, s % 60)
     }
 
-    /// 码率格式化为 kbps / Mbps。
     private func formatBitrate(_ bandwidth: Int) -> String {
         if bandwidth >= 1_000_000 {
             return String(format: "%.1f Mbps", Double(bandwidth) / 1_000_000)
@@ -830,7 +895,6 @@ struct NowPlayingView: View {
         return "\(max(1, bandwidth / 1000)) kbps"
     }
 
-    /// 关闭播放页（优先回调 onDismiss，否则 dismiss）。
     private func closePlayer() {
         if let onDismiss {
             onDismiss()
@@ -839,7 +903,6 @@ struct NowPlayingView: View {
         }
     }
 
-    /// 给 B 站封面拼上缩放参数（缩略图）。
     private func thumbnailURL(_ url: URL?, width: Int, height: Int) -> URL? {
         guard let url else { return nil }
         let raw = url.absoluteString
@@ -857,7 +920,7 @@ struct MiniPlayerBar: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            AsyncImage(url: thumbnailURL(engine.current?.coverURL, width: 160, height: 90)) { image in
+            CachedAsyncImage(url: thumbnailURL(engine.current?.coverURL, width: 160, height: 90)) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
                 AppTheme.secondaryBackground
@@ -919,7 +982,6 @@ struct MiniPlayerBar: View {
         )
     }
 
-    /// 弹簧动画打开全屏播放器。
     private func openFullPlayer() {
         withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
             isDraggingFullPlayer = false
@@ -928,7 +990,6 @@ struct MiniPlayerBar: View {
         }
     }
 
-    /// 给 B 站封面拼上缩放参数（缩略图）。
     private func thumbnailURL(_ url: URL?, width: Int, height: Int) -> URL? {
         guard let url else { return nil }
         let raw = url.absoluteString
@@ -937,7 +998,6 @@ struct MiniPlayerBar: View {
     }
 }
 
-/// 圆形图标按钮（上一首 / 下一首）。
 private struct PlayerIconButton: View {
     let systemName: String
     let size: CGFloat
@@ -952,7 +1012,6 @@ private struct PlayerIconButton: View {
     }
 }
 
-/// 操作行里的图标按钮（收藏 / 缓存 / 歌词 等）。
 private struct ActionSymbolButton: View {
     let title: String
     let systemName: String
@@ -972,7 +1031,6 @@ private struct ActionSymbolButton: View {
     }
 }
 
-/// 操作行里的图标标签（用作 Menu 的触发器）。
 private struct ActionSymbolLabel: View {
     let title: String
     let systemName: String
@@ -988,9 +1046,7 @@ private struct ActionSymbolLabel: View {
     }
 }
 
-/// 数组安全下标辅助。
 private extension Array {
-    /// 安全下标：越界返回 nil。
     subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
     }
@@ -1034,14 +1090,12 @@ private struct PlayerProgressBar: View {
         .padding(.horizontal, 28)
     }
 
-    /// 秒数格式化为 mm:ss。
     private func format(_ seconds: Double) -> String {
         let s = Int(seconds.isFinite ? max(seconds, 0) : 0)
         return String(format: "%d:%02d", s / 60, s % 60)
     }
 }
 
-/// 同步歌词面板：高亮并自动滚动到当前行。
 private struct LyricsSheetView: View {
     @Environment(PlayerEngine.self) private var engine
     @Environment(\.dismiss) private var dismiss
@@ -1082,7 +1136,6 @@ private struct LyricsSheetView: View {
         }
     }
 
-    /// 当前应高亮的歌词行下标。
     private var currentLyricIndex: Int {
         guard !engine.lyrics.isEmpty else { return 0 }
         if let active = engine.lyrics.firstIndex(where: { line in
@@ -1094,7 +1147,6 @@ private struct LyricsSheetView: View {
     }
 }
 
-/// MV 全屏播放层（进入时尝试提升画质）。
 private struct MVFullscreenView: View {
     @Environment(PlayerEngine.self) private var engine
     @Environment(\.dismiss) private var dismiss
@@ -1128,7 +1180,6 @@ private struct MVFullscreenView: View {
     }
 }
 
-/// 收藏夹选择器：长按收藏时挑选目标收藏夹。
 private struct FavoriteFolderPickerView: View {
     @Environment(PlayerEngine.self) private var engine
     @Environment(\.dismiss) private var dismiss
@@ -1191,7 +1242,6 @@ private struct FavoriteFolderPickerView: View {
     }
 }
 
-/// UP 主合集/系列列表（含当前视频自带合集）。
 private struct UPPlaylistsView: View {
     @Environment(PlayerEngine.self) private var engine
     @State private var playlists: [BiliClient.UPPlaylist] = []
@@ -1236,7 +1286,6 @@ private struct UPPlaylistsView: View {
         }
     }
 
-    /// 加载 UP 主合集列表（当前视频合集排最前，去重）。
     private func load() async {
         guard let current = engine.current, let mid = current.ownerMid else {
             errorMessage = "当前歌曲缺少 UP 主信息"
@@ -1257,7 +1306,6 @@ private struct UPPlaylistsView: View {
         }
     }
 
-    /// 按 type-id 去重合集。
     private func dedupePlaylists(_ playlists: [BiliClient.UPPlaylist]) -> [BiliClient.UPPlaylist] {
         var seen = Set<String>()
         return playlists.filter { playlist in
@@ -1269,7 +1317,6 @@ private struct UPPlaylistsView: View {
     }
 }
 
-/// 合集详情：分页加载、点击播放、整入队列。
 private struct UPPlaylistDetailView: View {
     @Environment(PlayerEngine.self) private var engine
     @Environment(\.dismiss) private var dismiss
@@ -1286,14 +1333,14 @@ private struct UPPlaylistDetailView: View {
             if let errorMessage {
                 Text(errorMessage).font(.caption).foregroundStyle(.red)
             }
-            ForEach(Array(tracks.enumerated()), id: \.element.bvid) { index, track in
+            ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
                 Button {
                     Task {
                         await engine.play(tracks: tracks, startAt: index)
                         dismiss()
                     }
                 } label: {
-                    TrackRow(track: track, isPlaying: engine.current?.bvid == track.bvid)
+                    TrackRow(track: track, isPlaying: engine.current.map { track.key.matches($0) } ?? false)
                 }
                 .buttonStyle(.plain)
                 .onAppear {
@@ -1327,7 +1374,6 @@ private struct UPPlaylistDetailView: View {
         }
     }
 
-    /// 分页加载合集内容，过滤非音乐。
     private func loadMore() async {
         guard hasMore, !loading, let mid = engine.current?.ownerMid else { return }
         loading = true

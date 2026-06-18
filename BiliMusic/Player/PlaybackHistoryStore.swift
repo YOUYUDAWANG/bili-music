@@ -22,7 +22,7 @@ final class PlaybackHistoryStore {
 
     /// 记录一次播放：已存在则次数 +1 并置顶，否则新增；超出 300 条裁掉最旧的。
     func record(_ track: Track) {
-        if let index = entries.firstIndex(where: { $0.bvid == track.bvid }) {
+        if let index = entries.firstIndex(where: { $0.key.matches(track) }) {
             entries[index].playCount += 1
             entries[index].lastPlayedAt = Date()
             entries[index].track = track
@@ -40,7 +40,7 @@ final class PlaybackHistoryStore {
     /// 清空全部播放历史。
     func clear() {
         entries = []
-        save()
+        save(immediate: true)
     }
 
     /// 从磁盘读历史，并按最近播放时间排序。
@@ -54,22 +54,39 @@ final class PlaybackHistoryStore {
 
     /// 防抖写盘:record() 每播一首都会调,连续切歌时只在停下来后写一次,
     /// encode 也挪到后台,不再每次都在主线程全量序列化 300 条历史。
-    private func save() {
-        let snapshot = entries
-        let url = fileURL
+    func flush() async {
         saveTask?.cancel()
+        await write(entries)
+        saveTask = nil
+    }
+
+    private func save(immediate: Bool = false) {
+        let snapshot = entries
+        saveTask?.cancel()
+        if immediate {
+            saveTask = Task { [weak self] in
+                await self?.write(snapshot)
+                self?.saveTask = nil
+            }
+            return
+        }
         saveTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(1))
             guard !Task.isCancelled else { return }
-            await Task.detached(priority: .background) {
-                let start = CFAbsoluteTimeGetCurrent()
-                guard let data = try? JSONEncoder().encode(snapshot) else { return }
-                try? data.write(to: url, options: .atomic)
-                let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
-                log.debug("save() \(elapsed, format: .fixed(precision: 1))ms entries=\(snapshot.count)")
-            }.value
+            await self?.write(snapshot)
             self?.saveTask = nil
         }
+    }
+
+    private func write(_ snapshot: [PlaybackHistoryEntry]) async {
+        let url = fileURL
+        await Task.detached(priority: .background) {
+            let start = CFAbsoluteTimeGetCurrent()
+            guard let data = try? JSONEncoder().encode(snapshot) else { return }
+            try? data.write(to: url, options: .atomic)
+            let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+            log.debug("save() \(elapsed, format: .fixed(precision: 1))ms entries=\(snapshot.count)")
+        }.value
     }
 }
 
@@ -79,6 +96,7 @@ struct PlaybackHistoryEntry: Identifiable, Codable, Equatable {
     var playCount: Int
     var lastPlayedAt: Date
 
-    var id: String { track.bvid }
+    var id: String { track.id }
+    var key: TrackKey { track.key }
     var bvid: String { track.bvid }
 }

@@ -37,7 +37,11 @@ struct RootView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background {
-                Task { await engine.handleScenePhase(isBackground: true) }
+                Task {
+                    await CacheStore.shared.flush()
+                    await PlaybackHistoryStore.shared.flush()
+                    await engine.handleScenePhase(isBackground: true)
+                }
             }
         }
         .task {

@@ -60,7 +60,7 @@ struct BiliClient {
         let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
         let truncated = url.count > 80 ? String(url.prefix(80)) + "…" : url
         log.debug("GET \(elapsed, format: .fixed(precision: 1))ms \(truncated)")
-        let env = try JSONDecoder().decode(Envelope<T>.self, from: data)
+        let env = try await Self.decode(Envelope<T>.self, from: data)
         guard env.code == 0, let payload = env.data else {
             throw APIError(code: env.code, message: env.message)
         }
@@ -95,10 +95,16 @@ struct BiliClient {
             let code: Int
             let message: String
         }
-        let env = try JSONDecoder().decode(VoidEnvelope.self, from: data)
+        let env = try await Self.decode(VoidEnvelope.self, from: data)
         guard env.code == 0 else {
             throw APIError(code: env.code, message: env.message)
         }
+    }
+
+    private static func decode<T: Decodable>(_ type: T.Type, from data: Data) async throws -> T {
+        try await Task.detached(priority: .userInitiated) {
+            try JSONDecoder().decode(type, from: data)
+        }.value
     }
 
     // MARK: - 视频信息
@@ -382,7 +388,7 @@ struct BiliClient {
             req.setValue(cookie, forHTTPHeaderField: "Cookie")
         }
         let (data, _) = try await Self.session.data(for: req)
-        return try JSONDecoder().decode(SubtitleFile.self, from: data)
+        return try await Self.decode(SubtitleFile.self, from: data)
     }
 
     // MARK: - 扫码登录

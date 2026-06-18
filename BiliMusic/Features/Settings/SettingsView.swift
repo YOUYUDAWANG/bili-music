@@ -121,7 +121,7 @@ private struct PlaybackHistoryView: View {
                     Task { await engine.play(tracks: tracks, startAt: index) }
                 } label: {
                     HStack {
-                        TrackRow(track: entry.track, isPlaying: engine.current?.bvid == entry.bvid)
+                        TrackRow(track: entry.track, isPlaying: engine.current.map { entry.track.key.matches($0) } ?? false)
                         Text("\(entry.playCount)次")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
