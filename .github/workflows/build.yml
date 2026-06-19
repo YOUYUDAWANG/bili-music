@@ -1,0 +1,46 @@
+name: Build
+
+# 编译门禁：PR 和推 main 时跑。只做「能不能编译过」的检查，
+# 不做单测（项目暂无测试）、不签名（simulator 编译免签名）。
+on:
+  pull_request:
+    paths:
+      - 'BiliMusic/**'
+      - 'project.yml'
+      - '.github/workflows/build.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'BiliMusic/**'
+      - 'project.yml'
+      - '.github/workflows/build.yml'
+
+# 同一分支连续推送时，自动取消上一次还在跑的构建，省 macOS 分钟。
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Compile (iOS Simulator)
+    runs-on: macos-latest   # iOS 编译必须用 macOS runner；如需可复现可改成 macos-15 并 xcode-select 指定版本
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # .xcodeproj 不入库，由 project.yml 生成，所以 CI 里要先装 xcodegen 再生成
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project BiliMusic.xcodeproj \
+            -scheme BiliMusic \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build

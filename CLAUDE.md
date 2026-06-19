@@ -1,16 +1,16 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+本文件为 Claude Code（claude.ai/code）在本仓库工作时提供指引。
 
-## Build & Run
+## 构建与运行
 
-The `.xcodeproj` is generated from `project.yml` and is not committed. Regenerate it whenever `project.yml` or new Swift files are added:
+`.xcodeproj` 由 `project.yml` 生成，不入库。每当修改 `project.yml` 或新增 Swift 文件后都要重新生成：
 
 ```bash
 xcodegen generate
 ```
 
-Compile check (no interactive tests — user verifies on real device):
+编译检查（无交互式测试 —— 由用户在真机上验证）：
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
@@ -18,64 +18,64 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
   -destination 'generic/platform=iOS Simulator' build
 ```
 
-No test targets exist. All verification is done on a physical iPhone via AltStore (free developer account, 7-day re-signing).
+没有测试 target。所有验证都通过 AltStore 在真机 iPhone 上完成（免费开发者账号，签名 7 天有效需续签）。
 
-## Architecture
+## 架构
 
-Single-module SwiftUI app, iOS 17+, `@Observable` MVVM. No third-party dependencies — URLSession + AVPlayer only.
+单 Module 的 SwiftUI app，iOS 17+，`@Observable` MVVM。无第三方依赖 —— 只用 URLSession + AVPlayer。
 
-### Global state
+### 全局状态
 
-`PlayerEngine` is the sole `@Observable` class injected via `.environment(engine)` from `BiliMusicApp`. Views read it with `@Environment(PlayerEngine.self)`. `CacheStore.shared` and `FavoriteManager.shared` are singletons accessed directly.
+`PlayerEngine` 是唯一的 `@Observable` 类，由 `BiliMusicApp` 通过 `.environment(engine)` 注入。视图用 `@Environment(PlayerEngine.self)` 读取。`CacheStore.shared` 和 `FavoriteManager.shared` 是单例，直接访问。
 
-### Data flow
+### 数据流
 
 ```
 BiliClient (URLSession) → Track struct → PlayerEngine (queue + AVPlayer)
                         ↘ CacheStore (JSON index + Documents/audio/)
 ```
 
-`Track` is a plain `struct` (bvid, cid, title, artist, coverURL, duration). Audio/MV stream URLs are **ephemeral** (~2h TTL) — only bvid/cid are persisted. Every playback resolves a fresh URL via `BiliClient.audioStream(bvid:cid:preferredQuality:)` or `videoStream(bvid:cid:profile:)`.
+`Track` 是普通 `struct`（bvid、cid、title、artist、coverURL、duration）。音频/MV 流 URL 是**临时的**（约 2 小时过期）—— 只持久化 bvid/cid。每次播放都通过 `BiliClient.audioStream(bvid:cid:preferredQuality:)` 或 `videoStream(bvid:cid:profile:)` 现取新 URL。
 
-### API layer (`BiliMusic/API/`)
+### API 层（`BiliMusic/API/`）
 
-- **`BiliClient`** — all B站 endpoints. Every request must include `BiliClient.headers` (Referer + browser UA) or CDN returns 403. Cookie (`CookieStore.cookie`) is appended when present.
-- **`WBISigner`** — WBI signing required for search and home-feed endpoints. Uses nav-endpoint keys + 64-char rearrangement table → MD5. Keys are cached 24h. Call `WBISigner.prewarm()` on launch.
-- **`LyricsClient`** — LRCLIB only. No B站 subtitle fallback (auto-CC produces "♪音乐♪" noise).
-- Quality IDs: `30216`=64K, `30232`=132K, `30280`=192K, `30250`=Dolby, `30251`=Hi-Res. Canonical list is `BiliClient.qualityOptions` — reference this everywhere, don't re-define.
+- **`BiliClient`** —— 所有 B站接口。每个请求都必须带上 `BiliClient.headers`（Referer + 浏览器 UA），否则 CDN 返回 403。存在 Cookie（`CookieStore.cookie`）时一并附上。
+- **`WBISigner`** —— 搜索和首页推荐接口需要 WBI 签名。用 nav 接口的 key + 64 字符重排表 → MD5。key 缓存 24 小时。启动时调用 `WBISigner.prewarm()`。
+- **`LyricsClient`** —— 仅用 LRCLIB。不 fallback 到 B站字幕（自动 CC 会产生「♪音乐♪」噪声）。
+- 音质 ID：`30216`=64K，`30232`=132K，`30280`=192K，`30250`=杜比，`30251`=Hi-Res。权威清单是 `BiliClient.qualityOptions` —— 各处引用它，不要重复定义。
 
-### Player (`BiliMusic/Player/`)
+### 播放器（`BiliMusic/Player/`）
 
-- **`PlayerEngine`** — `@Observable @MainActor`. Owns `AVPlayer`, queue (`[Track]`), `queueIndex`, playback state, lyrics, and MV/music mode. KVO on `timeControlStatus` keeps UI in sync with AVPlayer truth. `isScrubbing` flag prevents time-observer/gesture conflict during progress bar drag.
-- **`QueueMode`**: `.sequential`, `.shuffle`, `.repeatOne`, `.radio`. Radio mode pre-fetches the next track via `RecommendationEngine` after current song starts.
-- **`RecommendationEngine`** — stateless struct, `@MainActor`. Three modes: `.home`, `.radio`, `.relatedPanel`. Seeds candidates from favorites folder (random pages), related videos, history, and playlist neighbors; scores them deterministically + ±10 random dither; deduplicates by bvid within a call. Callers maintain cross-call exclusion sets (`shownBVIDs`) to avoid repeats across refreshes.
-- **`MusicFilter`** — heuristics to detect music content: B站 music partition `typeID` set + title/duration rules.
-- **`PlaybackHistoryStore.shared`** — JSON at `Documents/playback-history.json`, 300-entry cap.
+- **`PlayerEngine`** —— `@Observable @MainActor`。持有 `AVPlayer`、队列（`[Track]`）、`queueIndex`、播放状态、歌词以及 MV/音乐模式。对 `timeControlStatus` 的 KVO 让 UI 与 AVPlayer 的真实状态保持同步。`isScrubbing` 标志位防止拖动进度条时时间观察器与手势冲突。
+- **`QueueMode`**：`.sequential`、`.shuffle`、`.repeatOne`、`.radio`。电台模式在当前歌曲开始播放后，通过 `RecommendationEngine` 预取下一首。
+- **`RecommendationEngine`** —— 无状态 struct，`@MainActor`。三种模式：`.home`、`.radio`、`.relatedPanel`。从收藏夹（随机页）、相关视频、播放历史、歌单相邻曲目中取候选；用确定性打分 + ±10 随机扰动排序；单次调用内按 bvid 去重。调用方维护跨调用的排除集（`shownBVIDs`），避免多次刷新出现重复。
+- **`MusicFilter`** —— 判定是否为音乐内容的启发式规则：B站音乐分区 `typeID` 集合 + 标题/时长规则。
+- **`PlaybackHistoryStore.shared`** —— JSON 存于 `Documents/playback-history.json`，上限 300 条。
 
-### Auth (`BiliMusic/Auth/`)
+### 鉴权（`BiliMusic/Auth/`）
 
-- **`CookieStore`** — stores the full Cookie string in Keychain. Key fields: `SESSDATA`, `bili_jct`, `DedeUserID`. Check `CookieStore.isLoggedIn` before making authenticated requests.
+- **`CookieStore`** —— 把完整 Cookie 字符串存在 Keychain 里。关键字段：`SESSDATA`、`bili_jct`、`DedeUserID`。发起需要登录的请求前先检查 `CookieStore.isLoggedIn`。
 
-### Cache (`BiliMusic/Cache/`)
+### 缓存（`BiliMusic/Cache/`）
 
-- **`CacheStore.shared`** — `@Observable`. JSON index at `Documents/cache_index.json`; audio files at `Documents/audio/{bvid}_{cid}.m4a`.
-- **`DownloadManager.shared`** — uses `URLSessionDownloadTask` (not `AsyncBytes`). Downloads with the same `BiliClient.headers`.
+- **`CacheStore.shared`** —— `@Observable`。JSON 索引在 `Documents/cache_index.json`；音频文件在 `Documents/audio/{bvid}_{cid}.m4a`。
+- **`DownloadManager.shared`** —— 用 `URLSessionDownloadTask`（不是 `AsyncBytes`）。下载时带同样的 `BiliClient.headers`。
 
-### Features
+### 功能页（`BiliMusic/Features/`）
 
-- **`RootView`** — tab bar + custom full-player overlay (not `.fullScreenCover`). The full player is a `NowPlayingView` applied as `.offset(y:).ignoresSafeArea()` so it slides up from the mini bar.
-- **`NowPlayingView`** — three-page `TabView` (queue ← current song → recommendations). Dismissal via swipe-down gesture; threshold ~130pt or predicted ~260pt.
-- **`HomeView`** — fires `RecommendationEngine(.home)` on appear; accumulates `shownBVIDs` across "换一批" taps to avoid repeats.
+- **`RootView`** —— tab bar + 自定义全屏播放器浮层（不是 `.fullScreenCover`）。全屏播放器是一个 `NowPlayingView`，用 `.offset(y:).ignoresSafeArea()` 实现从 mini bar 上滑出现。
+- **`NowPlayingView`** —— 三页 `TabView`（队列 ← 当前歌曲 → 推荐）。通过下滑手势关闭；阈值约 130pt 或预测约 260pt。
+- **`HomeView`** —— 出现时触发 `RecommendationEngine(.home)`；每次点「换一批」累积 `shownBVIDs` 以避免重复。
 
-### Design
+### 设计（`BiliMusic/Design/`）
 
-- **`AppTheme`** — `accent = Color.primary` (not B站 red). `playerGradient` is a neutral system gradient (no album-art blur — washes out content in light mode). All colors use system semantic values.
+- **`AppTheme`** —— `accent = Color.primary`（不用 B站红）。`playerGradient` 是中性的系统渐变（不做专辑封面虚化 —— 浅色模式下会冲淡内容）。所有颜色都用系统语义色值。
 
-## Key Constraints
+## 关键约束
 
-- **No simulator interaction tests** — only compile-verify; real-device testing done by user.
-- **No forced red/brand accent** — `AppTheme.accent` stays `Color.primary`.
-- **No album-art blur background** — use `AppTheme.playerGradient` (neutral).
-- **Cover frames are 16:9** — B站 covers are 16:9; use `height: coverSize * 9/16`, not square.
-- **New Swift files need `xcodegen generate`** — the `.xcodeproj` is generated; adding files without regenerating means Xcode won't find them.
-- **Stream URLs must not be persisted** — only bvid/cid go to disk; URLs expire in ~2h.
+- **不做模拟器交互测试** —— 只做编译验证；真机测试由用户完成。
+- **不强加红色/品牌主色** —— `AppTheme.accent` 保持 `Color.primary`。
+- **不做专辑封面虚化背景** —— 用 `AppTheme.playerGradient`（中性）。
+- **封面是 16:9** —— B站封面是 16:9；用 `height: coverSize * 9/16`，不要用正方形。
+- **新增 Swift 文件要 `xcodegen generate`** —— `.xcodeproj` 是生成的；加文件不重新生成，Xcode 找不到。
+- **流 URL 不可持久化** —— 只把 bvid/cid 落盘；URL 约 2 小时后过期。
