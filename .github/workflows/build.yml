@@ -40,7 +40,7 @@ jobs:
           set -o pipefail
           xcodebuild \
             -project BiliMusic.xcodeproj \
-            -scheme BiliMusic \
-            -destination 'generic/platform=iOS Simulator' \
+            -target BiliMusic \
+            -sdk iphonesimulator \
             CODE_SIGNING_ALLOWED=NO \
             build
