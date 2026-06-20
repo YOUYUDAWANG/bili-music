@@ -18,10 +18,12 @@ final class DownloadManager {
 
     private init() {}
 
+    /// 该 bvid 是否正在下载。
     func isDownloading(_ bvid: String) -> Bool {
         progress[bvid] != nil
     }
 
+    /// 下载整曲到本地缓存：补全 cid → 取流 → 边下边报进度 → 落盘并写索引。已在下载或已缓存则跳过。
     func download(track: Track) async {
         guard progress[track.bvid] == nil,
               CacheStore.shared.entry(bvid: track.bvid) == nil else { return }
@@ -68,6 +70,7 @@ final class DownloadManager {
     }
 }
 
+/// URLSessionDownloadTask 的进度回调适配器，把字节进度换算成 0...1 回调出去。
 private final class ProgressWatcher: NSObject, URLSessionTaskDelegate, URLSessionDownloadDelegate {
     private let onProgress: @Sendable (Double) -> Void
 

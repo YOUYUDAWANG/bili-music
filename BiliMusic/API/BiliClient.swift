@@ -5,6 +5,7 @@ private let log = Logger(subsystem: "com.fubuki.BiliMusic", category: "network")
 
 /// B 站接口客户端。所有请求带 Referer + 浏览器 UA,否则 CDN 403。
 struct BiliClient {
+    /// 音质选项的权威清单（id + 展示名）。各处引用此处，勿重复定义。
     static let qualityOptions: [(id: Int, title: String)] = [
         (0,     "自动(最高)"),
         (30251, "Hi-Res"),
@@ -14,6 +15,7 @@ struct BiliClient {
         (30216, "流畅 64K"),
     ]
 
+    /// 所有请求必带的浏览器伪装头（Referer + UA），缺则 CDN 返回 403。
     static let headers = [
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
         "Referer": "https://www.bilibili.com",
@@ -28,18 +30,21 @@ struct BiliClient {
         return URLSession(configuration: config)
     }()
 
+    /// B 站接口返回的错误（code + message）。
     struct APIError: LocalizedError {
         let code: Int
         let message: String
         var errorDescription: String? { "B站接口错误 \(code): \(message)" }
     }
 
+    /// B 站统一响应信封 { code, message, data }。
     private struct Envelope<T: Decodable>: Decodable {
         let code: Int
         let message: String
         let data: T?
     }
 
+    /// 发 GET：带统一头 + Cookie，解信封，code≠0 抛错。
     private func get<T: Decodable>(_ url: String) async throws -> T {
         let start = CFAbsoluteTimeGetCurrent()
         guard let encodedUrl = url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
@@ -62,6 +67,7 @@ struct BiliClient {
         return payload
     }
 
+    /// 发表单 POST（无返回体）：带统一头 + Cookie，code≠0 抛错。
     private func postVoid(_ url: String, form: [String: String]) async throws {
         let start = CFAbsoluteTimeGetCurrent()
         guard let encodedUrl = url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
@@ -97,6 +103,7 @@ struct BiliClient {
 
     // MARK: - 视频信息
 
+    /// 视频详情（含分 P、UP 主、合集树 ugc_season）。
     struct VideoInfo: Decodable {
         struct Owner: Decodable { let mid: Int; let name: String; let face: String }
         struct Page: Decodable { let cid: Int; let page: Int; let part: String; let duration: Int }
@@ -130,10 +137,12 @@ struct BiliClient {
         let ugc_season: UGCSeason?
     }
 
+    /// 取视频详情。
     func videoInfo(bvid: String) async throws -> VideoInfo {
         try await get("https://api.bilibili.com/x/web-interface/view?bvid=\(bvid)")
     }
 
+    /// 分 P 条目。
     struct PageListItem: Decodable {
         let cid: Int
         let page: Int
@@ -141,12 +150,14 @@ struct BiliClient {
         let duration: Int
     }
 
+    /// 取分 P 列表（比 videoInfo 轻量，只为补 cid/时长）。
     func pageList(bvid: String) async throws -> [PageListItem] {
         try await get("https://api.bilibili.com/x/player/pagelist?bvid=\(bvid)")
     }
 
     // MARK: - 音频流
 
+    /// DASH 播放信息（音频流列表 + flac）。
     struct PlayInfo: Decodable {
         struct Dash: Decodable {
             struct Audio: Decodable { let id: Int; let baseUrl: String; let bandwidth: Int }
@@ -157,6 +168,7 @@ struct BiliClient {
         let dash: Dash?
     }
 
+    /// 单文件 MP4 播放信息（MV 用）。
     struct VideoPlayInfo: Decodable {
         struct DURL: Decodable { let url: String }
         let quality: Int?
@@ -187,6 +199,7 @@ struct BiliClient {
         return (url, chosen.id, chosen.bandwidth)
     }
 
+    /// MV 取流场景：内嵌优先稳定快速，全屏优先高清并自动降级。
     enum VideoStreamProfile {
         case inline
         case fullscreen
@@ -233,10 +246,12 @@ struct BiliClient {
 
     // MARK: - 搜索 (WBI)
 
+    /// 搜索结果包装。
     struct SearchData: Decodable {
         let result: [SearchItem]?
     }
 
+    /// 搜索结果条目（自定义解码，兼容 typeid 字符串/数字混用）。
     struct SearchItem: Decodable {
         let aid: Int?
         let mid: Int?
@@ -288,6 +303,7 @@ struct BiliClient {
         }
     }
 
+    /// 搜索视频（WBI 签名；musicOnly 限定音乐分区 tids=3）。
     func search(keyword: String, page: Int = 1, musicOnly: Bool = false) async throws -> [SearchItem] {
         var params = [
             "search_type": "video",
@@ -305,6 +321,7 @@ struct BiliClient {
 
     // MARK: - 相关推荐 (电台连播数据源)
 
+    /// 相关推荐条目（电台连播数据源）。
     struct RelatedItem: Decodable {
         struct Owner: Decodable { let mid: Int?; let name: String }
         let aid: Int?
@@ -316,12 +333,14 @@ struct BiliClient {
         let owner: Owner
     }
 
+    /// 取相关推荐（电台连播主力数据源）。
     func related(bvid: String) async throws -> [RelatedItem] {
         try await get("https://api.bilibili.com/x/web-interface/archive/related?bvid=\(bvid)")
     }
 
     // MARK: - 字幕/歌词
 
+    /// 字幕轨列表信息。
     struct SubtitleInfo: Decodable {
         struct Subtitle: Decodable {
             struct Item: Decodable {
@@ -334,6 +353,7 @@ struct BiliClient {
         let subtitle: Subtitle?
     }
 
+    /// 字幕文件（分行带时间）。
     struct SubtitleFile: Decodable {
         struct Line: Decodable {
             let from: Double
@@ -343,12 +363,14 @@ struct BiliClient {
         let body: [Line]
     }
 
+    /// 取字幕轨列表。
     func subtitles(bvid: String, cid: Int) async throws -> [SubtitleInfo.Subtitle.Item] {
         let info: SubtitleInfo = try await get(
             "https://api.bilibili.com/x/player/v2?bvid=\(bvid)&cid=\(cid)")
         return info.subtitle?.subtitles ?? []
     }
 
+    /// 下载并解析某条字幕轨。
     func subtitleFile(_ subtitle: SubtitleInfo.Subtitle.Item) async throws -> SubtitleFile {
         let raw = subtitle.subtitle_url.hasPrefix("//") ? "https:" + subtitle.subtitle_url : subtitle.subtitle_url
         guard let url = URL(string: raw) else {
@@ -365,21 +387,25 @@ struct BiliClient {
 
     // MARK: - 扫码登录
 
+    /// 登录二维码（展示用 url + 轮询用 key）。
     struct QRCode: Decodable {
         let url: String
         let qrcode_key: String
     }
 
+    /// 申请登录二维码。
     func qrCodeGenerate() async throws -> QRCode {
         try await get("https://passport.bilibili.com/x/passport-login/web/qrcode/generate")
     }
 
+    /// 扫码轮询结果：等待 / 过期 / 成功（带 Cookie）。
     enum QRPollResult {
         case waiting          // 未扫码 (86101) 或已扫码待确认 (86090)
         case expired          // 二维码过期 (86038)
         case success(cookie: String)
     }
 
+    /// 轮询扫码状态；成功时从回调 URL 解出 SESSDATA/bili_jct/DedeUserID 拼成 Cookie。
     func qrCodePoll(key: String) async throws -> QRPollResult {
         struct Poll: Decodable {
             let url: String
@@ -409,12 +435,14 @@ struct BiliClient {
 
     // MARK: - 收藏夹 (需登录)
 
+    /// 收藏夹。
     struct FavFolder: Decodable, Identifiable {
         let id: Int
         let title: String
         let media_count: Int
     }
 
+    /// 取我创建的收藏夹列表（需登录）。
     func favFolders() async throws -> [FavFolder] {
         guard let mid = CookieStore.mid else {
             throw APIError(code: -101, message: "未登录")
@@ -425,6 +453,7 @@ struct BiliClient {
         return data.list ?? []
     }
 
+    /// 收藏夹内的一条内容（attr≠0 表示已失效）。
     struct FavItem: Decodable {
         struct Upper: Decodable { let name: String }
         let bvid: String
@@ -435,16 +464,19 @@ struct BiliClient {
         let attr: Int   // 非 0 = 已失效
     }
 
+    /// 收藏夹内容分页。
     struct FavPage: Decodable {
         let medias: [FavItem]?
         let has_more: Bool
     }
 
+    /// 分页取某收藏夹的内容。
     func favItems(folderId: Int, page: Int) async throws -> FavPage {
         try await get(
             "https://api.bilibili.com/x/v3/fav/resource/list?media_id=\(folderId)&pn=\(page)&ps=40&platform=web")
     }
 
+    /// 收藏 / 取消收藏（写操作，需 CSRF token）。
     func setFavorite(aid: Int, folderId: Int, add: Bool) async throws {
         guard let csrf = CookieStore.csrf else {
             throw APIError(code: -101, message: "未登录或缺少 bili_jct")
@@ -462,6 +494,7 @@ struct BiliClient {
 
     // MARK: - UP 主合集/系列
 
+    /// UP 主合集/系列（type 1=合集 season，否则系列 series）。
     struct UPPlaylist: Decodable, Identifiable, Hashable {
         let id: Int
         let title: String
@@ -494,6 +527,7 @@ struct BiliClient {
         }
     }
 
+    /// 合集/系列里的一条视频。
     struct UPPlaylistItem: Decodable, Hashable {
         let bvid: String
         let aid: Int?
@@ -512,11 +546,13 @@ struct BiliClient {
         }
     }
 
+    /// 合集内容分页。
     struct UPPlaylistPage {
         let items: [UPPlaylistItem]
         let hasMore: Bool
     }
 
+    /// 取 UP 主公开的合集 + 系列列表。
     func upPlaylists(mid: Int) async throws -> [UPPlaylist] {
         struct Data: Decodable {
             struct ListBox: Decodable { let items_lists: [UPPlaylist]? }
@@ -528,6 +564,7 @@ struct BiliClient {
         return (data.seasons_list?.items_lists ?? []) + (data.series_list?.items_lists ?? [])
     }
 
+    /// 取当前视频自带的合集（ugc_season），无则返回 nil。
     func currentVideoPlaylist(bvid: String) async throws -> UPPlaylist? {
         let info = try await videoInfo(bvid: bvid)
         guard let season = info.ugc_season else { return nil }
@@ -551,6 +588,7 @@ struct BiliClient {
             items: items)
     }
 
+    /// 分页取合集/系列的视频（已内嵌 items 则直接返回）。
     func upPlaylistItems(mid: Int, playlist: UPPlaylist, page: Int = 1) async throws -> UPPlaylistPage {
         if let items = playlist.items {
             return UPPlaylistPage(items: items, hasMore: false)
@@ -601,6 +639,7 @@ struct BiliClient {
 
     // MARK: - 首页推荐 (WBI;登录后个性化)
 
+    /// 首页推荐条目。
     struct FeedItem: Decodable {
         struct Owner: Decodable { let name: String }
         let bvid: String?
@@ -610,6 +649,7 @@ struct BiliClient {
         let owner: Owner?
     }
 
+    /// 取首页推荐流（WBI 签名；登录后个性化）。
     func homeFeed(freshIdx: Int) async throws -> [FeedItem] {
         struct FeedData: Decodable { let item: [FeedItem]? }
         let query = try await WBISigner.sign([
@@ -624,11 +664,13 @@ struct BiliClient {
 
     // MARK: - 用户信息
 
+    /// 当前登录用户信息。
     struct UserInfo: Decodable {
         let uname: String
         let face: String
     }
 
+    /// 取当前登录用户信息（nav 接口）。
     func myInfo() async throws -> UserInfo {
         try await get("https://api.bilibili.com/x/web-interface/nav")
     }

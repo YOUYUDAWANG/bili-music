@@ -3,6 +3,7 @@ import SwiftUI
 
 private let log = Logger(subsystem: "com.fubuki.BiliMusic", category: "search")
 
+/// 搜索页：本地 TextField + 搜索历史 + 分页结果。多关键词并发查询、严格音乐过滤、忽略过期响应。
 struct SearchView: View {
     @Environment(PlayerEngine.self) private var engine
     @State private var query = ""
@@ -205,18 +206,22 @@ struct SearchView: View {
         }
     }
 
+    /// 从持久化字符串解码搜索历史。
     private func decodeSearchHistory() -> [String] {
         (try? JSONDecoder().decode([String].self, from: Data(searchHistoryData.utf8))) ?? []
     }
 
+    /// 是否展示「搜索历史」区。
     private var shouldShowSearchHistory: Bool {
         historyLoaded && results.isEmpty && !searchHistory.isEmpty && !searching && resultsQuery.isEmpty
     }
 
+    /// 是否展示初始空状态。
     private var shouldShowEmptyState: Bool {
         historyLoaded && !searchFocused && results.isEmpty && searchHistory.isEmpty && !searching && errorMessage == nil && resultsQuery.isEmpty
     }
 
+    /// 是否展示「没有结果」。
     private var shouldShowNoResults: Bool {
         !searching
             && results.isEmpty
@@ -225,12 +230,14 @@ struct SearchView: View {
             && errorMessage == nil
     }
 
+    /// 是否展示结果列表。
     private var shouldShowResults: Bool {
         !searching
             && !results.isEmpty
             && query.trimmingCharacters(in: .whitespacesAndNewlines) == resultsQuery
     }
 
+    /// 提交搜索：重置状态、记历史、起一个可取消的搜索任务。
     private func submitSearch() {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
@@ -250,6 +257,7 @@ struct SearchView: View {
         searchTask = Task { await search(text: text, searchID: searchID) }
     }
 
+    /// 把搜索词记入历史（去重置顶，上限 20）。
     private func rememberSearch(_ text: String) {
         var items = searchHistory.filter { $0.caseInsensitiveCompare(text) != .orderedSame }
         items.insert(text, at: 0)
@@ -261,6 +269,7 @@ struct SearchView: View {
         }
     }
 
+    /// 执行首批搜索（多关键词 × 多页并发），用 searchID 忽略过期响应。
     private func search(text: String, searchID: UUID) async {
         defer {
             if activeSearchID == searchID {
@@ -292,6 +301,7 @@ struct SearchView: View {
         }
     }
 
+    /// 滚到底部时加载更多；严格过滤可能整批被丢，故连试几批避免底部卡住。
     private func loadMoreIfNeeded() async {
         guard shouldShowResults,
               hasMoreResults,
@@ -344,11 +354,13 @@ struct SearchView: View {
         }
     }
 
+    /// 一批搜索结果：过滤后的曲目 + 原始条数（判断是否还有更多）。
     private struct SearchBatch {
         let tracks: [Track]
         let rawCount: Int
     }
 
+    /// 并发查询多关键词多页，合并 → 去重 → 严格音乐过滤（过滤在后台线程）。
     private func searchBatch(
         client: BiliClient,
         keywords: [String],
@@ -378,6 +390,7 @@ struct SearchView: View {
         return SearchBatch(tracks: filtered, rawCount: pageItems.count)
     }
 
+    /// 为查询词生成关键词变体（纯英数时额外尝试去空格版）。
     private func searchKeywords(for text: String) -> [String] {
         let compact = text.replacingOccurrences(of: #"\s+"#, with: "", options: .regularExpression)
         guard compact != text, compact.range(of: #"^[A-Za-z0-9]+$"#, options: .regularExpression) != nil else {
@@ -387,6 +400,7 @@ struct SearchView: View {
     }
 }
 
+/// 按 bvid 去重，保留首次出现顺序。
 private func dedupe(_ tracks: [Track]) -> [Track] {
     var seen = Set<String>()
     return tracks.filter { track in
@@ -396,6 +410,7 @@ private func dedupe(_ tracks: [Track]) -> [Track] {
     }
 }
 
+/// 通用曲目行：封面 + 标题 + UP 主 + 时长，播放中高亮。各列表复用。
 struct TrackRow: View {
     let track: Track
     var isPlaying = false
@@ -437,12 +452,14 @@ struct TrackRow: View {
         .contentShape(Rectangle())
     }
 
+    /// 秒数格式化为 mm:ss / h:mm:ss。
     private func format(_ seconds: Int) -> String {
         seconds >= 3600
             ? String(format: "%d:%02d:%02d", seconds / 3600, seconds % 3600 / 60, seconds % 60)
             : String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 
+    /// 给 B 站封面拼上缩略图缩放参数。
     private func thumbnailURL(_ url: URL?, size: Int) -> URL? {
         guard let url else { return nil }
         let raw = url.absoluteString
