@@ -1,9 +1,9 @@
 import Foundation
 
 enum MusicFilter {
-    // Bilibili music partition and common music sub-partitions.
+    // B 站音乐分区及常见音乐子分区。
     // 3: 音乐, 28: 原创音乐, 31: 翻唱, 30: VOCALOID/UTAU, 59: 演奏,
-    // 29: 音乐现场, 193: MV, 130: 音乐综合, 243/244: music vertical subtypes.
+    // 29: 音乐现场, 193: MV, 130: 音乐综合, 243/244: 音乐竖屏子类型。
     private static let musicTypeIDs: Set<Int> = [3, 28, 29, 30, 31, 59, 130, 193, 243, 244]
 
     private static let musicHints = [
@@ -103,7 +103,7 @@ enum MusicFilter {
             return true
         }
 
-        // Many song uploads are simply "artist - title" or "song / artist".
+        // 很多歌曲投稿就是简单的「歌手 - 歌名」或「歌名 / 歌手」。
         return looksLikeSongTitle(text) && duration <= 600
     }
 

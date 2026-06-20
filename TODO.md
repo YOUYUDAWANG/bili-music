@@ -1,171 +1,171 @@
-# BiliMusic TODO
+# BiliMusic 待办
 
-## Current Status
+## 当前状态
 
-- [x] Real-device playback is stable.
-- [x] QR login works on device.
-- [x] Search playback works on device.
-- [x] Lock-screen playback and controls work on device.
-- [x] Local cache works, including offline playback after disabling network.
-- [ ] AltStore renewal flow still needs to be verified.
+- [x] 真机播放稳定。
+- [x] 扫码登录在真机上可用。
+- [x] 搜索播放在真机上可用。
+- [x] 锁屏播放与控制在真机上可用。
+- [x] 本地缓存可用，包括断网后的离线播放。
+- [ ] AltStore 续签流程仍待验证。
 
-## P6 Polish
+## P6 打磨
 
-- [x] Shift the UI direction toward Apple Music.
-  - Shared neutral Apple-style accent and system background theme.
-  - Player actions use a compact symbol bar instead of label-heavy controls.
-  - Home, Search, Favorites, Cache, Settings, Queue, and picker sheets use native grouped list styling.
-- [x] Add favorite toggle from the player.
-  - Uses the last opened Bilibili favorite folder as the default target.
-  - Supports add/remove for the currently playing track.
-- [x] Add selectable favorite target from the player.
-  - Short press favorites to the default folder.
-  - Long press opens a folder picker and remembers the selected folder as the new default.
-- [x] Restore the last opened favorite folder by default.
-  - Favorites tab re-enters the last folder after loading the folder list.
-- [x] Reduce search UI stutter.
-  - Cancels stale search tasks.
-  - Moves result mapping/filtering off the main actor.
-  - Preloads top search results after results arrive.
-- [x] Reduce blank delay when tapping a new song.
-  - Preloads cid/playurl for the next few visible tracks.
-  - Reuses short-lived prepared stream URLs while they are fresh.
-- [x] Fix immediate player UI layout problems.
-  - Player cover now adapts to viewport size.
-  - Favorite/cache actions moved into compact icon controls.
-- [x] Fix real-device player sheet layout clipping.
-  - Removed large spacer-driven layout.
-  - Player page now uses a stable scrollable vertical layout so cover/title/controls stay visible.
-- [x] Add playback history.
-  - Persist recently played tracks locally.
-  - Show a compact history section or page.
-  - Let tapping a history item start playback.
-  - Show play counts in the Cache tab history section.
-- [x] Add playback modes.
-  - Player supports sequential, shuffle, repeat-one, and radio modes.
-  - Radio mode now picks related tracks immediately instead of waiting for the current queue to end.
-  - Favorites and Cache rows can start radio playback from the context menu.
-- [x] Show queue/recommendations as side pages in the player.
-  - The full player opens on the current song.
-  - Swipe to the left page for the current queue.
-  - Swipe to the right page for related recommendations for the current track.
-- [x] Make lyrics an optional Apple Music-style entry.
-  - The player only shows a lyrics button when online lyrics are matched.
-  - Tapping the button opens a synced lyrics sheet.
-- [x] Consolidate player controls into one icon row.
-  - Queue mode and playback quality are icon menus in the action row.
-  - Music/MV uses the YouTube Music-style segmented switch again.
-  - The player no longer shows the default favorite folder text.
-- [x] Preload MV stream URLs while in music mode.
-  - Switching to MV reuses a prepared video URL when available.
-- [x] Add MV fullscreen behavior.
-  - MV mode has a fullscreen button.
-  - iPhone landscape orientation is enabled and MV fills the player when the device is landscape.
-- [x] Make full player dismissal return to mini mode.
-  - Full player is a full-screen cover.
-  - Tapping chevron/down-dragging the handle dismisses back to the mini player.
-- [x] Add search history and reduce search field stutter.
-  - Replaced SwiftUI `.searchable` with a plain TextField.
-  - Replaced the search `List` with `ScrollView`/`LazyVStack` to reduce first-focus initialization cost.
-  - Removed BV/link parsing from the search box.
-  - Search now clears stale results immediately, ignores stale async responses, fetches multiple pages, and prewarms WBI signing.
-  - Search uses a looser search-specific music filter so normal music searches return more items.
-  - Stores recent search terms locally and allows clearing history.
-- [x] Restrict search results to music more aggressively.
-  - Decode Bilibili `typeid` from search results.
-  - Prefer Bilibili music partition ids and reject non-music partitions before title heuristics.
-  - Keep search relevance matching so unrelated videos do not appear just because their duration looks song-like.
-- [x] Improve player gesture and media controls.
-  - Down-swipe dismissal is attached to the whole player instead of only the top handle.
-  - Down-swipe dismissal threshold is higher to reduce accidental minimization.
-  - Mini-player upward swipe requires a more deliberate vertical gesture and uses spring animation.
-  - MV fullscreen button appears only after tapping the video and auto-hides.
-  - MV stream lookup now tries higher MP4 qualities before falling back.
-  - Playback quality menu shows the current audio quality and bitrate when available.
-- [x] Guard against unexpected auto-skip.
-  - End-of-track handling now verifies the notification belongs to the current player item.
-  - Automatic advance only fires when playback is actually near the expected track duration.
-- [x] Restore Cache tab focus.
-  - Cache tab shows only cached tracks again.
-  - Playback history moved to Settings → Playback History.
-- [x] Reduce tap-to-audio latency.
-  - New track playback cancels stale preload/radio prefetch tasks.
-  - New tracks start with audio first instead of blocking on MV stream lookup.
-  - Cover, lyrics, and MV availability checks now run after playback starts.
-  - AVPlayer now starts immediately with minimal forward buffering.
-  - Auto-cache, queue/radio prefetch, cover, lyrics, and MV checks are delayed so the first audio buffer gets priority.
-  - Search/result tracks use the lightweight `pagelist` endpoint to fill `cid` instead of full video info.
-- [x] Make mini-player upward drag feel interactive.
-  - Full player is now a custom overlay instead of `fullScreenCover`.
-  - While dragging up from the mini player, the full player follows the finger from the bottom.
-- [x] Improve playlist detection.
-  - The collection sheet first checks the current video's `ugc_season`.
-  - Falls back to the UP owner's public seasons/series when the current video has no detected collection.
-- [x] Show current-video playlist inside the player.
-  - When the current track belongs to a Bilibili collection, the player shows the collection near the bottom of the now-playing page.
-  - The current song is highlighted and auto-centered in that collection list.
-  - Tapping a collection item replaces the current queue with the whole collection and starts from that item.
-- [x] Reduce empty space in the player.
-  - If no current-video collection is available, the player shows a compact "up next" queue preview at the bottom.
-- [x] Tune full-player down-swipe dismissal.
-  - Lowered the dismissal threshold slightly while keeping it above the earlier accidental-trigger range.
-- [ ] Improve queue management.
-  - [x] Show the current queue in the full player.
-  - [x] Support jumping to a queued track.
-  - [x] Support removing queued tracks.
-  - [x] Support appending tracks from UP playlists.
-- [ ] Verify UP playlists on device.
-  - Player has a "合集" entry for the current track's UP owner.
-  - Current-video合集 should appear first if Bilibili exposes `ugc_season`.
-  - Uses public season/series playlists from the UP space.
-  - Bilibili API shape may need adjustment after real-account testing.
-- [ ] Verify lyrics on device.
-  - Uses LRCLIB online synced lyrics first.
-  - Does not fall back to Bilibili auto subtitles because they frequently produce incorrect "♪音乐♪" lines.
-  - Shows a clear empty state when no lyric source matches.
-  - Confirm matching is conservative enough to avoid wrong song variants.
-- [ ] Verify Music/MV switching on device.
-  - Player has a native segmented "音乐 / MV" switch.
-  - MV mode uses a stable MP4 stream and resumes near the current timestamp.
-  - Switching back to music should resume audio near the same timestamp.
-  - MV fullscreen button should open a fullscreen video layer without starting a second audio track.
-  - Rotating the phone landscape in MV should fill the player with video.
-  - Wi-Fi playback can default to MV mode via Settings.
-  - Entering background from MV mode switches to pure music and should keep lock-screen playback alive.
-- [ ] Add sleep timer.
-  - Presets: 15, 30, 45, 60 minutes.
-  - Stop playback when the timer ends.
-  - Show remaining time in the player or settings.
-- [ ] Improve error states.
-  - Detect expired or invalid Cookie and guide re-login.
-  - Show clear messages for missing audio streams, unavailable videos, and network failures.
-  - If a radio recommendation fails, skip to another candidate where possible.
-- [ ] Further reduce first-play latency if the stream still feels slow.
-  - Consider preparing an `AVPlayerItem` for the highlighted/next track, not just fetching playurl.
-  - Keep the previous visual state visible while the new item buffers.
-- [x] Improve cache browsing.
-  - Added sorting by recently cached, title, artist, size, or quality.
-  - Added search/filter for cached tracks.
-  - Cache rows show quality and file size more consistently.
+- [x] UI 方向向 Apple Music 看齐。
+  - 统一的中性 Apple 风格 accent 与系统背景主题。
+  - 播放器操作改用紧凑的图标栏，而非堆文字的控件。
+  - 首页、搜索、收藏、缓存、设置、队列以及各 picker sheet 都用原生 grouped 列表样式。
+- [x] 在播放器里加收藏开关。
+  - 默认收藏到最近一次打开的 B 站收藏夹。
+  - 支持对当前播放曲目添加/取消收藏。
+- [x] 在播放器里支持选择收藏目标。
+  - 短按收藏到默认收藏夹。
+  - 长按打开收藏夹选择器，并把选中的收藏夹记为新的默认。
+- [x] 默认恢复最近打开的收藏夹。
+  - 收藏 tab 在加载完收藏夹列表后重新进入上次的收藏夹。
+- [x] 减少搜索 UI 卡顿。
+  - 取消过期的搜索任务。
+  - 把结果的映射/过滤移出 main actor。
+  - 结果返回后预加载靠前的搜索项。
+- [x] 减少点击新歌后的空白等待。
+  - 为视野内接下来几首预加载 cid/playurl。
+  - 在短期有效期内复用已准备好的流 URL。
+- [x] 修复播放器即时的 UI 布局问题。
+  - 播放器封面现在自适应视口大小。
+  - 收藏/缓存操作移入紧凑的图标控件。
+- [x] 修复真机上播放器 sheet 的布局裁切。
+  - 移除靠大 spacer 撑起来的布局。
+  - 播放页改用稳定的可滚动纵向布局，保证封面/标题/控件始终可见。
+- [x] 加入播放历史。
+  - 本地持久化最近播放的曲目。
+  - 用紧凑的历史区块或页面展示。
+  - 点击历史项即可开始播放。
+  - 在缓存 tab 的历史区块显示播放次数。
+- [x] 加入播放模式。
+  - 播放器支持顺序、随机、单曲循环、电台四种模式。
+  - 电台模式现在立刻挑相关曲目，而不是等当前队列播完。
+  - 收藏和缓存列表行可从右键菜单启动电台播放。
+- [x] 把队列/推荐做成播放器的侧滑页。
+  - 全屏播放器打开时停在当前歌曲。
+  - 左滑到左页是当前队列。
+  - 右滑到右页是当前曲目的相关推荐。
+- [x] 把歌词做成 Apple Music 风格的可选入口。
+  - 只有匹配到在线歌词时，播放器才显示歌词按钮。
+  - 点击按钮打开同步歌词 sheet。
+- [x] 把播放器控件收拢成一行图标。
+  - 队列模式和播放音质做成操作行里的图标菜单。
+  - 音乐/MV 重新改用 YouTube Music 风格的分段开关。
+  - 播放器不再显示默认收藏夹的文字。
+- [x] 在音乐模式下预加载 MV 流 URL。
+  - 切到 MV 时优先复用已准备好的视频 URL。
+- [x] 加入 MV 全屏行为。
+  - MV 模式有全屏按钮。
+  - 启用 iPhone 横屏方向，设备横屏时 MV 铺满播放器。
+- [x] 让全屏播放器关闭后回到 mini 模式。
+  - 全屏播放器是一个 full-screen cover。
+  - 点 chevron / 下拉手柄即可收回 mini 播放器。
+- [x] 加入搜索历史并减少搜索框卡顿。
+  - 用普通 TextField 替换 SwiftUI 的 `.searchable`。
+  - 用 `ScrollView`/`LazyVStack` 替换搜索的 `List`，降低首次聚焦的初始化开销。
+  - 从搜索框里移除 BV/链接解析。
+  - 搜索现在会立即清掉过期结果、忽略过期的异步响应、抓取多页，并预热 WBI 签名。
+  - 搜索使用更宽松的搜索专用音乐过滤，让普通音乐搜索返回更多结果。
+  - 本地存储最近搜索词，并支持清空历史。
+- [x] 更激进地把搜索结果限制为音乐。
+  - 解析搜索结果里的 B 站 `typeid`。
+  - 在标题启发式之前，优先 B 站音乐分区 id 并排除非音乐分区。
+  - 保留搜索相关性匹配，避免仅因时长像歌就混入无关视频。
+- [x] 改进播放器手势与媒体控制。
+  - 下滑关闭绑定在整个播放器上，而不只是顶部手柄。
+  - 下滑关闭的阈值调高，减少误触最小化。
+  - mini 播放器上滑需要更明确的纵向手势，并使用弹簧动画。
+  - MV 全屏按钮只在点击视频后出现，并自动隐藏。
+  - MV 流查找现在会先尝试更高的 MP4 画质，再回退。
+  - 播放音质菜单在可用时显示当前音质与码率。
+- [x] 防止意外自动跳曲。
+  - 播放结束的处理现在会校验通知属于当前播放项。
+  - 只有播放真正接近预期曲目时长时，才触发自动切下一首。
+- [x] 恢复缓存 tab 的定位。
+  - 缓存 tab 重新只显示已缓存曲目。
+  - 播放历史移到 设置 → 播放历史。
+- [x] 降低点击到出声的延迟。
+  - 播放新曲目时取消过期的预加载/电台预取任务。
+  - 新曲目先出音频，而不是卡在 MV 流查找上。
+  - 封面、歌词、MV 可用性检测改到播放开始之后再跑。
+  - AVPlayer 现在立即起播，前向缓冲最小化。
+  - 自动缓存、队列/电台预取、封面、歌词、MV 检测都延后，让首个音频缓冲优先。
+  - 搜索/结果曲目用轻量的 `pagelist` 接口补 `cid`，而不是完整的视频信息接口。
+- [x] 让 mini 播放器上拖有交互感。
+  - 全屏播放器现在是自定义浮层，而非 `fullScreenCover`。
+  - 从 mini 播放器上拖时，全屏播放器从底部跟随手指。
+- [x] 改进歌单检测。
+  - 合集 sheet 先检查当前视频的 `ugc_season`。
+  - 当前视频没检测到合集时，回退到 UP 主公开的合集/系列。
+- [x] 在播放器里显示当前视频所属歌单。
+  - 当前曲目属于某个 B 站合集时，播放器在正在播放页底部附近显示该合集。
+  - 当前歌曲在合集列表里高亮并自动居中。
+  - 点击合集项会用整个合集替换当前队列，并从该项开始播放。
+- [x] 减少播放器的空白区域。
+  - 没有当前视频合集时，播放器在底部显示紧凑的「接下来」队列预览。
+- [x] 调整全屏播放器的下滑关闭。
+  - 略微降低关闭阈值，同时仍高于之前会误触的区间。
+- [ ] 改进队列管理。
+  - [x] 在全屏播放器里显示当前队列。
+  - [x] 支持跳到队列里的某一曲。
+  - [x] 支持移除队列里的曲目。
+  - [x] 支持从 UP 主歌单追加曲目。
+- [ ] 在真机上验证 UP 主歌单。
+  - 播放器为当前曲目的 UP 主提供「合集」入口。
+  - 若 B 站暴露了 `ugc_season`，当前视频合集应排在最前。
+  - 使用 UP 空间里的公开合集/系列歌单。
+  - 真实账号测试后，B 站 API 结构可能需要调整。
+- [ ] 在真机上验证歌词。
+  - 优先使用 LRCLIB 在线同步歌词。
+  - 不回退到 B 站自动字幕，因为它们经常产出错误的「♪音乐♪」行。
+  - 没有任何歌词源匹配时显示清晰的空状态。
+  - 确认匹配足够保守，避免匹配到错误的歌曲版本。
+- [ ] 在真机上验证音乐/MV 切换。
+  - 播放器有原生的「音乐 / MV」分段开关。
+  - MV 模式使用稳定的 MP4 流，并在当前时间点附近续播。
+  - 切回音乐应在大致相同的时间点续播音频。
+  - MV 全屏按钮应打开一个全屏视频层，且不启动第二路音频。
+  - MV 中横置手机应让视频铺满播放器。
+  - 可通过设置让 Wi-Fi 播放默认进入 MV 模式。
+  - 从 MV 模式进入后台应切回纯音乐，并保持锁屏播放不中断。
+- [ ] 加入定时关闭。
+  - 预设：15、30、45、60 分钟。
+  - 计时结束时停止播放。
+  - 在播放器或设置里显示剩余时间。
+- [ ] 改进错误状态。
+  - 检测过期或失效的 Cookie 并引导重新登录。
+  - 为缺失音频流、视频不可用、网络失败给出清晰提示。
+  - 电台推荐失败时，尽可能跳到另一个候选。
+- [ ] 若起播仍觉慢，进一步降低首播延迟。
+  - 考虑为高亮/下一首准备好 `AVPlayerItem`，而不仅是取 playurl。
+  - 在新项缓冲时保持上一帧画面可见。
+- [x] 改进缓存浏览。
+  - 加入按最近缓存、标题、UP主、大小、音质排序。
+  - 加入对已缓存曲目的搜索/过滤。
+  - 缓存列表行更一致地显示音质和文件大小。
 
-## Recommendation Tuning
+## 推荐调优
 
-- [x] Keep related-video radio as the primary music recommendation path.
-- [x] Centralize recommendation logic.
-  - Added a shared `RecommendationEngine` used by Home, radio auto-pick, and the player's related panel.
-  - Recommendations now merge current-song related videos, recent history, favorite-folder seeds, playlist neighbors, and artist/title search where appropriate.
-  - Candidate ranking now scores source quality, music-likeness, duration, artist/title relevance, favorites/cache signals, recent-play penalties, queue duplicates, and obvious non-music hints.
-- [x] Replace Bilibili home feed with music-only discovery sources.
-  - Home now uses current track/cache seeds and related videos first.
-  - Falls back to explicit music keyword search instead of generic Bilibili feed.
-- [x] Tighten radio filtering beyond duration if needed.
-  - Skip already played BVs.
-  - Prefer 1-11 minute tracks.
-  - Consider filtering titles that look like commentary, movie clips, or game videos.
-- [ ] Tune fallback music keywords after real-device use.
+- [x] 把相关视频电台作为主要的音乐推荐路径。
+- [x] 收敛推荐逻辑。
+  - 新增共享的 `RecommendationEngine`，供首页、电台自动选歌、播放器相关面板使用。
+  - 推荐现在会按情况融合当前歌曲的相关视频、最近历史、收藏夹种子、歌单相邻曲目，以及歌手/歌名搜索。
+  - 候选排序现在对来源质量、音乐相似度、时长、歌手/歌名相关性、收藏/缓存信号、最近播放惩罚、队列重复、明显的非音乐线索一并打分。
+- [x] 用纯音乐发现源替换 B 站首页推荐流。
+  - 首页现在优先用当前曲目/缓存种子和相关视频。
+  - 回退到明确的音乐关键词搜索，而非通用的 B 站推荐流。
+- [x] 必要时在时长之外收紧电台过滤。
+  - 跳过已播放的 BV。
+  - 偏好 1~11 分钟的曲目。
+  - 考虑过滤看起来像解说、影视剪辑或游戏视频的标题。
+- [ ] 真机使用后调优兜底音乐关键词。
 
-## Documentation
+## 文档
 
-- [x] Update architecture docs to reflect the current non-SwiftData implementation.
-- [ ] Document the real-device verification checklist.
-- [ ] Document AltStore installation and renewal once verified.
+- [x] 更新架构文档以反映当前非 SwiftData 的实现。
+- [ ] 编写真机验证清单。
+- [ ] 验证通过后，编写 AltStore 安装与续签文档。
