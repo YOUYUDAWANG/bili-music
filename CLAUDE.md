@@ -14,8 +14,8 @@ xcodegen generate
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-  xcodebuild -project BiliMusic.xcodeproj -scheme BiliMusic \
-  -destination 'generic/platform=iOS Simulator' build
+  xcodebuild -project BiliMusic.xcodeproj -target BiliMusic \
+  -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO build
 ```
 
 没有测试 target。所有验证都通过 AltStore 在真机 iPhone 上完成（免费开发者账号，签名 7 天有效需续签）。
