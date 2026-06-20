@@ -27,10 +27,12 @@ enum WBISigner {
         return query + "&w_rid=" + wRid
     }
 
+    /// 启动时预热 mixin key 缓存，避免首次搜索/推荐多等一次 nav 请求。
     static func prewarm() async {
         _ = try? await mixinKey()
     }
 
+    /// 取（并缓存 12 小时）mixin key：nav 接口的 img/sub key 经 64 位重排表混淆得到。
     private static func mixinKey() async throws -> String {
         if let cached = cachedKey, Date().timeIntervalSince(cached.fetchedAt) < 12 * 3600 {
             return cached.key
@@ -55,6 +57,7 @@ enum WBISigner {
         return key
     }
 
+    /// 从 URL 取文件名主体（去掉目录与扩展名）。
     private static func keyPart(_ url: String) -> String {
         url.split(separator: "/").last.map { $0.split(separator: ".").first.map(String.init) ?? "" } ?? ""
     }

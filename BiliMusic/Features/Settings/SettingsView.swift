@@ -1,6 +1,7 @@
 import CoreImage.CIFilterBuiltins
 import SwiftUI
 
+/// 设置页：账号登录/登出、推荐种子夹、音质、缓存、播放偏好、播放历史入口。
 struct SettingsView: View {
     @State private var loggedIn = CookieStore.isLoggedIn
     @State private var username: String?
@@ -93,17 +94,20 @@ struct SettingsView: View {
         }
     }
 
+    /// 登录后拉取并显示用户名。
     private func loadUsername() async {
         guard loggedIn else { return }
         username = try? await BiliClient().myInfo().uname
     }
 
+    /// 拉取收藏夹列表，用于「推荐种子收藏夹」选择器。
     private func loadFolders() async {
         guard loggedIn else { return }
         favFolders = (try? await BiliClient().favFolders()) ?? []
     }
 }
 
+/// 播放历史页：点击重播、可清空。
 private struct PlaybackHistoryView: View {
     @Environment(PlayerEngine.self) private var engine
     private var history: PlaybackHistoryStore { .shared }
@@ -187,6 +191,7 @@ struct QRLoginView: View {
         .onDisappear { pollTask?.cancel() }
     }
 
+    /// 生成二维码并开始轮询扫码结果，成功即存 Cookie 并回调。
     private func startLogin() {
         expired = false
         status = "用 B 站 App 扫一扫"
@@ -216,6 +221,7 @@ struct QRLoginView: View {
         }
     }
 
+    /// 把登录 URL 渲染成二维码图片。
     private func makeQR(_ string: String) -> UIImage? {
         let filter = CIFilter.qrCodeGenerator()
         filter.message = Data(string.utf8)

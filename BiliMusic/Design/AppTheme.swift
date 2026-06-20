@@ -1,5 +1,6 @@
 import SwiftUI
 
+/// 全局主题。Apple Music 风格的克制配色，统一用系统语义色，不强加品牌色。
 enum AppTheme {
     /// 单色控件语言:不强加品牌色,tint/高亮用自适应的 primary(黑/白),
     /// 唯一的色彩来自正在播放页的专辑封面虚化背景。更接近 Apple Music 的克制感。

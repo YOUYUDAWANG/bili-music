@@ -9,6 +9,7 @@ struct LibraryView: View {
 
     private var cache: CacheStore { .shared }
 
+    /// 按搜索词过滤 + 按所选规则排序后的可见条目。
     private var visibleEntries: [CachedEntry] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let filtered = query.isEmpty ? cache.entries : cache.entries.filter { entry in
@@ -136,11 +137,13 @@ struct LibraryView: View {
         }
     }
 
+    /// 字节数格式化为人类可读大小。
     private func format(bytes: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 }
 
+/// 缓存列表的排序方式。
 private enum CacheSortOrder: String, CaseIterable, Identifiable {
     case recentlyCached
     case title
@@ -171,6 +174,7 @@ private enum CacheSortOrder: String, CaseIterable, Identifiable {
     }
 }
 
+/// 缓存列表顶部的汇总行（数量 + 占用大小）。
 private struct CacheSummaryView: View {
     let count: Int
     let totalCount: Int

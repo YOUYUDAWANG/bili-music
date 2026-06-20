@@ -1,5 +1,6 @@
 import Foundation
 
+/// 判定内容是否为音乐的启发式：B 站音乐分区 typeID + 标题/时长规则。宁可漏判也不错判。
 enum MusicFilter {
     // B 站音乐分区及常见音乐子分区。
     // 3: 音乐, 28: 原创音乐, 31: 翻唱, 30: VOCALOID/UTAU, 59: 演奏,
@@ -25,14 +26,17 @@ enum MusicFilter {
         "中字", "解析", "分析",
     ]
 
+    /// 宽松判定（用于推荐扩列，允许更多疑似音乐通过）。
     static func isMusic(_ track: Track) -> Bool {
         isMusic(title: track.title, artist: track.artist, duration: track.duration)
     }
 
+    /// 严格判定（用于电台种子等高质量场景，时长门槛更窄）。
     static func isStrictMusic(_ track: Track) -> Bool {
         isStrictMusic(title: track.title, artist: track.artist, duration: track.duration)
     }
 
+    /// 搜索结果专用判定：结合分区、非音乐关键词与查询词相关性，更严格地排除泛内容。
     static func isSearchResultMusic(_ track: Track, query: String? = nil) -> Bool {
         // 搜索页宁可少一点,也不要混进解说/剪辑/教程/影视/游戏等泛内容。
         guard (60...720).contains(track.duration) else { return false }
@@ -53,6 +57,7 @@ enum MusicFilter {
         return hasMusicHint || looksLikeSongTitle(text)
     }
 
+    /// 结果是否与搜索词相关，避免仅因时长像歌就混入无关视频。
     private static func isRelevantToSearchQuery(_ track: Track, query: String) -> Bool {
         let normalizedQuery = normalize(query)
         guard !normalizedQuery.isEmpty else { return true }
@@ -79,6 +84,7 @@ enum MusicFilter {
         return matchedCount == tokens.count || (tokens.count >= 3 && matchedCount >= tokens.count - 1)
     }
 
+    /// 归一化：小写、去音调/全半角、清理高亮标签与标点空白，便于比较。
     private static func normalize(_ text: String) -> String {
         text
             .lowercased()
@@ -91,6 +97,7 @@ enum MusicFilter {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// 宽松判定的底层实现（时长 60~720 秒 + 关键词/命名启发）。
     static func isMusic(title: String, artist: String, duration: Int) -> Bool {
         guard (60...720).contains(duration) else { return false }
         let text = (title + " " + artist).lowercased()
@@ -107,6 +114,7 @@ enum MusicFilter {
         return looksLikeSongTitle(text) && duration <= 600
     }
 
+    /// 严格判定的底层实现（时长 75~540 秒，命中非音乐词直接否决）。
     static func isStrictMusic(title: String, artist: String, duration: Int) -> Bool {
         guard (75...540).contains(duration) else { return false }
         let text = (title + " " + artist).lowercased()
@@ -119,6 +127,7 @@ enum MusicFilter {
         return looksLikeSongTitle(text)
     }
 
+    /// 标题是否像「歌手 - 歌名」「《歌名》」之类的歌曲命名。
     private static func looksLikeSongTitle(_ text: String) -> Bool {
         text.contains(" - ") || text.contains("《") || text.contains("》")
             || text.contains("「") || text.contains("」") || text.contains("|")

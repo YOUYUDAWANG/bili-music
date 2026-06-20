@@ -69,6 +69,7 @@ struct FavoritesView: View {
         }
     }
 
+    /// 拉取收藏夹列表，并在首次进入时恢复上次打开的夹。
     private func load() async {
         guard CookieStore.isLoggedIn else { return }
         loading = folders.isEmpty
@@ -142,6 +143,7 @@ struct FavFolderDetailView: View {
         }
     }
 
+    /// 分页加载收藏夹内容，过滤失效稿件与非音乐。
     private func loadMore() async {
         guard hasMore, !loading else { return }
         loading = true

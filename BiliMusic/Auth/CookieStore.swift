@@ -5,6 +5,7 @@ import Security
 enum CookieStore {
     private static let service = "com.fubuki.BiliMusic.cookie"
 
+    /// Keychain 里的完整 Cookie 串。读写都走钥匙串；set 为 nil 即登出并清除。
     static var cookie: String? {
         get {
             let query: [String: Any] = [
@@ -30,6 +31,7 @@ enum CookieStore {
         }
     }
 
+    /// 是否存在已保存的登录态。
     static var isLoggedIn: Bool { cookie != nil }
 
     /// Cookie 里的 DedeUserID,收藏夹等接口需要

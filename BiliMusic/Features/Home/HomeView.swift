@@ -59,6 +59,7 @@ struct HomeView: View {
         }
     }
 
+    /// 取一批推荐；累计 shownBVIDs 去重，超过 80 个就清空重来。
     private func load() async {
         loading = true
         defer { loading = false }

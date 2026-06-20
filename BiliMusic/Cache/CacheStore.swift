@@ -5,6 +5,7 @@ import Observation
 private let log = Logger(subsystem: "com.fubuki.BiliMusic", category: "cache")
 
 
+/// 一条缓存索引：曲目元信息 + 本地文件名 + 大小 + 音质 + 下载时间。
 struct CachedEntry: Codable, Identifiable, Equatable {
     let bvid: String
     let cid: Int
@@ -39,20 +40,24 @@ final class CacheStore {
     // 缓存上百首后线性扫描会拖慢列表/播放页。
     private var index: [String: CachedEntry] = [:]
 
+    /// 重建 bvid → entry 的查找字典（entries 变化时自动调用）。
     private func rebuildIndex() {
         index = Dictionary(entries.map { ($0.bvid, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
+    /// 音频文件目录 Documents/audio/。
     nonisolated static var audioDir: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("audio", isDirectory: true)
     }
 
+    /// 索引 JSON 路径 Documents/cache_index.json。
     private var indexURL: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("cache_index.json")
     }
 
+    /// 建目录、读索引，并过滤掉文件已不存在的条目（应对 iCloud 清理）。
     private init() {
         try? FileManager.default.createDirectory(at: Self.audioDir, withIntermediateDirectories: true)
         if let data = try? Data(contentsOf: indexURL),
@@ -65,26 +70,31 @@ final class CacheStore {
         rebuildIndex()   // didSet 在 init 内不触发,手动建一次
     }
 
+    /// 按 bvid 取缓存条目（O(1)）。
     func entry(bvid: String) -> CachedEntry? {
         index[bvid]
     }
 
+    /// 缓存命中时返回本地文件 URL。
     func localURL(bvid: String) -> URL? {
         entry(bvid: bvid).map { Self.audioDir.appendingPathComponent($0.fileName) }
     }
 
+    /// 新增/覆盖一条缓存并置顶，去重后写盘。
     func add(_ entry: CachedEntry) {
         entries.removeAll { $0.bvid == entry.bvid }
         entries.insert(entry, at: 0)
         save()
     }
 
+    /// 删除某条缓存的文件与索引。
     func remove(_ entry: CachedEntry) {
         try? FileManager.default.removeItem(at: Self.audioDir.appendingPathComponent(entry.fileName))
         entries.removeAll { $0.bvid == entry.bvid }
         save()
     }
 
+    /// 删除全部缓存文件与索引。
     func removeAll() {
         entries.forEach {
             try? FileManager.default.removeItem(at: Self.audioDir.appendingPathComponent($0.fileName))
@@ -93,6 +103,7 @@ final class CacheStore {
         save()
     }
 
+    /// 全部缓存占用的总字节数。
     var totalSize: Int64 {
         entries.reduce(0) { $0 + $1.fileSize }
     }

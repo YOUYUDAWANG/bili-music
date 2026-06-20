@@ -5,6 +5,7 @@ import Observation
 private let log = Logger(subsystem: "com.fubuki.BiliMusic", category: "history")
 
 
+/// 播放历史。JSON 持久化、上限 300 条，供推荐去重与「最近播放」展示。
 @Observable
 @MainActor
 final class PlaybackHistoryStore {
@@ -19,6 +20,7 @@ final class PlaybackHistoryStore {
         load()
     }
 
+    /// 记录一次播放：已存在则次数 +1 并置顶，否则新增；超出 300 条裁掉最旧的。
     func record(_ track: Track) {
         if let index = entries.firstIndex(where: { $0.bvid == track.bvid }) {
             entries[index].playCount += 1
@@ -35,11 +37,13 @@ final class PlaybackHistoryStore {
         save()
     }
 
+    /// 清空全部播放历史。
     func clear() {
         entries = []
         save()
     }
 
+    /// 从磁盘读历史，并按最近播放时间排序。
     private func load() {
         guard let data = try? Data(contentsOf: fileURL),
               let decoded = try? JSONDecoder().decode([PlaybackHistoryEntry].self, from: data) else { return }
@@ -69,6 +73,7 @@ final class PlaybackHistoryStore {
     }
 }
 
+/// 单条播放历史：曲目 + 播放次数 + 最近播放时间。
 struct PlaybackHistoryEntry: Identifiable, Codable, Equatable {
     var track: Track
     var playCount: Int

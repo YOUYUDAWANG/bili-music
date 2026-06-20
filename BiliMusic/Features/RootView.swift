@@ -1,5 +1,6 @@
 import SwiftUI
 
+/// 根视图：底部 tab + 自定义全屏播放器浮层（从 mini bar 上滑出现）。
 struct RootView: View {
     @Environment(PlayerEngine.self) private var engine
     @Environment(\.scenePhase) private var scenePhase
@@ -67,6 +68,7 @@ struct RootView: View {
         }
     }
 
+    /// 全屏播放器的纵向偏移：展开为 0，否则停在屏幕下方并随拖动跟手。
     private func fullPlayerOffset(height: CGFloat) -> CGFloat {
         if showFullPlayer {
             return 0
@@ -74,6 +76,7 @@ struct RootView: View {
         return max(0, height + openPlayerTranslation)
     }
 
+    /// 收起全屏播放器，回到 mini 模式。
     private func closeFullPlayer() {
         withAnimation(.spring(response: 0.34, dampingFraction: 0.9)) {
             showFullPlayer = false

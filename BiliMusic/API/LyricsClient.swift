@@ -6,6 +6,7 @@ private let log = Logger(subsystem: "com.fubuki.BiliMusic", category: "lyrics")
 /// 在线歌词:LRCLIB 同步歌词。B 站标题噪声多、artist 是 UP主而非歌手,
 /// 所以先从标题解析真实歌名/歌手,再用「标题相似 + 时长门槛」严格匹配,宁可没有也不错配。
 struct LyricsClient {
+    /// LRCLIB 搜索返回的候选条目。
     struct Candidate: Decodable {
         let trackName: String
         let artistName: String
@@ -15,8 +16,10 @@ struct LyricsClient {
         let plainLyrics: String?
     }
 
+    /// 匹配不到歌词。
     enum LyricsError: Error { case noMatch }
 
+    /// 为曲目匹配同步歌词：解析歌名/歌手 → 搜索 → 双门槛筛选 → 解析 LRC。匹配不到抛 noMatch。
     func lyrics(for track: Track) async throws -> [PlayerEngine.LyricLine] {
         let parsed = Self.parseSong(from: track.title)
 
@@ -39,6 +42,7 @@ struct LyricsClient {
 
     // MARK: - 请求
 
+    /// 按歌名 + 歌手精确搜索。
     private func searchByFields(track: String, artist: String) async throws -> [Candidate] {
         try await request(queryItems: [
             URLQueryItem(name: "track_name", value: track),
@@ -46,10 +50,12 @@ struct LyricsClient {
         ])
     }
 
+    /// 自由文本搜索（兜底）。
     private func searchFreeText(_ query: String) async throws -> [Candidate] {
         try await request(queryItems: [URLQueryItem(name: "q", value: query)])
     }
 
+    /// 调 LRCLIB 搜索接口并解码候选列表。
     private func request(queryItems: [URLQueryItem]) async throws -> [Candidate] {
         var components = URLComponents(string: "https://lrclib.net/api/search")!
         components.queryItems = queryItems
@@ -81,6 +87,7 @@ struct LyricsClient {
             .0
     }
 
+    /// 给候选打分：歌名相似度 + 时长接近度，压低伴奏/钢琴/卡拉OK 版本。
     private func score(_ candidate: Candidate, songTitle wanted: String, duration: Int) -> Int {
         var value = 0
         let ct = comparable(candidate.trackName)
@@ -137,12 +144,14 @@ struct LyricsClient {
         return (text, nil)
     }
 
+    /// 正则替换的简写。
     private static func regexReplace(_ text: String, _ pattern: String, with replacement: String) -> String {
         text.replacingOccurrences(of: pattern, with: replacement, options: .regularExpression)
     }
 
     // MARK: - LRC 解析
 
+    /// 解析 LRC 文本为带时间区间的歌词行。
     private func parseLRC(_ text: String) -> [PlayerEngine.LyricLine] {
         let pattern = #"\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]\s*(.*)"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
@@ -176,6 +185,7 @@ struct LyricsClient {
         }
     }
 
+    /// 归一化歌名用于比较（去音调/标点/空白后小写）。
     private func comparable(_ value: String) -> String {
         value
             .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
