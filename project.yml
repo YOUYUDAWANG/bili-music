@@ -23,3 +23,13 @@ targets:
         UIBackgroundModes: [audio]
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
+  BiliMusicTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [BiliMusicTests]
+    dependencies:
+      - target: BiliMusic
+    settings:
+      base:
+        SWIFT_VERSION: "5.10"
+        CODE_SIGNING_ALLOWED: NO

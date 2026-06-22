@@ -148,11 +148,11 @@ final class SearchModelsTests: XCTestCase {
     }
 
     func testSectionsPromoteFirstResultAndSplitMV() {
-        let best = Track(bvid: "BV1", typeID: 3, title: "晴天", artist: "周杰伦",
+        let best = Track(typeID: 3, bvid: "BV1", title: "晴天", artist: "周杰伦",
                          coverURL: nil, duration: 269)
-        let song = Track(bvid: "BV2", typeID: 3, title: "七里香", artist: "周杰伦",
+        let song = Track(typeID: 3, bvid: "BV2", title: "七里香", artist: "周杰伦",
                          coverURL: nil, duration: 295)
-        let mv = Track(bvid: "BV3", typeID: 193, title: "稻香 MV", artist: "周杰伦",
+        let mv = Track(typeID: 193, bvid: "BV3", title: "稻香 MV", artist: "周杰伦",
                        coverURL: nil, duration: 260)
 
         let sections = SearchResultSections.make(from: [best, song, mv])
@@ -202,7 +202,7 @@ Append to `SearchModelsTests.swift`:
 @MainActor
 func testSearchStoreRestoresCachedSnapshot() {
     let store = SearchStore()
-    let track = Track(bvid: "BV1", typeID: 3, title: "晴天", artist: "周杰伦",
+    let track = Track(typeID: 3, bvid: "BV1", title: "晴天", artist: "周杰伦",
                       coverURL: nil, duration: 269)
     store.storeCachedSnapshotForTesting(
         query: "晴天",
@@ -662,13 +662,13 @@ Append:
 
 ```swift
 func testExpandedSearchStillRejectsObviousNonMusic() {
-    let game = Track(bvid: "BV4", typeID: 17, title: "游戏攻略 教程", artist: "UP",
+    let game = Track(typeID: 17, bvid: "BV4", title: "游戏攻略 教程", artist: "UP",
                      coverURL: nil, duration: 300)
     XCTAssertFalse(MusicFilter.isSearchResult(game, query: "晴天", mode: .expanded))
 }
 
 func testMVModePrefersMVSignals() {
-    let mv = Track(bvid: "BV5", typeID: 193, title: "晴天 Official MV", artist: "周杰伦",
+    let mv = Track(typeID: 193, bvid: "BV5", title: "晴天 Official MV", artist: "周杰伦",
                    coverURL: nil, duration: 269)
     XCTAssertTrue(MusicFilter.isSearchResult(mv, query: "晴天", mode: .mv))
 }
