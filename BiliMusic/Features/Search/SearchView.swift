@@ -37,12 +37,23 @@ struct SearchView: View {
                 .frame(height: 44)
                 .background(AppTheme.secondaryBackground, in: RoundedRectangle(cornerRadius: 12))
                 .padding(.horizontal, 16)
+
+                Picker("搜索范围", selection: Binding(
+                    get: { store.mode },
+                    set: { mode in store.setMode(mode, query: query) }
+                )) {
+                    ForEach(SearchResultMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
             }
             .padding(.bottom, 10)
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    if store.shouldShowSearchHistory() {
+                    if store.shouldShowSearchHistory() && trimmedQuery.isEmpty {
                         Text("搜索历史")
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(.secondary)
@@ -88,24 +99,54 @@ struct SearchView: View {
                         .padding(.horizontal, 16)
                     }
 
+                    if isTypingUnsubmittedQuery {
+                        typingPrompt
+                    }
+
                     if store.searching {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 36)
+                        HStack(spacing: 10) {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                            Text("正在搜索音乐...")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
                     } else if let errorMessage = store.errorMessage {
-                        Text(errorMessage)
-                            .foregroundStyle(.red)
-                            .font(.caption)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 8)
+                        VStack(spacing: 10) {
+                            Text(errorMessage)
+                                .foregroundStyle(.red)
+                                .font(.caption)
+                            Button("重试") {
+                                store.retryCurrentSearch { tracks in
+                                    engine.preload(tracks: tracks, limit: 2, delay: .milliseconds(500))
+                                }
+                            }
+                            .font(.subheadline.weight(.semibold))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 20)
                     } else if store.shouldShowEmptyState(searchFocused: searchFocused) {
                         ContentUnavailableView("搜点什么吧", systemImage: "music.note.list")
                             .frame(maxWidth: .infinity)
                             .padding(.top, 60)
                     } else if store.shouldShowNoResults(query: query) {
-                        ContentUnavailableView("没有找到音乐结果", systemImage: "music.note.list")
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 60)
+                        ContentUnavailableView {
+                            Label("没有找到音乐结果", systemImage: "music.note.list")
+                        } description: {
+                            Text("当前只显示音乐内容，可以扩大搜索范围。")
+                        } actions: {
+                            Button("扩大搜索") {
+                                store.broadenCurrentSearch { tracks in
+                                    engine.preload(tracks: tracks, limit: 2, delay: .milliseconds(500))
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 36)
                     }
 
                     if store.shouldShowResults(query: query) {
@@ -121,22 +162,25 @@ struct SearchView: View {
                                 if index != store.results.count - 1 {
                                     Divider().padding(.leading, 84)
                                 }
-                                if index >= store.results.count - 6 {
-                                    Color.clear
-                                        .frame(height: 1)
-                                        .onAppear {
-                                            Task {
-                                                await store.loadMoreIfNeeded { tracks in
-                                                    engine.preload(tracks: tracks, limit: 1, delay: .milliseconds(700))
-                                                }
-                                            }
-                                        }
-                                }
                             }
                             if store.loadingMore {
                                 ProgressView()
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 16)
+                            } else if store.hasMoreResults {
+                                Button {
+                                    Task {
+                                        await store.loadMore { tracks in
+                                            engine.preload(tracks: tracks, limit: 1, delay: .milliseconds(700))
+                                        }
+                                    }
+                                } label: {
+                                    Text("加载更多")
+                                        .font(.subheadline.weight(.semibold))
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 14)
+                                }
+                                .buttonStyle(.plain)
                             } else if !store.hasMoreResults {
                                 Text("没有更多结果")
                                     .font(.caption)
@@ -165,6 +209,29 @@ struct SearchView: View {
         .onChange(of: query) {
             store.queryDidChange(query)
         }
+    }
+
+    private var trimmedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var isTypingUnsubmittedQuery: Bool {
+        !trimmedQuery.isEmpty && trimmedQuery != store.resultsQuery && !store.searching
+    }
+
+    private var typingPrompt: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("按回车搜索 “\(trimmedQuery)”")
+                .font(.subheadline.weight(.semibold))
+            Text("默认只显示音乐内容，可切换到 MV 或扩大搜索。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppTheme.background, in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
     }
 
     private func submitSearch() {
