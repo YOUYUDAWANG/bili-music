@@ -102,6 +102,7 @@ final class SearchStore {
                     keywords: activeKeywords,
                     pages: pageStart...(pageStart + 1),
                     query: text,
+                    mode: mode,
                     excluding: excluded)
                 pageStart += 2
                 stillHasRawResults = batch.rawCount > 0
@@ -242,7 +243,8 @@ final class SearchStore {
                 client: client,
                 keywords: keywords,
                 pages: pageStart...(pageStart + pageCount - 1),
-                query: text)
+                query: text,
+                mode: mode)
 
             guard !Task.isCancelled, activeSearchID == searchID else { return }
             results = batch.tracks
@@ -278,13 +280,17 @@ final class SearchStore {
         keywords: [String],
         pages: ClosedRange<Int>,
         query: String,
+        mode: SearchResultMode,
         excluding excluded: Set<String> = []
     ) async throws -> SearchBatch {
         let pageItems = try await withThrowingTaskGroup(of: [BiliClient.SearchItem].self) { group in
             for keyword in keywords {
                 for page in pages {
                     group.addTask {
-                        try await client.search(keyword: keyword, page: page, musicOnly: true)
+                        try await client.search(
+                            keyword: keyword,
+                            page: page,
+                            musicOnly: mode.usesBiliMusicOnlySearch)
                     }
                 }
             }
@@ -297,7 +303,7 @@ final class SearchStore {
         let filtered = await Task.detached(priority: .userInitiated) {
             dedupeSearchTracks(pageItems.map(Track.init(search:))
                 .filter { !excluded.contains($0.bvid) }
-                .filter { MusicFilter.isSearchResultMusic($0, query: query) })
+                .filter { MusicFilter.isSearchResult($0, query: query, mode: mode) })
         }.value
         return SearchBatch(tracks: filtered, rawCount: pageItems.count)
     }

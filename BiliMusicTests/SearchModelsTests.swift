@@ -29,6 +29,20 @@ final class SearchModelsTests: XCTestCase {
         XCTAssertEqual(sections.mvs.map(\.bvid), ["BV3"])
     }
 
+    func testExpandedSearchRejectsObviousNonMusic() {
+        let gameplay = Track(typeID: 17, bvid: "BV9", title: "三国杀实况攻略合集", artist: "游戏区UP",
+                             coverURL: nil, duration: 320)
+
+        XCTAssertFalse(MusicFilter.isSearchResult(gameplay, query: "三国杀", mode: .expanded))
+    }
+
+    func testMVModeAcceptsMVSignal() {
+        let mv = Track(typeID: 193, bvid: "BV3", title: "周杰伦《晴天》Official MV", artist: "周杰伦",
+                       coverURL: nil, duration: 269)
+
+        XCTAssertTrue(MusicFilter.isSearchResult(mv, query: "晴天", mode: .mv))
+    }
+
     @MainActor
     func testSearchStoreRestoresCachedSnapshot() {
         let store = SearchStore()

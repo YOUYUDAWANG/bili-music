@@ -26,6 +26,8 @@ enum MusicFilter {
         "中字", "解析", "分析",
     ]
 
+    private static let weakMusicHints: Set<String> = ["合集", "playlist"]
+
     /// 宽松判定（用于推荐扩列，允许更多疑似音乐通过）。
     static func isMusic(_ track: Track) -> Bool {
         isMusic(title: track.title, artist: track.artist, duration: track.duration)
@@ -55,6 +57,62 @@ enum MusicFilter {
             return true
         }
         return hasMusicHint || looksLikeSongTitle(text)
+    }
+
+    /// 搜索模式专用入口：音乐默认收紧，MV 要明确有 MV 信号，扩大搜索允许跨分区但仍排除明显泛内容。
+    static func isSearchResult(_ track: Track, query: String? = nil, mode: SearchResultMode) -> Bool {
+        switch mode {
+        case .music:
+            return isSearchResultMusic(track, query: query)
+        case .mv:
+            return isSearchResultMV(track, query: query)
+        case .expanded:
+            return isExpandedSearchResult(track, query: query)
+        }
+    }
+
+    private static func isSearchResultMV(_ track: Track, query: String? = nil) -> Bool {
+        guard (60...900).contains(track.duration) else { return false }
+        let text = (track.title + " " + track.artist).lowercased()
+        guard hasMVSignal(track, text: text) else { return false }
+        if nonMusicHints.contains(where: { text.contains($0.lowercased()) }),
+           !musicHints.contains(where: { text.contains($0.lowercased()) }) {
+            return false
+        }
+        if let query, !isRelevantToSearchQuery(track, query: query) {
+            return false
+        }
+        return true
+    }
+
+    private static func isExpandedSearchResult(_ track: Track, query: String? = nil) -> Bool {
+        guard (45...900).contains(track.duration) else { return false }
+        let text = (track.title + " " + track.artist).lowercased()
+        let hasMusicHint = musicHints.contains { text.contains($0.lowercased()) }
+        let hasStrongMusicHint = musicHints.contains { hint in
+            let normalizedHint = hint.lowercased()
+            return !weakMusicHints.contains(normalizedHint) && text.contains(normalizedHint)
+        }
+        if nonMusicHints.contains(where: { text.contains($0.lowercased()) }), !hasStrongMusicHint {
+            return false
+        }
+        if let query, !isRelevantToSearchQuery(track, query: query) {
+            return false
+        }
+        if let typeID = track.typeID, musicTypeIDs.contains(typeID) {
+            return true
+        }
+        return hasStrongMusicHint || (hasMusicHint && !nonMusicHints.contains { text.contains($0.lowercased()) })
+            || looksLikeSongTitle(text)
+    }
+
+    private static func hasMVSignal(_ track: Track, text: String) -> Bool {
+        track.typeID == 193
+            || text.contains("mv")
+            || text.contains("music video")
+            || text.contains("official video")
+            || text.contains("官方视频")
+            || text.contains("官方影像")
     }
 
     /// 结果是否与搜索词相关，避免仅因时长像歌就混入无关视频。
