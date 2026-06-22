@@ -3,25 +3,33 @@ import OSLog
 
 private let log = Logger(subsystem: "com.fubuki.BiliMusic", category: "recommend")
 
-private actor RecommendationResultCache {
-    static let shared = RecommendationResultCache()
+/// 已打分的候选。
+private struct ScoredTrack {
+    let track: Track
+    let score: Int
+}
 
-    private var values: [String: (date: Date, tracks: [Track])] = [:]
+/// 缓存的是「打分后的候选池」而非最终列表:网络开销 8 分钟付一次,
+/// 但每次调用都在池子上重新加权随机抽样,所以「换一批」每次结果不同。
+private actor RecommendationPoolCache {
+    static let shared = RecommendationPoolCache()
+
+    private var values: [String: (date: Date, pool: [ScoredTrack])] = [:]
     private let ttl: TimeInterval = 8 * 60
 
-    func tracks(for key: String) -> [Track]? {
+    func pool(for key: String) -> [ScoredTrack]? {
         guard let cached = values[key],
               Date().timeIntervalSince(cached.date) < ttl else {
             values[key] = nil
             return nil
         }
-        return cached.tracks
+        return cached.pool
     }
 
-    func store(_ tracks: [Track], for key: String) {
-        values[key] = (Date(), tracks)
-        if values.count > 24 {
-            values.removeValue(forKey: values.keys.sorted().first ?? key)
+    func store(_ pool: [ScoredTrack], for key: String) {
+        values[key] = (Date(), pool)
+        if values.count > 24, let oldest = values.min(by: { $0.value.date < $1.value.date })?.key {
+            values.removeValue(forKey: oldest)
         }
     }
 }
@@ -85,29 +93,44 @@ struct RecommendationEngine {
     func recommendations(mode: Mode, context: Context, limit: Int = 24) async -> [Track] {
         let snapshot = await Self.makeSnapshot(mode: mode)
         let cacheKey = Self.cacheKey(mode: mode, context: context, snapshot: snapshot)
-        if let cached = await RecommendationResultCache.shared.tracks(for: cacheKey) {
-            let filtered = cached.filter { !Self.contains(context.excludedKeys, matching: $0) }
-            if !filtered.isEmpty {
-                return Array(filtered.prefix(limit))
+
+        // 电台要的是「最佳下一首」,需要实时最高分,不缓存、不随机。其余模式缓存候选池。
+        if mode != .radio, let cached = await RecommendationPoolCache.shared.pool(for: cacheKey) {
+            let available = cached.filter { !Self.contains(context.excludedKeys, matching: $0.track) }
+            // 池子还够抽 / 或首次加载(无排除集)就直接用;被排除集掏空了才重建。
+            if available.count >= limit || (context.excludedKeys.isEmpty && !available.isEmpty) {
+                return Self.select(from: cached, mode: mode, excluded: context.excludedKeys, limit: limit)
             }
         }
 
+        let candidates = await buildCandidates(mode: mode, context: context, snapshot: snapshot)
+        let pool = await Task.detached(priority: .userInitiated) {
+            Self.scoredPool(candidates, mode: mode, context: context, snapshot: snapshot)
+        }.value
+        if mode != .radio {
+            await RecommendationPoolCache.shared.store(pool, for: cacheKey)
+        }
+        return Self.select(from: pool, mode: mode, excluded: context.excludedKeys, limit: limit)
+    }
+
+    private func buildCandidates(mode: Mode, context: Context, snapshot: Snapshot) async -> [Candidate] {
         var candidates: [Candidate] = []
 
         switch mode {
         case .home:
             // 首页刷新必须快:旧逻辑会串行请求收藏/历史/缓存/当前歌曲十几个 related,
             // 真机上点击"换一批"会明显变慢。这里按质量分层短路,够用就停止补源。
-            let favorites = await favoriteSeeds(maxCount: 3, snapshot: snapshot)
-            candidates += await relatedCandidates(from: favorites, source: .favoriteSeed, perSeedLimit: 8)
+            // 种子取多一些(5 个)以扩大候选池,配合加权随机抽样减少重复。
+            let favorites = await favoriteSeeds(maxCount: 5, snapshot: snapshot)
+            candidates += await relatedCandidates(from: favorites, source: .favoriteSeed, perSeedLimit: 10)
 
-            if candidates.count < 12, let current = context.current {
+            if candidates.count < 16, let current = context.current {
                 candidates += await relatedCandidates(from: [current], source: .relatedCurrent, perSeedLimit: 12)
             }
-            if candidates.count < 12 {
+            if candidates.count < 16 {
                 candidates += await relatedCandidates(from: Array(snapshot.historyTracks.prefix(2)), source: .relatedHistory, perSeedLimit: 8)
             }
-            if candidates.count < 12 {
+            if candidates.count < 16 {
                 candidates += await relatedCandidates(from: Array(snapshot.cachedTracks.prefix(2)), source: .relatedHistory, perSeedLimit: 8)
             }
             if candidates.isEmpty {
@@ -134,13 +157,7 @@ struct RecommendationEngine {
             }
         }
 
-        let ranked = await Task.detached(priority: .userInitiated) {
-            Self.ranked(candidates, mode: mode, context: context, snapshot: snapshot, limit: limit)
-        }.value
-        if mode != .radio {
-            await RecommendationResultCache.shared.store(ranked, for: cacheKey)
-        }
-        return ranked
+        return candidates
     }
 
     func nextRadioTrack(after current: Track?, excludedKeys: Set<TrackKey>) async -> Track? {
@@ -284,7 +301,10 @@ struct RecommendationEngine {
         return FavoriteFolderSnapshot(id: folder.id, mediaCount: folder.media_count)
     }
 
-    private static func ranked(_ candidates: [Candidate], mode: Mode, context: Context, snapshot: Snapshot, limit: Int) -> [Track] {
+    /// 打分 + 按 key 去重(保留最高分),得到一个降序候选池。注意:这里**不**做
+    /// excludedKeys 过滤——排除集是「本次会话已展示」的动态信息,要在抽样阶段实时过滤,
+    /// 不能烘进缓存的池子里,否则会把池子越缩越小。
+    private static func scoredPool(_ candidates: [Candidate], mode: Mode, context: Context, snapshot: Snapshot) -> [ScoredTrack] {
         let current = context.current
 
         let scored = candidates
@@ -292,37 +312,47 @@ struct RecommendationEngine {
                 guard let current else { return true }
                 return !candidate.track.key.matches(current)
             }
-            .filter { !Self.contains(context.excludedKeys, matching: $0.track) }
             .map { candidate in
                 (candidate.track, score(candidate, current: current, queue: context.queue, mode: mode, snapshot: snapshot))
             }
             .filter { $0.1 > 0 }
 
-        var best: [TrackKey: (track: Track, score: Int)] = [:]
+        var best: [TrackKey: ScoredTrack] = [:]
         for item in scored {
             let key = best.keys.first { $0.matches(item.0) } ?? item.0.key
-            let previous = best[key]
-            if previous == nil || item.1 > previous!.score {
-                best[key] = (item.0, item.1)
-            }
+            if let previous = best[key], previous.score >= item.1 { continue }
+            best[key] = ScoredTrack(track: item.0, score: item.1)
         }
 
-        let sorted = best.values
-            .sorted { lhs, rhs in
-                if lhs.score == rhs.score {
-                    return lhs.track.title < rhs.track.title
-                }
-                return lhs.score > rhs.score
-            }
-            .map(\.track)
+        return best.values.sorted { lhs, rhs in
+            if lhs.score == rhs.score { return lhs.track.title < rhs.track.title }
+            return lhs.score > rhs.score
+        }
+    }
 
+    /// 从候选池里选出本次要展示的曲目。
+    /// 电台:要最佳下一首,实时排除后取最高分。其余:加权随机抽样,高分更可能被选中
+    /// 但每次都不同,从根本上解决「换一批总是那几首」。
+    private static func select(from pool: [ScoredTrack], mode: Mode, excluded: Set<TrackKey>, limit: Int) -> [Track] {
+        let available = pool.filter { !Self.contains(excluded, matching: $0.track) }
         if mode == .radio {
-            return Array(sorted.prefix(limit))
+            return Array(available.prefix(limit).map(\.track))
         }
+        return weightedSample(available, count: limit).map(\.track)
+    }
 
-        let head = sorted.prefix(8)
-        let tail = sorted.dropFirst(8).shuffled()
-        return Array((head + tail).prefix(limit))
+    /// 加权随机抽样(无放回,Efraimidis–Spirakis):key = U^(1/weight),取 key 最大的若干个。
+    /// weight 用分数,分数越高越可能靠前,但仍有随机性,保证每次刷新结果轮换。
+    private static func weightedSample(_ items: [ScoredTrack], count: Int) -> [ScoredTrack] {
+        items
+            .map { item -> (ScoredTrack, Double) in
+                let weight = Double(max(1, item.score))
+                let u = Double.random(in: 1e-9 ..< 1)
+                return (item, pow(u, 1.0 / weight))
+            }
+            .sorted { $0.1 > $1.1 }
+            .prefix(count)
+            .map(\.0)
     }
 
     private static func score(_ candidate: Candidate, current: Track?, queue: [Track], mode: Mode, snapshot: Snapshot) -> Int {

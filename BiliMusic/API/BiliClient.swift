@@ -45,10 +45,12 @@ struct BiliClient {
     }
 
     /// 发 GET：带统一头 + Cookie，解信封，code≠0 抛错。
+    /// 注意：传入的 url 必须已是合法编码。搜索的 query 由 WBISigner 百分号编码并据此签名,
+    /// 其余接口的参数都是 ASCII(bvid/cid/页码)。**不能**在这里再 addingPercentEncoding——
+    /// 那会把 `%E5` 二次编码成 `%25E5`,服务器收到的是字面量而非中文,搜索静默返回错误结果。
     private func get<T: Decodable>(_ url: String) async throws -> T {
         let start = CFAbsoluteTimeGetCurrent()
-        guard let encodedUrl = url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let urlObj = URL(string: encodedUrl) else {
+        guard let urlObj = URL(string: url) else {
             throw APIError(code: -1, message: "URL 非法")
         }
         var req = URLRequest(url: urlObj)
@@ -70,8 +72,7 @@ struct BiliClient {
     /// 发表单 POST（无返回体）：带统一头 + Cookie，code≠0 抛错。
     private func postVoid(_ url: String, form: [String: String]) async throws {
         let start = CFAbsoluteTimeGetCurrent()
-        guard let encodedUrl = url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let urlObj = URL(string: encodedUrl) else {
+        guard let urlObj = URL(string: url) else {
             throw APIError(code: -1, message: "URL 非法")
         }
         var req = URLRequest(url: urlObj)
