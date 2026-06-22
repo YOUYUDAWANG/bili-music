@@ -8,6 +8,9 @@ struct SearchView: View {
     @FocusState private var searchFocused: Bool
     @AppStorage("searchHistory") private var searchHistoryData = "[]"
 
+    private var history: PlaybackHistoryStore { .shared }
+    private var cache: CacheStore { .shared }
+
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
@@ -100,6 +103,8 @@ struct SearchView: View {
                         .padding(.horizontal, 16)
                     }
 
+                    landingContent
+
                     if isTypingUnsubmittedQuery {
                         typingPrompt
                     }
@@ -130,7 +135,7 @@ struct SearchView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 20)
-                    } else if store.shouldShowEmptyState(searchFocused: searchFocused) {
+                    } else if store.shouldShowEmptyState(searchFocused: searchFocused) && !hasLandingContent {
                         ContentUnavailableView("搜点什么吧", systemImage: "music.note.list")
                             .frame(maxWidth: .infinity)
                             .padding(.top, 60)
@@ -151,57 +156,7 @@ struct SearchView: View {
                     }
 
                     if store.shouldShowResults(query: query) {
-                        VStack(spacing: 0) {
-                            ForEach(Array(store.results.enumerated()), id: \.element.id) { index, track in
-                                Button {
-                                    let key = track.key
-                                    preparingTrackKey = key
-                                    Task {
-                                        await engine.play(tracks: store.results, startAt: index)
-                                        await MainActor.run {
-                                            if preparingTrackKey?.matches(track) == true {
-                                                preparingTrackKey = nil
-                                            }
-                                        }
-                                    }
-                                } label: {
-                                    searchResultRow(track: track)
-                                        .padding(.horizontal, 14)
-                                }
-                                .buttonStyle(.plain)
-                                if index != store.results.count - 1 {
-                                    Divider().padding(.leading, 84)
-                                }
-                            }
-                            if store.loadingMore {
-                                ProgressView()
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 16)
-                            } else if store.hasMoreResults {
-                                Button {
-                                    Task {
-                                        await store.loadMore { tracks in
-                                            engine.preload(tracks: tracks, limit: 1, delay: .milliseconds(700))
-                                        }
-                                    }
-                                } label: {
-                                    Text("加载更多")
-                                        .font(.subheadline.weight(.semibold))
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 14)
-                                }
-                                .buttonStyle(.plain)
-                            } else if !store.hasMoreResults {
-                                Text("没有更多结果")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 14)
-                            }
-                        }
-                        .background(AppTheme.background, in: RoundedRectangle(cornerRadius: 12))
-                        .padding(.horizontal, 16)
-                        .padding(.top, 8)
+                        searchResultsView
                     }
                 }
                 .padding(.bottom, 24)
@@ -212,6 +167,8 @@ struct SearchView: View {
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .task {
             await store.loadHistory()
+            await history.loadIfNeeded()
+            await cache.loadIfNeeded()
         }
         .onChange(of: searchHistoryData) {
             store.reloadHistoryIfNeeded()
@@ -227,6 +184,140 @@ struct SearchView: View {
 
     private var isTypingUnsubmittedQuery: Bool {
         !trimmedQuery.isEmpty && trimmedQuery != store.resultsQuery && !store.searching
+    }
+
+    private var recentTracks: [Track] {
+        Array(history.entries.prefix(6).map(\.track))
+    }
+
+    private var cachedTracks: [Track] {
+        Array(cache.entries.prefix(6).map(\.track))
+    }
+
+    private var hasLandingContent: Bool {
+        trimmedQuery.isEmpty && (!recentTracks.isEmpty || !cachedTracks.isEmpty)
+    }
+
+    @ViewBuilder
+    private var landingContent: some View {
+        if trimmedQuery.isEmpty {
+            VStack(alignment: .leading, spacing: 16) {
+                landingSection(title: "最近播放", systemImage: "clock.fill", tracks: recentTracks)
+                landingSection(title: "已缓存", systemImage: "arrow.down.circle.fill", tracks: cachedTracks)
+            }
+            .padding(.top, 12)
+        }
+    }
+
+    @ViewBuilder
+    private var searchResultsView: some View {
+        let sections = SearchResultSections.make(from: store.results)
+        VStack(alignment: .leading, spacing: 16) {
+            if let bestMatch = sections.bestMatch {
+                searchSection(title: "最佳匹配", tracks: [bestMatch])
+            }
+            searchSection(title: "歌曲", tracks: sections.songs)
+            searchSection(title: "MV", tracks: sections.mvs)
+            paginationControl
+        }
+        .padding(.top, 8)
+    }
+
+    @ViewBuilder
+    private func searchSection(title: String, tracks: [Track]) -> some View {
+        if !tracks.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                sectionHeader(title)
+                VStack(spacing: 0) {
+                    ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                        Button {
+                            playSearchResult(track)
+                        } label: {
+                            searchResultRow(track: track)
+                                .padding(.horizontal, 14)
+                        }
+                        .buttonStyle(.plain)
+                        if index != tracks.count - 1 {
+                            Divider().padding(.leading, 84)
+                        }
+                    }
+                }
+                .background(AppTheme.background, in: RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal, 16)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func landingSection(title: String, systemImage: String, tracks: [Track]) -> some View {
+        if !tracks.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Image(systemName: systemImage)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.accent)
+                    Text(title)
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.primary)
+                }
+                .padding(.horizontal, 20)
+                VStack(spacing: 0) {
+                    ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                        Button {
+                            play(tracks: tracks, startAt: index, selected: track)
+                        } label: {
+                            searchResultRow(track: track)
+                                .padding(.horizontal, 14)
+                        }
+                        .buttonStyle(.plain)
+                        if index != tracks.count - 1 {
+                            Divider().padding(.leading, 84)
+                        }
+                    }
+                }
+                .background(AppTheme.background, in: RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal, 16)
+            }
+        }
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.headline.weight(.bold))
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 20)
+    }
+
+    private var paginationControl: some View {
+        Group {
+            if store.loadingMore {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+            } else if store.hasMoreResults {
+                Button {
+                    Task {
+                        await store.loadMore { tracks in
+                            engine.preload(tracks: tracks, limit: 1, delay: .milliseconds(700))
+                        }
+                    }
+                } label: {
+                    Text("加载更多")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Text("没有更多结果")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+            }
+        }
+        .background(AppTheme.background, in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 16)
     }
 
     private var typingPrompt: some View {
@@ -259,6 +350,24 @@ struct SearchView: View {
 
     private func isPreparing(_ track: Track) -> Bool {
         preparingTrackKey.map { $0.matches(track) } ?? false
+    }
+
+    private func playSearchResult(_ track: Track) {
+        guard let index = store.results.firstIndex(where: { $0.key.matches(track) }) else { return }
+        play(tracks: store.results, startAt: index, selected: track)
+    }
+
+    private func play(tracks: [Track], startAt index: Int, selected track: Track) {
+        let key = track.key
+        preparingTrackKey = key
+        Task {
+            await engine.play(tracks: tracks, startAt: index)
+            await MainActor.run {
+                if preparingTrackKey?.matches(track) == true {
+                    preparingTrackKey = nil
+                }
+            }
+        }
     }
 
     private func submitSearch() {
