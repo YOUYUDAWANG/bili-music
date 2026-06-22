@@ -7,7 +7,6 @@ struct HomeView: View {
     @State private var tracks: [Track] = []
     @State private var loading = false
     @State private var errorMessage: String?
-    @State private var shownKeys: Set<TrackKey> = []
 
     var body: some View {
         NavigationStack {
@@ -58,22 +57,30 @@ struct HomeView: View {
         }
     }
 
-    /// 取一批推荐；累计 shownBVIDs 去重，超过 80 个就清空重来。
+    /// 取一批推荐：排除「最近 3 小时已在首页推过」的曲目(跨重启生效)。
+    /// 若排除集把候选掏空了就放宽一次,保证首页不空。
     private func load() async {
         loading = true
         defer { loading = false }
         errorMessage = nil
-        if shownKeys.count >= 80 { shownKeys = [] }
-        let result = await RecommendationEngine().recommendations(
-            mode: .home,
-            context: .init(current: engine.current, queue: engine.queue, excludedKeys: shownKeys),
-            limit: 30)
+        let excluded = RecentHomeFeedStore.shared.recentKeys()
+        var result = await fetch(excluding: excluded)
+        if result.isEmpty, !excluded.isEmpty {
+            result = await fetch(excluding: [])
+        }
         if result.isEmpty {
             errorMessage = CookieStore.isLoggedIn ? "暂时没有找到合适的音乐推荐" : nil
         } else {
-            shownKeys.formUnion(result.map(\.key))
+            RecentHomeFeedStore.shared.record(result.map(\.bvid))
             tracks = result
             engine.preload(tracks: result, limit: 3, delay: .milliseconds(700))
         }
+    }
+
+    private func fetch(excluding excluded: Set<TrackKey>) async -> [Track] {
+        await RecommendationEngine().recommendations(
+            mode: .home,
+            context: .init(current: engine.current, queue: engine.queue, excludedKeys: excluded),
+            limit: 30)
     }
 }
