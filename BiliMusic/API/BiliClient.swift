@@ -483,6 +483,28 @@ struct BiliClient {
             "https://api.bilibili.com/x/v3/fav/resource/list?media_id=\(folderId)&pn=\(page)&ps=40&platform=web")
     }
 
+    /// resource/ids 一次返回整个收藏夹的全部条目 id(只含 bvid,极轻量),
+    /// 用来构建「已收藏」全集以便从推荐里排除。兼容 bvid / bv_id 两种字段名。
+    private struct FavResourceID: Decodable {
+        let bvid: String
+        private enum CodingKeys: String, CodingKey { case bvid, bv_id }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            if let v = try? c.decode(String.self, forKey: .bvid) {
+                bvid = v
+            } else {
+                bvid = try c.decode(String.self, forKey: .bv_id)
+            }
+        }
+    }
+
+    /// 取整个收藏夹的全部 bvid(单请求,不分页)。
+    func favItemIDs(folderId: Int) async throws -> [String] {
+        let items: [FavResourceID] = try await get(
+            "https://api.bilibili.com/x/v3/fav/resource/ids?media_id=\(folderId)&platform=web")
+        return items.map(\.bvid)
+    }
+
     /// 收藏 / 取消收藏（写操作，需 CSRF token）。
     func setFavorite(aid: Int, folderId: Int, add: Bool) async throws {
         guard let csrf = CookieStore.csrf else {

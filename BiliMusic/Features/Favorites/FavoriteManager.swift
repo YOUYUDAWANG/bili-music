@@ -13,6 +13,7 @@ final class FavoriteManager {
     private(set) var defaultFolderTitle: String?
     private(set) var folders: [BiliClient.FavFolder] = []
     private(set) var foldersLoading = false
+    private var allIDsSyncedAt: Date?
 
     private let lastFolderKey = "lastFavoriteFolderId"
 
@@ -81,6 +82,28 @@ final class FavoriteManager {
         } catch {
             lastError = friendlyMessage(for: error)
         }
+    }
+
+    /// 同步「全部收藏」的 bvid 全集(跨所有收藏夹),供推荐去重用。
+    /// 结果缓存 10 分钟;只增不减(本会话内 toggle 会增量维护移除)。
+    /// 未登录直接返回——没有收藏可言。
+    func syncAllFavoriteIDs(force: Bool = false) async {
+        guard CookieStore.isLoggedIn else { return }
+        if !force, let at = allIDsSyncedAt, Date().timeIntervalSince(at) < 600 { return }
+        if folders.isEmpty { await loadFolders() }
+        let client = self.client
+        let targets = folders.filter { $0.media_count > 0 }.map(\.id)
+        guard !targets.isEmpty else { allIDsSyncedAt = Date(); return }
+        let ids = await withTaskGroup(of: [String].self) { group in
+            for folderId in targets {
+                group.addTask { (try? await client.favItemIDs(folderId: folderId)) ?? [] }
+            }
+            var all: Set<String> = []
+            for await batch in group { all.formUnion(batch) }
+            return all
+        }
+        favoriteBVIDs.formUnion(ids)
+        allIDsSyncedAt = Date()
     }
 
     /// 取默认收藏夹 id：优先上次用的，否则取「默认」夹或第一个。

@@ -96,10 +96,11 @@ struct RecommendationEngine {
 
         // 电台要的是「最佳下一首」,需要实时最高分,不缓存、不随机。其余模式缓存候选池。
         if mode != .radio, let cached = await RecommendationPoolCache.shared.pool(for: cacheKey) {
-            let available = cached.filter { !Self.contains(context.excludedKeys, matching: $0.track) }
+            let usable = Self.usable(cached, mode: mode, snapshot: snapshot)
+            let available = usable.filter { !Self.contains(context.excludedKeys, matching: $0.track) }
             // 池子还够抽 / 或首次加载(无排除集)就直接用;被排除集掏空了才重建。
             if available.count >= limit || (context.excludedKeys.isEmpty && !available.isEmpty) {
-                return Self.select(from: cached, mode: mode, excluded: context.excludedKeys, limit: limit)
+                return Self.select(from: usable, mode: mode, excluded: context.excludedKeys, limit: limit)
             }
         }
 
@@ -110,7 +111,16 @@ struct RecommendationEngine {
         if mode != .radio {
             await RecommendationPoolCache.shared.store(pool, for: cacheKey)
         }
-        return Self.select(from: pool, mode: mode, excluded: context.excludedKeys, limit: limit)
+        let usable = Self.usable(pool, mode: mode, snapshot: snapshot)
+        return Self.select(from: usable, mode: mode, excluded: context.excludedKeys, limit: limit)
+    }
+
+    /// 发现类推荐(首页 / 播放器推荐面板)不展示已收藏的歌——你都收藏了不需要再推。
+    /// 用实时收藏集过滤,所以即便命中的是几分钟前的缓存池,刚收藏的也会立刻消失。
+    /// 电台连播保留收藏曲(否则电台永远不放你喜欢的歌)。
+    private static func usable(_ pool: [ScoredTrack], mode: Mode, snapshot: Snapshot) -> [ScoredTrack] {
+        guard mode != .radio else { return pool }
+        return pool.filter { !snapshot.favoriteBVIDs.contains($0.track.bvid) }
     }
 
     private func buildCandidates(mode: Mode, context: Context, snapshot: Snapshot) async -> [Candidate] {
@@ -273,6 +283,10 @@ struct RecommendationEngine {
     private static func makeSnapshot(mode: Mode) async -> Snapshot {
         await CacheStore.shared.loadIfNeeded()
         await PlaybackHistoryStore.shared.loadIfNeeded()
+        // 发现类推荐要排除已收藏的歌,先补全收藏全集(缓存 10 分钟,绝大多数调用是命中)。
+        if mode != .radio {
+            await FavoriteManager.shared.syncAllFavoriteIDs()
+        }
         let historyEntries = PlaybackHistoryStore.shared.entries
         let cacheEntries = CacheStore.shared.entries
         let favoriteBVIDs = FavoriteManager.shared.favoriteBVIDs
