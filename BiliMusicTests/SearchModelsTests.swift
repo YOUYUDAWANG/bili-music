@@ -28,4 +28,35 @@ final class SearchModelsTests: XCTestCase {
         XCTAssertEqual(sections.songs.map(\.bvid), ["BV2"])
         XCTAssertEqual(sections.mvs.map(\.bvid), ["BV3"])
     }
+
+    @MainActor
+    func testSearchStoreRestoresCachedSnapshot() {
+        let store = SearchStore()
+        let track = Track(typeID: 3, bvid: "BV1", title: "晴天", artist: "周杰伦",
+                          coverURL: nil, duration: 269)
+        store.storeCachedSnapshotForTesting(
+            query: "晴天",
+            mode: .music,
+            snapshot: SearchCachedSnapshot(
+                tracks: [track],
+                nextPage: 4,
+                activeKeywords: ["晴天"],
+                hasMoreResults: true))
+
+        let restored = store.restoreCachedResultsIfAvailable(for: " 晴天 ")
+
+        XCTAssertTrue(restored)
+        XCTAssertEqual(store.results.map(\.bvid), ["BV1"])
+        XCTAssertTrue(store.hasMoreResults)
+    }
+
+    @MainActor
+    func testChangingModeClearsTransientResultsForSameQuery() {
+        let store = SearchStore()
+        store.setMode(.mv, query: "晴天")
+
+        XCTAssertEqual(store.mode, .mv)
+        XCTAssertTrue(store.results.isEmpty)
+        XCTAssertFalse(store.hasMoreResults)
+    }
 }

@@ -12,11 +12,14 @@ final class SearchStore {
     private(set) var resultsQuery = ""
     private(set) var hasMoreResults = false
     private(set) var loadingMore = false
+    private(set) var mode: SearchResultMode = .music
+    private(set) var activeQuery = ""
 
     private var searchTask: Task<Void, Never>?
     private var activeSearchID = UUID()
     private var activeKeywords: [String] = []
     private var nextPage = 1
+    private var resultCache: [SearchCacheKey: SearchCachedSnapshot] = [:]
     private let historyKey = "searchHistory"
 
     func loadHistory() async {
@@ -53,9 +56,13 @@ final class SearchStore {
         guard !text.isEmpty else { return }
         searchTask?.cancel()
         let searchID = UUID()
+        let hadCachedResults = restoreCachedResultsIfAvailable(for: text)
+        if !hadCachedResults {
+            resetTransientState(cancelTask: false)
+        }
         activeSearchID = searchID
-        resetTransientState(cancelTask: false)
-        searching = true
+        activeQuery = text
+        searching = !hadCachedResults
         rememberSearch(text)
         searchTask = Task { [weak self] in
             await self?.search(text: text, searchID: searchID, preload: preload)
@@ -63,12 +70,19 @@ final class SearchStore {
     }
 
     func loadMoreIfNeeded(preload: @escaping @MainActor ([Track]) -> Void) async {
+        await loadMore(preload: preload)
+    }
+
+    func loadMore(preload: @escaping @MainActor ([Track]) -> Void) async {
         guard shouldShowResults(query: resultsQuery),
               hasMoreResults,
               !searching,
               !loadingMore,
               !activeKeywords.isEmpty else { return }
+        await loadMorePage(preload: preload)
+    }
 
+    private func loadMorePage(preload: @escaping @MainActor ([Track]) -> Void) async {
         let text = resultsQuery
         let searchID = activeSearchID
         loadingMore = true
@@ -106,12 +120,56 @@ final class SearchStore {
             hasMoreResults = stillHasRawResults && nextPage <= 30
             if !loaded.isEmpty {
                 results.append(contentsOf: loaded)
+                cacheCurrentSnapshot()
                 preload(loaded)
             }
         } catch {
             guard activeSearchID == searchID, resultsQuery == text else { return }
             hasMoreResults = false
         }
+    }
+
+    @discardableResult
+    func restoreCachedResultsIfAvailable(for query: String) -> Bool {
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = SearchCacheKey(query: text, mode: mode)
+        guard let snapshot = resultCache[key] else { return false }
+        results = snapshot.tracks
+        resultsQuery = text
+        activeQuery = text
+        activeKeywords = snapshot.activeKeywords
+        nextPage = snapshot.nextPage
+        hasMoreResults = snapshot.hasMoreResults
+        errorMessage = nil
+        searching = false
+        loadingMore = false
+        return true
+    }
+
+    func setMode(_ newMode: SearchResultMode, query: String) {
+        guard mode != newMode else { return }
+        mode = newMode
+        resetTransientState(cancelTask: true)
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty {
+            activeQuery = text
+            _ = restoreCachedResultsIfAvailable(for: text)
+        }
+    }
+
+    func retryCurrentSearch(preload: @escaping @MainActor ([Track]) -> Void) {
+        let text = activeQuery.isEmpty ? resultsQuery : activeQuery
+        submitSearch(text, preload: preload)
+    }
+
+    func broadenCurrentSearch(preload: @escaping @MainActor ([Track]) -> Void) {
+        let text = activeQuery.isEmpty ? resultsQuery : activeQuery
+        setMode(.expanded, query: text)
+        submitSearch(text, preload: preload)
+    }
+
+    func storeCachedSnapshotForTesting(query: String, mode: SearchResultMode, snapshot: SearchCachedSnapshot) {
+        resultCache[SearchCacheKey(query: query, mode: mode)] = snapshot
     }
 
     func shouldShowSearchHistory() -> Bool {
@@ -145,6 +203,7 @@ final class SearchStore {
         errorMessage = nil
         results = []
         resultsQuery = ""
+        activeQuery = ""
         activeKeywords = []
         nextPage = 1
         hasMoreResults = false
@@ -188,14 +247,25 @@ final class SearchStore {
             guard !Task.isCancelled, activeSearchID == searchID else { return }
             results = batch.tracks
             resultsQuery = text
+            activeQuery = text
             activeKeywords = keywords
             nextPage = pageStart + pageCount
             hasMoreResults = batch.rawCount > 0 && nextPage <= 30
+            cacheCurrentSnapshot()
             preload(batch.tracks)
         } catch {
             guard !Task.isCancelled, activeSearchID == searchID else { return }
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func cacheCurrentSnapshot() {
+        guard !resultsQuery.isEmpty else { return }
+        resultCache[SearchCacheKey(query: resultsQuery, mode: mode)] = SearchCachedSnapshot(
+            tracks: results,
+            nextPage: nextPage,
+            activeKeywords: activeKeywords,
+            hasMoreResults: hasMoreResults)
     }
 
     private struct SearchBatch {
