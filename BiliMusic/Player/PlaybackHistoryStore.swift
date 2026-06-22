@@ -13,15 +13,20 @@ final class PlaybackHistoryStore {
 
     private(set) var entries: [PlaybackHistoryEntry] = []
     private let fileURL: URL
+    private(set) var isLoaded = false
+    private var loadTask: Task<[PlaybackHistoryEntry], Never>?
+    private var loadStartVersion = 0
+    private var mutationVersion = 0
+    private var discardPendingLoad = false
 
     private init() {
         fileURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("playback-history.json")
-        load()
     }
 
     /// 记录一次播放：已存在则次数 +1 并置顶，否则新增；超出 300 条裁掉最旧的。
     func record(_ track: Track) {
+        mutationVersion += 1
         if let index = entries.firstIndex(where: { $0.key.matches(track) }) {
             entries[index].playCount += 1
             entries[index].lastPlayedAt = Date()
@@ -39,15 +44,39 @@ final class PlaybackHistoryStore {
 
     /// 清空全部播放历史。
     func clear() {
+        mutationVersion += 1
+        if loadTask != nil, !isLoaded {
+            discardPendingLoad = true
+        }
         entries = []
         save(immediate: true)
     }
 
-    /// 从磁盘读历史，并按最近播放时间排序。
-    private func load() {
-        guard let data = try? Data(contentsOf: fileURL),
-              let decoded = try? JSONDecoder().decode([PlaybackHistoryEntry].self, from: data) else { return }
-        entries = decoded.sorted { $0.lastPlayedAt > $1.lastPlayedAt }
+    /// 从磁盘异步读历史，并按最近播放时间排序。
+    func loadIfNeeded() async {
+        guard !isLoaded else { return }
+        if let loadTask {
+            let loaded = await loadTask.value
+            applyLoadedEntries(loaded, startedAt: loadStartVersion)
+            return
+        }
+
+        let fileURL = fileURL
+        loadStartVersion = mutationVersion
+        let task = Task<[PlaybackHistoryEntry], Never>.detached(priority: .utility) {
+            let start = CFAbsoluteTimeGetCurrent()
+            guard let data = try? Data(contentsOf: fileURL),
+                  let decoded = try? JSONDecoder().decode([PlaybackHistoryEntry].self, from: data) else {
+                return []
+            }
+            let entries = decoded.sorted { $0.lastPlayedAt > $1.lastPlayedAt }
+            let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+            log.debug("load() \(elapsed, format: .fixed(precision: 1))ms entries=\(entries.count)")
+            return entries
+        }
+        loadTask = task
+        let loaded = await task.value
+        applyLoadedEntries(loaded, startedAt: loadStartVersion)
     }
 
     private var saveTask: Task<Void, Never>?
@@ -87,6 +116,42 @@ final class PlaybackHistoryStore {
             let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
             log.debug("save() \(elapsed, format: .fixed(precision: 1))ms entries=\(snapshot.count)")
         }.value
+    }
+
+    private func applyLoadedEntries(_ loaded: [PlaybackHistoryEntry], startedAt version: Int) {
+        guard !isLoaded else { return }
+        let changedWhileLoading = mutationVersion != version
+        if discardPendingLoad {
+            isLoaded = true
+        } else if changedWhileLoading {
+            entries = Self.merge(current: entries, loaded: loaded)
+            save()
+            isLoaded = true
+        } else {
+            entries = loaded
+            isLoaded = true
+        }
+        loadTask = nil
+        discardPendingLoad = false
+    }
+
+    private static func merge(
+        current: [PlaybackHistoryEntry],
+        loaded: [PlaybackHistoryEntry]
+    ) -> [PlaybackHistoryEntry] {
+        var result = current
+        for entry in loaded {
+            if let index = result.firstIndex(where: { $0.key.matches(entry.track) }) {
+                result[index].playCount += entry.playCount
+                if entry.lastPlayedAt > result[index].lastPlayedAt {
+                    result[index].lastPlayedAt = entry.lastPlayedAt
+                    result[index].track = entry.track
+                }
+            } else {
+                result.append(entry)
+            }
+        }
+        return Array(result.sorted { $0.lastPlayedAt > $1.lastPlayedAt }.prefix(300))
     }
 }
 

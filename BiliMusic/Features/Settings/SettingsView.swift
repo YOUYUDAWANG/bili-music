@@ -149,6 +149,9 @@ private struct PlaybackHistoryView: View {
         .scrollContentBackground(.hidden)
         .background(AppTheme.groupedBackground)
         .navigationTitle("播放历史")
+        .task {
+            await history.loadIfNeeded()
+        }
         .overlay {
             if history.entries.isEmpty {
                 ContentUnavailableView("没有播放历史", systemImage: "clock")

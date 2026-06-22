@@ -27,6 +27,52 @@ final class ImageMemoryCache {
     }
 }
 
+actor ImageLoadCoordinator {
+    static let shared = ImageLoadCoordinator()
+
+    private let session: URLSession
+    private var inFlight: [URL: Task<UIImage?, Never>] = [:]
+
+    private init() {
+        let config = URLSessionConfiguration.default
+        config.urlCache = URLCache(
+            memoryCapacity: 32 * 1024 * 1024,
+            diskCapacity: 128 * 1024 * 1024,
+            diskPath: "BiliMusicImages")
+        config.requestCachePolicy = .returnCacheDataElseLoad
+        config.timeoutIntervalForRequest = 12
+        config.httpMaximumConnectionsPerHost = 6
+        session = URLSession(configuration: config)
+    }
+
+    func image(for url: URL, headers: [String: String] = BiliClient.headers) async -> UIImage? {
+        if let task = inFlight[url] {
+            return await task.value
+        }
+
+        var request = URLRequest(url: url)
+        headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
+        let session = session
+        let task = Task<UIImage?, Never>(priority: .utility) {
+            do {
+                let (data, response) = try await session.data(for: request)
+                if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                    return nil
+                }
+                return await Task.detached(priority: .utility) {
+                    UIImage(data: data)
+                }.value
+            } catch {
+                return nil
+            }
+        }
+        inFlight[url] = task
+        let image = await task.value
+        inFlight[url] = nil
+        return image
+    }
+}
+
 struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     let url: URL?
     var headers: [String: String] = BiliClient.headers
@@ -59,19 +105,12 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
             return
         }
         image = nil
-        do {
-            var request = URLRequest(url: url)
-            headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
-            let (data, _) = try await URLSession.shared.data(for: request)
-            guard !Task.isCancelled else { return }
-            let decoded = await Task.detached(priority: .utility) {
-                UIImage(data: data)
-            }.value
-            guard !Task.isCancelled, let decoded else { return }
-            ImageMemoryCache.shared.insert(decoded, for: url)
-            image = decoded
-        } catch {
+        guard let decoded = await ImageLoadCoordinator.shared.image(for: url, headers: headers),
+              !Task.isCancelled else {
             image = nil
+            return
         }
+        ImageMemoryCache.shared.insert(decoded, for: url)
+        image = decoded
     }
 }

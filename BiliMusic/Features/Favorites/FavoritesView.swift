@@ -152,15 +152,16 @@ struct FavFolderDetailView: View {
             let result = try await BiliClient().favItems(folderId: folderId, page: page)
             page += 1
             hasMore = result.has_more
-            tracks += (result.medias ?? [])
+            let newTracks = (result.medias ?? [])
                 .filter { $0.attr == 0 }   // 跳过已失效的收藏
                 .map { item in
                     Track(bvid: item.bvid, title: item.title, artist: item.upper.name,
                           coverURL: URL(string: item.cover), duration: item.duration)
                 }
                 .filter(MusicFilter.isMusic)
+            tracks += newTracks
             FavoriteManager.shared.markLoaded(folderId: folderId, title: title, tracks: tracks)
-            engine.preload(tracks: tracks)
+            engine.preload(tracks: newTracks, limit: 2, delay: .milliseconds(700))
         } catch {
             errorMessage = error.localizedDescription
         }

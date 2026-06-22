@@ -104,6 +104,9 @@ struct LibraryView: View {
             .background(AppTheme.groupedBackground)
             .navigationTitle("缓存")
             .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "搜索缓存")
+            .task {
+                await cache.loadIfNeeded()
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {

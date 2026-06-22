@@ -39,9 +39,20 @@ final class CacheStore {
     // TrackKey → entry 的 O(1) 索引。B 站同一个 BV 可以有多个 cid/分P,
     // 缓存身份必须精确到 cid,否则分P歌曲会互相覆盖。
     private var index: [TrackKey: CachedEntry] = [:]
+    private var uniqueBVIDIndex: [String: CachedEntry] = [:]
+    private var ambiguousBVIDs: Set<String> = []
+    private(set) var isLoaded = false
+    private var loadTask: Task<[CachedEntry], Never>?
+    private var loadStartVersion = 0
+    private var mutationVersion = 0
+    private var removedDuringLoad: Set<TrackKey> = []
+    private var clearedDuringLoad = false
 
     private func rebuildIndex() {
         index = Dictionary(entries.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
+        let grouped = Dictionary(grouping: entries, by: \.bvid)
+        uniqueBVIDIndex = grouped.compactMapValues { $0.count == 1 ? $0[0] : nil }
+        ambiguousBVIDs = Set(grouped.filter { $0.value.count > 1 }.map(\.key))
     }
 
     nonisolated static var audioDir: URL {
@@ -56,25 +67,45 @@ final class CacheStore {
 
     private init() {
         try? FileManager.default.createDirectory(at: Self.audioDir, withIntermediateDirectories: true)
-        if let data = try? Data(contentsOf: indexURL),
-           let saved = try? JSONDecoder().decode([CachedEntry].self, from: data) {
-            // 索引和实际文件可能不一致(比如 iCloud 清理),只保留文件还在的
-            entries = saved.filter {
-                FileManager.default.fileExists(atPath: Self.audioDir.appendingPathComponent($0.fileName).path)
-            }
-        }
         rebuildIndex()   // didSet 在 init 内不触发,手动建一次
+    }
+
+    func loadIfNeeded() async {
+        guard !isLoaded else { return }
+        if let loadTask {
+            let loaded = await loadTask.value
+            applyLoadedEntries(loaded, startedAt: loadStartVersion)
+            return
+        }
+
+        let indexURL = indexURL
+        let audioDir = Self.audioDir
+        loadStartVersion = mutationVersion
+        let task = Task<[CachedEntry], Never>.detached(priority: .utility) {
+            let start = CFAbsoluteTimeGetCurrent()
+            try? FileManager.default.createDirectory(at: audioDir, withIntermediateDirectories: true)
+            guard let data = try? Data(contentsOf: indexURL),
+                  let saved = try? JSONDecoder().decode([CachedEntry].self, from: data) else {
+                return []
+            }
+            let entries = saved.filter {
+                FileManager.default.fileExists(atPath: audioDir.appendingPathComponent($0.fileName).path)
+            }
+            let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+            log.debug("load() \(elapsed, format: .fixed(precision: 1))ms entries=\(entries.count)")
+            return entries
+        }
+        loadTask = task
+        let loaded = await task.value
+        applyLoadedEntries(loaded, startedAt: loadStartVersion)
     }
 
     func entry(for track: Track) -> CachedEntry? {
         if let cid = track.cid, let exact = index[TrackKey(bvid: track.bvid, cid: cid)] {
             return exact
         }
-        let matches = entries.filter { $0.bvid == track.bvid }
-        if matches.count == 1 {
-            return matches[0]
-        }
-        return nil
+        guard !ambiguousBVIDs.contains(track.bvid) else { return nil }
+        return uniqueBVIDIndex[track.bvid]
     }
 
     func entry(key: TrackKey) -> CachedEntry? {
@@ -82,8 +113,8 @@ final class CacheStore {
             return exact
         }
         guard key.cid == nil else { return nil }
-        let matches = entries.filter { $0.bvid == key.bvid }
-        return matches.count == 1 ? matches[0] : nil
+        guard !ambiguousBVIDs.contains(key.bvid) else { return nil }
+        return uniqueBVIDIndex[key.bvid]
     }
 
     /// 兼容旧调用:只在该 BV 唯一缓存时返回,避免多分P误命中。
@@ -100,18 +131,27 @@ final class CacheStore {
     }
 
     func add(_ entry: CachedEntry) {
+        mutationVersion += 1
         entries.removeAll { $0.key == entry.key }
         entries.insert(entry, at: 0)
         save(immediate: true)
     }
 
     func remove(_ entry: CachedEntry) {
+        mutationVersion += 1
+        if loadTask != nil, !isLoaded {
+            removedDuringLoad.insert(entry.key)
+        }
         try? FileManager.default.removeItem(at: Self.audioDir.appendingPathComponent(entry.fileName))
         entries.removeAll { $0.key == entry.key }
         save(immediate: true)
     }
 
     func removeAll() {
+        mutationVersion += 1
+        if loadTask != nil, !isLoaded {
+            clearedDuringLoad = true
+        }
         entries.forEach {
             try? FileManager.default.removeItem(at: Self.audioDir.appendingPathComponent($0.fileName))
         }
@@ -161,5 +201,27 @@ final class CacheStore {
             let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
             log.debug("save() \(elapsed, format: .fixed(precision: 1))ms entries=\(snapshot.count)")
         }.value
+    }
+
+    private func applyLoadedEntries(_ loaded: [CachedEntry], startedAt version: Int) {
+        guard !isLoaded else { return }
+        let changedWhileLoading = mutationVersion != version
+        if clearedDuringLoad {
+            isLoaded = true
+        } else if changedWhileLoading {
+            let currentKeys = Set(entries.map(\.key))
+            let retainedLoaded = loaded
+                .filter { !removedDuringLoad.contains($0.key) }
+                .filter { !currentKeys.contains($0.key) }
+            entries += retainedLoaded
+            save(immediate: true)
+            isLoaded = true
+        } else {
+            entries = loaded
+            isLoaded = true
+        }
+        loadTask = nil
+        removedDuringLoad = []
+        clearedDuringLoad = false
     }
 }

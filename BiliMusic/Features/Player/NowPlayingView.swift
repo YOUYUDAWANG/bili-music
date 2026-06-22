@@ -735,7 +735,7 @@ struct NowPlayingView: View {
         shownRecommendationKeys.formUnion(tracks.map(\.key))
         recommendedTracks = tracks
         recommendationsError = tracks.isEmpty ? "没有找到合适的推荐歌曲" : nil
-        engine.preload(tracks: recommendedTracks)
+        engine.preload(tracks: recommendedTracks, limit: 2, delay: .milliseconds(500))
     }
 
     private func loadCurrentPlaylistIfNeeded(force: Bool) async {
@@ -794,7 +794,7 @@ struct NowPlayingView: View {
             let result = PlaylistLookupResult(playlist: playlist, tracks: tracks, error: nil)
             playlistLookupCache[bvid] = result
             applyPlaylistLookup(result, for: bvid)
-            engine.preload(tracks: tracks)
+            engine.preload(tracks: tracks, limit: 2, delay: .milliseconds(700))
         } catch {
             guard engine.current?.bvid == bvid else { return }
             let result = PlaylistLookupResult(
@@ -1387,7 +1387,7 @@ private struct UPPlaylistDetailView: View {
                 .map { Track(playlist: $0, artist: artist, ownerMid: mid) }
                 .filter(MusicFilter.isMusic)
             tracks.append(contentsOf: newTracks)
-            engine.preload(tracks: newTracks)
+            engine.preload(tracks: newTracks, limit: 2, delay: .milliseconds(700))
         } catch {
             errorMessage = error.localizedDescription
         }

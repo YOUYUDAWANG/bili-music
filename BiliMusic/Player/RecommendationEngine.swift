@@ -3,6 +3,29 @@ import OSLog
 
 private let log = Logger(subsystem: "com.fubuki.BiliMusic", category: "recommend")
 
+private actor RecommendationResultCache {
+    static let shared = RecommendationResultCache()
+
+    private var values: [String: (date: Date, tracks: [Track])] = [:]
+    private let ttl: TimeInterval = 8 * 60
+
+    func tracks(for key: String) -> [Track]? {
+        guard let cached = values[key],
+              Date().timeIntervalSince(cached.date) < ttl else {
+            values[key] = nil
+            return nil
+        }
+        return cached.tracks
+    }
+
+    func store(_ tracks: [Track], for key: String) {
+        values[key] = (Date(), tracks)
+        if values.count > 24 {
+            values.removeValue(forKey: values.keys.sorted().first ?? key)
+        }
+    }
+}
+
 struct RecommendationEngine {
     enum Mode {
         case home
@@ -61,14 +84,22 @@ struct RecommendationEngine {
 
     func recommendations(mode: Mode, context: Context, limit: Int = 24) async -> [Track] {
         let snapshot = await Self.makeSnapshot(mode: mode)
+        let cacheKey = Self.cacheKey(mode: mode, context: context, snapshot: snapshot)
+        if let cached = await RecommendationResultCache.shared.tracks(for: cacheKey) {
+            let filtered = cached.filter { !Self.contains(context.excludedKeys, matching: $0) }
+            if !filtered.isEmpty {
+                return Array(filtered.prefix(limit))
+            }
+        }
+
         var candidates: [Candidate] = []
 
         switch mode {
         case .home:
             // 首页刷新必须快:旧逻辑会串行请求收藏/历史/缓存/当前歌曲十几个 related,
             // 真机上点击"换一批"会明显变慢。这里按质量分层短路,够用就停止补源。
-            let favorites = await favoriteSeeds(maxCount: 5, snapshot: snapshot)
-            candidates += await relatedCandidates(from: favorites, source: .favoriteSeed, perSeedLimit: 10)
+            let favorites = await favoriteSeeds(maxCount: 3, snapshot: snapshot)
+            candidates += await relatedCandidates(from: favorites, source: .favoriteSeed, perSeedLimit: 8)
 
             if candidates.count < 12, let current = context.current {
                 candidates += await relatedCandidates(from: [current], source: .relatedCurrent, perSeedLimit: 12)
@@ -92,16 +123,24 @@ struct RecommendationEngine {
 
         case .relatedPanel:
             if let current = context.current {
-                candidates += await relatedCandidates(from: [current], source: .relatedCurrent)
-                candidates += await artistSearchCandidates(for: current)
+                candidates += await relatedCandidates(from: [current], source: .relatedCurrent, perSeedLimit: 14)
+                if candidates.count < 10 {
+                    candidates += await artistSearchCandidates(for: current)
+                }
             }
             candidates += playlistNeighborCandidates(current: context.current, playlistTracks: context.playlistTracks)
-            candidates += await relatedCandidates(from: Array(snapshot.historyTracks.prefix(2)), source: .relatedHistory)
+            if candidates.count < 12 {
+                candidates += await relatedCandidates(from: Array(snapshot.historyTracks.prefix(1)), source: .relatedHistory, perSeedLimit: 8)
+            }
         }
 
-        return await Task.detached(priority: .userInitiated) {
+        let ranked = await Task.detached(priority: .userInitiated) {
             Self.ranked(candidates, mode: mode, context: context, snapshot: snapshot, limit: limit)
         }.value
+        if mode != .radio {
+            await RecommendationResultCache.shared.store(ranked, for: cacheKey)
+        }
+        return ranked
     }
 
     func nextRadioTrack(after current: Track?, excludedKeys: Set<TrackKey>) async -> Track? {
@@ -215,6 +254,8 @@ struct RecommendationEngine {
 
     @MainActor
     private static func makeSnapshot(mode: Mode) async -> Snapshot {
+        await CacheStore.shared.loadIfNeeded()
+        await PlaybackHistoryStore.shared.loadIfNeeded()
         let historyEntries = PlaybackHistoryStore.shared.entries
         let cacheEntries = CacheStore.shared.entries
         let favoriteBVIDs = FavoriteManager.shared.favoriteBVIDs
@@ -335,6 +376,20 @@ struct RecommendationEngine {
 
     private static func contains(_ keys: Set<TrackKey>, matching track: Track) -> Bool {
         keys.contains(track.key) || keys.contains { $0.matches(track) }
+    }
+
+    private static func cacheKey(mode: Mode, context: Context, snapshot: Snapshot) -> String {
+        let current = context.current?.key.description ?? "none"
+        let playlist = context.playlistTracks.prefix(4).map(\.key.description).joined(separator: ",")
+        let folder = snapshot.favoriteFolder?.id ?? 0
+        switch mode {
+        case .home:
+            return "home:\(folder):\(current)"
+        case .relatedPanel:
+            return "related:\(current):\(playlist)"
+        case .radio:
+            return "radio:\(current):\(playlist)"
+        }
     }
 
     private func searchTerms(for track: Track) -> [String] {

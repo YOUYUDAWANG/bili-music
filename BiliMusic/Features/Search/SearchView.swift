@@ -118,7 +118,6 @@ struct SearchView: View {
                                         .padding(.horizontal, 14)
                                 }
                                 .buttonStyle(.plain)
-                                .onAppear { engine.schedulePreload(track) }
                                 if index != store.results.count - 1 {
                                     Divider().padding(.leading, 84)
                                 }
@@ -126,7 +125,11 @@ struct SearchView: View {
                                     Color.clear
                                         .frame(height: 1)
                                         .onAppear {
-                                            Task { await store.loadMoreIfNeeded(preload: engine.preload) }
+                                            Task {
+                                                await store.loadMoreIfNeeded { tracks in
+                                                    engine.preload(tracks: tracks, limit: 1, delay: .milliseconds(700))
+                                                }
+                                            }
                                         }
                                 }
                             }
@@ -168,7 +171,9 @@ struct SearchView: View {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         searchFocused = false
-        store.submitSearch(text, preload: engine.preload)
+        store.submitSearch(text) { tracks in
+            engine.preload(tracks: tracks, limit: 2, delay: .milliseconds(500))
+        }
     }
 }
 

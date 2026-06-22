@@ -24,7 +24,6 @@ struct HomeView: View {
                                 TrackRow(track: track, isPlaying: engine.current.map { track.key.matches($0) } ?? false)
                             }
                             .buttonStyle(.plain)
-                            .onAppear { engine.schedulePreload(track) }
                         }
                     } header: {
                         Text("为你推荐")
@@ -74,7 +73,7 @@ struct HomeView: View {
         } else {
             shownKeys.formUnion(result.map(\.key))
             tracks = result
-            engine.preload(tracks: result)
+            engine.preload(tracks: result, limit: 3, delay: .milliseconds(700))
         }
     }
 }

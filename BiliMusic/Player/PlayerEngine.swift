@@ -138,6 +138,7 @@ final class PlayerEngine {
     private var coverImage: UIImage?
     private var playedKeys: Set<TrackKey> = []   // 电台去重
     private var prefetchTask: Task<Void, Never>?
+    private var queuePrefetchTask: Task<Void, Never>?
     private var preloadTask: Task<Void, Never>?
     private var autoMVTask: Task<Void, Never>?
     private var postPlaybackTask: Task<Void, Never>?
@@ -165,6 +166,7 @@ final class PlayerEngine {
     /// 用一组曲目替换队列并从指定位置开播(搜索页点击)
     func play(tracks: [Track], startAt index: Int, queueMode: QueueMode? = nil) async {
         prefetchTask?.cancel()
+        queuePrefetchTask?.cancel()
         autoMVTask?.cancel()
         queue = tracks
         queueIndex = index
@@ -179,6 +181,7 @@ final class PlayerEngine {
 
     func playRadio(seed track: Track) async {
         prefetchTask?.cancel()
+        queuePrefetchTask?.cancel()
         autoMVTask?.cancel()
         queue = [track]
         queueIndex = 0
@@ -191,10 +194,19 @@ final class PlayerEngine {
 
     /// 提前取 cid + playurl,减少点击歌曲后等待时间。URL 有时效,只做短期缓存。
     func preload(tracks: [Track]) {
+        preload(tracks: tracks, limit: 5, delay: .zero)
+    }
+
+    func preload(tracks: [Track], limit: Int, delay: Duration) {
         preloadTask?.cancel()
-        let candidates = tracks.prefix(5)
+        let candidates = Array(tracks.prefix(limit))
+        guard !candidates.isEmpty else { return }
         preloadTask = Task { [weak self] in
             guard let self else { return }
+            if delay > .zero {
+                try? await Task.sleep(for: delay)
+                guard !Task.isCancelled else { return }
+            }
             await withTaskGroup(of: Void.self) { group in
                 for track in candidates {
                     group.addTask { [weak self] in
@@ -225,6 +237,7 @@ final class PlayerEngine {
     func play(bvid: String) async {
         preloadTask?.cancel()
         prefetchTask?.cancel()
+        queuePrefetchTask?.cancel()
         autoMVTask?.cancel()
         state = .loading
         do {
@@ -294,6 +307,7 @@ final class PlayerEngine {
         guard queue.indices.contains(index) else { return }
         preloadTask?.cancel()
         prefetchTask?.cancel()
+        queuePrefetchTask?.cancel()
         autoMVTask?.cancel()
         queueIndex = index
         manualPlaybackModeOverride = nil
@@ -411,6 +425,7 @@ final class PlayerEngine {
         currentAudioBandwidth = nil
         autoMVTask?.cancel()
         postPlaybackTask?.cancel()
+        queuePrefetchTask?.cancel()
         do {
             let url: URL
             let isLocal: Bool
@@ -547,10 +562,14 @@ final class PlayerEngine {
     }
 
     private func scheduleQueuePrefetch() {
+        queuePrefetchTask?.cancel()
         guard queue.indices.contains(queueIndex + 1) else { return }
         let next = queue[queueIndex + 1]
-        Task { [weak self] in
+        let expectedIndex = queueIndex
+        queuePrefetchTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(900))
+            guard !Task.isCancelled,
+                  self?.queueIndex == expectedIndex else { return }
             await self?.prepare(track: next)
         }
     }
@@ -697,18 +716,11 @@ final class PlayerEngine {
             updateNowPlayingInfo()
             return
         }
-        var req = URLRequest(url: coverURL)
-        BiliClient.headers.forEach { req.setValue($1, forHTTPHeaderField: $0) }
-        if let (data, _) = try? await URLSession.shared.data(for: req) {
-            guard playbackGeneration == generation, current.map({ track.key.matches($0) }) ?? false else { return }
-            let decoded = await Task.detached(priority: .utility) {
-                UIImage(data: data)
-            }.value
-            guard let decoded else { return }
-            ImageMemoryCache.shared.insert(decoded, for: coverURL)
-            coverImage = decoded.resized(maxDimension: 600)
-            updateNowPlayingInfo()
-        }
+        guard let decoded = await ImageLoadCoordinator.shared.image(for: coverURL) else { return }
+        guard playbackGeneration == generation, current.map({ track.key.matches($0) }) ?? false else { return }
+        ImageMemoryCache.shared.insert(decoded, for: coverURL)
+        coverImage = decoded.resized(maxDimension: 600)
+        updateNowPlayingInfo()
     }
 
     private func artworkURL(_ url: URL?) -> URL? {
