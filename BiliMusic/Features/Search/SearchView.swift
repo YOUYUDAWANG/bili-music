@@ -4,6 +4,7 @@ struct SearchView: View {
     @Environment(PlayerEngine.self) private var engine
     @State private var query = ""
     @State private var store = SearchStore()
+    @State private var preparingTrackKey: TrackKey?
     @FocusState private var searchFocused: Bool
     @AppStorage("searchHistory") private var searchHistoryData = "[]"
 
@@ -153,9 +154,18 @@ struct SearchView: View {
                         VStack(spacing: 0) {
                             ForEach(Array(store.results.enumerated()), id: \.element.id) { index, track in
                                 Button {
-                                    Task { await engine.play(tracks: store.results, startAt: index) }
+                                    let key = track.key
+                                    preparingTrackKey = key
+                                    Task {
+                                        await engine.play(tracks: store.results, startAt: index)
+                                        await MainActor.run {
+                                            if preparingTrackKey?.matches(track) == true {
+                                                preparingTrackKey = nil
+                                            }
+                                        }
+                                    }
                                 } label: {
-                                    TrackRow(track: track, isPlaying: engine.current.map { track.key.matches($0) } ?? false)
+                                    searchResultRow(track: track)
                                         .padding(.horizontal, 14)
                                 }
                                 .buttonStyle(.plain)
@@ -234,6 +244,23 @@ struct SearchView: View {
         .padding(.top, 8)
     }
 
+    private func searchResultRow(track: Track) -> some View {
+        HStack(spacing: 14) {
+            TrackRow(
+                track: track,
+                isPlaying: engine.current.map { track.key.matches($0) } ?? false,
+                showsTrailingIcon: false)
+            if isPreparing(track) {
+                ProgressView()
+                    .scaleEffect(0.75)
+            }
+        }
+    }
+
+    private func isPreparing(_ track: Track) -> Bool {
+        preparingTrackKey.map { $0.matches(track) } ?? false
+    }
+
     private func submitSearch() {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
@@ -247,6 +274,7 @@ struct SearchView: View {
 struct TrackRow: View {
     let track: Track
     var isPlaying = false
+    var showsTrailingIcon = true
 
     var body: some View {
         HStack(spacing: 14) {
@@ -276,10 +304,12 @@ struct TrackRow: View {
                 .foregroundStyle(.secondary)
             }
             Spacer()
-            Image(systemName: isPlaying ? "speaker.wave.2.fill" : "ellipsis")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(isPlaying ? AppTheme.accent : .secondary)
-                .frame(width: 28, height: 28)
+            if showsTrailingIcon {
+                Image(systemName: isPlaying ? "speaker.wave.2.fill" : "ellipsis")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(isPlaying ? AppTheme.accent : .secondary)
+                    .frame(width: 28, height: 28)
+            }
         }
         .padding(.vertical, 5)
         .contentShape(Rectangle())
