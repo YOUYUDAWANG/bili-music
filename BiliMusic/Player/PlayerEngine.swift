@@ -135,6 +135,10 @@ final class PlayerEngine {
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var statusObserver: NSKeyValueObservation?
+    private var bufferObserver: NSKeyValueObservation?
+    /// 用户意图:是否希望在播放。用来区分「用户主动暂停」与「缓冲断流导致的暂停」——
+    /// 后者不该停住,缓冲恢复后要自动续播。
+    private var wantsPlayback = false
     private var coverImage: UIImage?
     private var playedKeys: Set<TrackKey> = []   // 电台去重
     private var prefetchTask: Task<Void, Never>?
@@ -327,15 +331,17 @@ final class PlayerEngine {
     }
 
     func togglePlayPause() {
-        if state == .playing {
+        // 用意图判断,而非 state——缓冲断流时 state 会是 .loading,此时点按应能暂停。
+        if wantsPlayback {
             pause()
-        } else if state == .paused {
+        } else {
             play()
         }
     }
 
     func play() {
         guard let player else { return }
+        wantsPlayback = true
         player.play()
         state = .playing
         updateNowPlayingInfo()
@@ -343,6 +349,7 @@ final class PlayerEngine {
 
     func pause() {
         guard let player else { return }
+        wantsPlayback = false
         player.pause()
         state = .paused
         updateNowPlayingInfo()
@@ -641,18 +648,24 @@ final class PlayerEngine {
         if let timeObserver, let player { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         statusObserver?.invalidate()
+        bufferObserver?.invalidate()
         player?.pause()
         player?.replaceCurrentItem(with: nil)
         timeObserver = nil
         endObserver = nil
         statusObserver = nil
+        bufferObserver = nil
+        wantsPlayback = true   // startPlayback 一定是「要播」的语境
         let asset = isLocal
             ? AVURLAsset(url: url)
             : AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": BiliClient.headers])
         let item = AVPlayerItem(asset: asset)
-        item.preferredForwardBufferDuration = 2
+        // 本地文件不需要前向缓冲;在线流缓冲 10s,2s 太小,任何小抖动都会掏空导致中途暂停。
+        item.preferredForwardBufferDuration = isLocal ? 0 : 10
         item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
         let player = AVPlayer(playerItem: item)
+        // false = 数据一到就播,起播快;代价是断流后不会自己恢复,
+        // 所以下面用 bufferObserver 手动续播,兼顾「快起播」和「不中途卡死」。
         player.automaticallyWaitsToMinimizeStalling = false
         self.player = player
         timeObserver = player.addPeriodicTimeObserver(
@@ -671,11 +684,27 @@ final class PlayerEngine {
                 case .playing:
                     self.state = .playing
                 case .paused:
-                    if self.state == .playing { self.state = .paused }
+                    // 关键:区分「用户主动暂停」与「缓冲断流」。用户想播却变 paused = 断流,
+                    // 显示 loading 而非 paused,等 bufferObserver 在缓冲恢复后续播。
+                    self.state = self.wantsPlayback ? .loading : .paused
                 case .waitingToPlayAtSpecifiedRate:
                     self.state = .loading
                 @unknown default:
                     break
+                }
+            }
+        }
+        // 缓冲恢复后自动续播。automaticallyWaitsToMinimizeStalling=false 时 AVPlayer
+        // 断流后不会自己重启,这里在「可以流畅播放」时手动 play(),前提是用户仍想播。
+        bufferObserver = item.observe(\.isPlaybackLikelyToKeepUp, options: [.new]) { [weak self] item, _ in
+            Task { @MainActor in
+                guard let self,
+                      self.playbackGeneration == generation,
+                      self.player?.currentItem === item else { return }
+                if item.isPlaybackLikelyToKeepUp,
+                   self.wantsPlayback,
+                   self.player?.timeControlStatus != .playing {
+                    self.player?.play()
                 }
             }
         }
