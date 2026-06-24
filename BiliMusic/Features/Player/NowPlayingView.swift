@@ -871,13 +871,14 @@ struct NowPlayingView: View {
             dismiss()
         }
     }
+}
 
-    private func thumbnailURL(_ url: URL?, width: Int, height: Int) -> URL? {
-        guard let url else { return nil }
-        let raw = url.absoluteString
-        guard raw.contains("hdslb.com"), !raw.contains("@") else { return url }
-        return URL(string: raw + "@\(width)w_\(height)h_1c.webp")
-    }
+/// 为 hdslb.com 的封面 URL 追加 WebP 缩略图参数。
+private func thumbnailURL(_ url: URL?, width: Int, height: Int) -> URL? {
+    guard let url else { return nil }
+    let raw = url.absoluteString
+    guard raw.contains("hdslb.com"), !raw.contains("@") else { return url }
+    return URL(string: raw + "@\(width)w_\(height)h_1c.webp")
 }
 
 /// 底部常驻迷你播放条。
@@ -957,13 +958,6 @@ struct MiniPlayerBar: View {
             openPlayerTranslation = 0
             showFullPlayer = true
         }
-    }
-
-    private func thumbnailURL(_ url: URL?, width: Int, height: Int) -> URL? {
-        guard let url else { return nil }
-        let raw = url.absoluteString
-        guard raw.contains("hdslb.com"), !raw.contains("@") else { return url }
-        return URL(string: raw + "@\(width)w_\(height)h_1c.webp")
     }
 }
 

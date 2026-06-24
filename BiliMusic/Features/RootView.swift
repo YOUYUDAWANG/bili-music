@@ -7,21 +7,27 @@ struct RootView: View {
     @State private var showFullPlayer = false
     @State private var isDraggingFullPlayer = false
     @State private var openPlayerTranslation: CGFloat = 0
+    @State private var showSettings = false
 
     var body: some View {
         GeometryReader { proxy in
             ZStack {
                 TabView {
                     HomeView()
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button {
+                                    showSettings = true
+                                } label: {
+                                    Image(systemName: "gearshape")
+                                }
+                            }
+                        }
                         .tabItem { Label("推荐", systemImage: "music.note.house.fill") }
                     SearchView()
                         .tabItem { Label("搜索", systemImage: "magnifyingglass") }
-                    FavoritesView()
-                        .tabItem { Label("收藏", systemImage: "heart.fill") }
-                    LibraryView()
-                        .tabItem { Label("缓存", systemImage: "arrow.down.circle.fill") }
-                    SettingsView()
-                        .tabItem { Label("设置", systemImage: "gearshape.fill") }
+                    LibraryTabView()
+                        .tabItem { Label("资料库", systemImage: "rectangle.stack.fill") }
                 }
                 .tint(AppTheme.accent)
                 .safeAreaInset(edge: .bottom) {
@@ -42,6 +48,9 @@ struct RootView: View {
                     .zIndex(10)
                 }
             }
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background {
@@ -66,18 +75,6 @@ struct RootView: View {
                     await engine.playNext()
                     NSLog("AUTOPLAY_NEXT state=\(String(describing: engine.state)) track=\(engine.current?.title ?? "nil")")
                 }
-            }
-        }
-    }
-
-    /// mini bar 放在 tab 内容的 safe area,这样不会盖住标签栏
-    private func withMiniBar(_ content: some View) -> some View {
-        content.safeAreaInset(edge: .bottom) {
-            if engine.current != nil {
-                MiniPlayerBar(
-                    showFullPlayer: $showFullPlayer,
-                    isDraggingFullPlayer: $isDraggingFullPlayer,
-                    openPlayerTranslation: $openPlayerTranslation)
             }
         }
     }
