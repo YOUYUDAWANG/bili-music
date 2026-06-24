@@ -78,6 +78,7 @@ struct NowPlayingView: View {
             }
             .offset(y: dragOffset)
             .animation(.spring(response: 0.32, dampingFraction: 0.86), value: dragOffset)
+            .simultaneousGesture(pageDismissDrag)
         }
         .sheet(isPresented: $showUPPlaylists) {
             UPPlaylistsView()
@@ -263,7 +264,7 @@ struct NowPlayingView: View {
                 }
             }
         } else {
-            CachedAsyncImage(url: thumbnailURL(engine.current?.coverURL, width: 600, height: 600)) { image in
+            CachedAsyncImage(url: thumbnailURL(engine.current?.coverURL, width: 960, height: 540)) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
                 ZStack {
@@ -273,7 +274,7 @@ struct NowPlayingView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .frame(width: coverSize, height: coverSize)
+            .frame(width: coverSize, height: coverSize * 9 / 16)
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .shadow(color: .black.opacity(0.42), radius: 28, y: 18)
         }
@@ -842,6 +843,27 @@ struct NowPlayingView: View {
                 dragOffset = max(0, value.translation.height)
             }
             .onEnded { value in
+                if value.translation.height > 130 || value.predictedEndTranslation.height > 260 {
+                    closePlayer()
+                } else {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+                        dragOffset = 0
+                    }
+                }
+            }
+    }
+
+    /// 整页下滑关闭:仅在当前播放页面启用(左右列表页保持正常滑动)。
+    private var pageDismissDrag: some Gesture {
+        DragGesture(minimumDistance: 24)
+            .onChanged { value in
+                guard selectedPage == PlayerPage.nowPlaying.rawValue,
+                      abs(value.translation.height) > abs(value.translation.width),
+                      value.translation.height > 0 else { return }
+                dragOffset = max(0, value.translation.height)
+            }
+            .onEnded { value in
+                guard selectedPage == PlayerPage.nowPlaying.rawValue else { return }
                 if value.translation.height > 130 || value.predictedEndTranslation.height > 260 {
                     closePlayer()
                 } else {
