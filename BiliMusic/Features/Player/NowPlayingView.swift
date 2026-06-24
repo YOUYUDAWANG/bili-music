@@ -899,63 +899,59 @@ struct MiniPlayerBar: View {
     var namespace: Namespace.ID
 
     var body: some View {
-        HStack(spacing: 12) {
-            CachedAsyncImage(url: thumbnailURL(engine.current?.coverURL, width: 120, height: 120)) { image in
+        HStack(spacing: 10) {
+            CachedAsyncImage(url: thumbnailURL(engine.current?.coverURL, width: 100, height: 100)) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
                 AppTheme.secondaryBackground
             }
             .matchedGeometryEffect(id: "playerCover", in: namespace)
-            .frame(width: 44, height: 44)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .shadow(color: .black.opacity(0.1), radius: 3, x: 0, y: 2)
+            .frame(width: 36, height: 36)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(engine.current?.title ?? "")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
-                    .fadeOutRight(width: 14)
                 Text(engine.current?.artist ?? "")
-                    .font(.system(size: 11))
+                    .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .fadeOutRight(width: 14)
             }
             Spacer()
             Button {
                 engine.togglePlayPause()
             } label: {
                 Image(systemName: engine.state == .playing ? "pause.fill" : "play.fill")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: 16, weight: .semibold))
                     .contentTransition(.symbolEffect(.replace))
-                    .frame(width: 36, height: 36)
+                    .frame(width: 32, height: 32)
                     .contentShape(Rectangle())
             }
             .buttonStyle(MiniPlayerControlButtonStyle())
-            .overlay { if engine.state == .loading { ProgressView().scaleEffect(0.6).tint(AppTheme.label) } }
             Button {
                 Task { await engine.playNext() }
             } label: {
                 Image(systemName: "forward.fill")
-                    .font(.system(size: 16, weight: .semibold))
-                    .frame(width: 36, height: 36)
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 32, height: 32)
                     .contentShape(Rectangle())
             }
             .buttonStyle(MiniPlayerControlButtonStyle())
             .disabled(!engine.hasNext)
             .opacity(engine.hasNext ? 1.0 : 0.3)
         }
-        .padding(.horizontal, 12)
-        .frame(height: 64)
+        .padding(.horizontal, 10)
+        .frame(height: 52)
         .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(.ultraThickMaterial)
+            RoundedRectangle(cornerRadius: 12)
+                .fill(.thinMaterial)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 14)
+                    RoundedRectangle(cornerRadius: 12)
                         .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
                 )
         )
-        .shadow(color: .black.opacity(0.12), radius: 10, x: 0, y: 5)
+        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
         .contentShape(Rectangle())
         .onTapGesture { openFullPlayer() }
         .gesture(

@@ -12,17 +12,28 @@ struct RootView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            ZStack {
+            ZStack(alignment: .bottom) {
                 TabView {
-                    miniBarWrapper(HomeView(showSettings: $showSettings))
+                    miniBarSpacer(HomeView(showSettings: $showSettings))
                         .tabItem { Label("推荐", systemImage: "music.note.house.fill") }
-                    miniBarWrapper(SearchView())
+                    miniBarSpacer(SearchView())
                         .tabItem { Label("搜索", systemImage: "magnifyingglass") }
-                    miniBarWrapper(LibraryTabView())
+                    miniBarSpacer(LibraryTabView())
                         .tabItem { Label("资料库", systemImage: "rectangle.stack.fill") }
                 }
                 .tint(AppTheme.accent)
                 .toolbarBackground(.ultraThinMaterial, for: .tabBar)
+
+                if engine.current != nil && !showFullPlayer && !isDraggingFullPlayer {
+                    MiniPlayerBar(
+                        showFullPlayer: $showFullPlayer,
+                        isDraggingFullPlayer: $isDraggingFullPlayer,
+                        openPlayerTranslation: $openPlayerTranslation,
+                        namespace: playerTransition)
+                    .padding(.horizontal, 28)
+                    .padding(.bottom, 6)  // small gap above tab bar
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
 
                 if showFullPlayer || isDraggingFullPlayer {
                     NowPlayingView(onDismiss: { closeFullPlayer() }, namespace: playerTransition)
@@ -62,18 +73,11 @@ struct RootView: View {
         }
     }
 
-    /// MiniPlayerBar 作为每个 tab 内容的安全区域底边距，确保内容不被 tab bar 遮挡。
-    private func miniBarWrapper(_ content: some View) -> some View {
+    /// 为每个 tab 预留 MiniPlayer 的底部空间，避免内容被浮动卡片遮挡。
+    private func miniBarSpacer(_ content: some View) -> some View {
         content.safeAreaInset(edge: .bottom) {
             if engine.current != nil {
-                MiniPlayerBar(
-                    showFullPlayer: $showFullPlayer,
-                    isDraggingFullPlayer: $isDraggingFullPlayer,
-                    openPlayerTranslation: $openPlayerTranslation,
-                    namespace: playerTransition)
-                .padding(.horizontal, 8)
-                .padding(.bottom, 4)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                Color.clear.frame(height: 48)
             }
         }
     }
