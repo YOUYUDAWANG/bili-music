@@ -5,6 +5,7 @@ import Observation
 @MainActor
 final class SearchStore {
     private(set) var results: [Track] = []
+    private(set) var sections: SearchResultSections?
     private(set) var searchHistory: [String] = []
     private(set) var searching = false
     private(set) var errorMessage: String?
@@ -45,9 +46,14 @@ final class SearchStore {
     func queryDidChange(_ query: String) {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty {
+            guard !resultsQuery.isEmpty || !results.isEmpty else { return }
             mode = .music
             resetTransientState(cancelTask: true)
         } else if text != resultsQuery {
+            guard !resultsQuery.isEmpty || !results.isEmpty else {
+                // 首个字符:state 已在默认值,不触发无意义的 @Observable 写入
+                return
+            }
             mode = .music
             resetTransientState(cancelTask: true)
         }
@@ -138,6 +144,7 @@ final class SearchStore {
         let key = SearchCacheKey(query: text, mode: mode)
         guard let snapshot = resultCache[key] else { return false }
         results = snapshot.tracks
+        sections = SearchResultSections.make(from: snapshot.tracks)
         resultsQuery = text
         activeQuery = text
         activeKeywords = snapshot.activeKeywords
@@ -205,6 +212,7 @@ final class SearchStore {
         searching = false
         errorMessage = nil
         results = []
+        sections = nil
         resultsQuery = ""
         activeQuery = ""
         activeKeywords = []
@@ -250,6 +258,7 @@ final class SearchStore {
 
             guard !Task.isCancelled, activeSearchID == searchID else { return }
             results = batch.tracks
+            sections = SearchResultSections.make(from: batch.tracks)
             resultsQuery = text
             activeQuery = text
             activeKeywords = keywords

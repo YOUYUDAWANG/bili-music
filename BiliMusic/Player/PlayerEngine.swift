@@ -162,7 +162,9 @@ final class PlayerEngine {
     }
 
     init() {
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+        Task(priority: .userInitiated) {
+            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+        }
         _ = NetworkMonitor.shared
         setUpRemoteCommands()
     }

@@ -1,4 +1,45 @@
+//
+//  SearchView.swift
+//  BiliMusic
+//
+//  Created by 蓝发双马尾大小姐 on 2025/7/1.
+//
+
 import SwiftUI
+import UIKit
+
+/// 键盘预加热:iOS 首次触发 TextField 时需加载键盘进程(尤其是第三方输入法),
+/// 导致第一次聚焦和第一次按键均有明显卡顿。此组件在视图出现时提前激活再释放
+/// 一个透明的 UITextField,强制系统加载键盘框架,用户无感知。
+///
+/// 注意:UITextField 必须满足以下条件才能 becomeFirstResponder():
+///   - 已 attach 到 window hierarchy (view.window != nil)
+///   - isHidden = false
+///   - alpha > 0.01
+/// 所以不能用 .hidden() 或 isHidden=true,而要用极小尺寸 + 极低透明度 + allowsHitTesting(false)。
+private struct KeyboardPrewarmer: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
+        view.backgroundColor = .clear
+        view.alpha = 0.02
+        view.isUserInteractionEnabled = false
+
+        let field = UITextField(frame: .zero)
+        view.addSubview(field)
+
+        DispatchQueue.main.async {
+            guard view.window != nil else { return }
+            field.becomeFirstResponder()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                field.resignFirstResponder()
+                field.removeFromSuperview()
+            }
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {}
+}
 
 struct SearchView: View {
     @Environment(PlayerEngine.self) private var engine
@@ -6,6 +47,8 @@ struct SearchView: View {
     @State private var store = SearchStore()
     @State private var preparingTrackKey: TrackKey?
     @State private var debounceTask: Task<Void, Never>?
+    @State private var searchResultTapTrigger = 0
+    @State private var searchHistoryTapTrigger = 0
     @FocusState private var searchFocused: Bool
     @AppStorage("searchHistory") private var searchHistoryData = "[]"
 
@@ -51,10 +94,13 @@ struct SearchView: View {
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    if searchFocused && trimmedQuery.isEmpty {
-                        searchHistoryView
-                    } else {
+                    // ZStack + opacity:两视图始终在层级中,焦点变化只改透明度,
+                    // 不触发视图树的创建/销毁,避免与键盘动画抢主线程。
+                    ZStack(alignment: .top) {
                         landingContent
+                            .opacity(searchFocused && trimmedQuery.isEmpty ? 0 : 1)
+                        searchHistoryView
+                            .opacity(searchFocused && trimmedQuery.isEmpty ? 1 : 0)
                     }
 
                     if store.searching {
@@ -109,14 +155,26 @@ struct SearchView: View {
                 }
                 .padding(.bottom, 24)
             }
+            .hideMiniPlayerOnScroll()
             .scrollDismissesKeyboard(.immediately)
         }
         .background(AppTheme.groupedBackground)
         .ignoresSafeArea(.keyboard, edges: .bottom)
+        // 键盘预加热:极小尺寸+极低透明度,让 UITextField 可聚焦但用户无感知
+        .background(
+            KeyboardPrewarmer()
+                .frame(width: 1, height: 1)
+                .opacity(0.01)
+                .allowsHitTesting(false)
+        )
         .task {
+            // 搜索历史是搜索栏必需,优先加载
             await store.loadHistory()
-            await history.loadIfNeeded()
-            await cache.loadIfNeeded()
+            // 播放历史与缓存索引只用于 landing 页"最近播放",不阻塞搜索栏交互
+            Task(priority: .background) {
+                await history.loadIfNeeded()
+                await cache.loadIfNeeded()
+            }
         }
         .onChange(of: searchHistoryData) {
             store.reloadHistoryIfNeeded()
@@ -129,7 +187,7 @@ struct SearchView: View {
             debounceTask = Task {
                 try? await Task.sleep(for: .milliseconds(300))
                 guard !Task.isCancelled else { return }
-                await MainActor.run { submitSearch() }
+                await MainActor.run { debouncedSearch() }
             }
         }
     }
@@ -168,6 +226,7 @@ struct SearchView: View {
             VStack(spacing: 0) {
                 ForEach(store.searchHistory, id: \.self) { term in
                     Button {
+                        searchHistoryTapTrigger += 1
                         query = term
                         submitSearch()
                     } label: {
@@ -184,6 +243,7 @@ struct SearchView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .sensoryFeedback(.intent(.selection), trigger: searchHistoryTapTrigger)
                     if term != store.searchHistory.last {
                         Divider().padding(.leading, 50)
                     }
@@ -209,16 +269,17 @@ struct SearchView: View {
 
     @ViewBuilder
     private var searchResultsView: some View {
-        let sections = SearchResultSections.make(from: store.results)
-        VStack(alignment: .leading, spacing: 16) {
-            if let bestMatch = sections.bestMatch {
-                searchSection(title: "最佳匹配", tracks: [bestMatch])
+        if let sections = store.sections {
+            VStack(alignment: .leading, spacing: 16) {
+                if let bestMatch = sections.bestMatch {
+                    searchSection(title: "最佳匹配", tracks: [bestMatch])
+                }
+                searchSection(title: "歌曲", tracks: sections.songs)
+                searchSection(title: "MV", tracks: sections.mvs)
+                paginationControl
             }
-            searchSection(title: "歌曲", tracks: sections.songs)
-            searchSection(title: "MV", tracks: sections.mvs)
-            paginationControl
+            .padding(.top, 8)
         }
-        .padding(.top, 8)
     }
 
     @ViewBuilder
@@ -229,12 +290,14 @@ struct SearchView: View {
                 VStack(spacing: 0) {
                     ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
                         Button {
+                            searchResultTapTrigger += 1
                             playSearchResult(track)
                         } label: {
                             searchResultRow(track: track)
                                 .padding(.horizontal, 14)
                         }
                         .buttonStyle(.plain)
+                        .sensoryFeedback(.intent(.lightImpact), trigger: searchResultTapTrigger)
                         if index != tracks.count - 1 {
                             Divider().padding(.leading, 84)
                         }
@@ -359,7 +422,17 @@ struct SearchView: View {
     private func submitSearch() {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        // 显式提交(键盘 search 按钮)收起键盘;防抖触发的搜索不打扰用户输入
         searchFocused = false
+        store.submitSearch(text) { tracks in
+            engine.preload(tracks: tracks, limit: 2, delay: .milliseconds(500))
+        }
+    }
+
+    /// 防抖触发的自动搜索——不收起键盘,不打断用户输入。
+    private func debouncedSearch() {
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
         store.submitSearch(text) { tracks in
             engine.preload(tracks: tracks, limit: 2, delay: .milliseconds(500))
         }
