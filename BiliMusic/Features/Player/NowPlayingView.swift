@@ -911,47 +911,70 @@ struct MiniPlayerBar: View {
     @Binding var openPlayerTranslation: CGFloat
 
     var body: some View {
-        HStack(spacing: 12) {
-            CachedAsyncImage(url: thumbnailURL(engine.current?.coverURL, width: 160, height: 90)) { image in
-                image.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: {
-                AppTheme.secondaryBackground
-            }
-            .frame(width: 52, height: 30)
-            .clipShape(RoundedRectangle(cornerRadius: 5))
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                CachedAsyncImage(url: thumbnailURL(engine.current?.coverURL, width: 160, height: 90)) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    AppTheme.secondaryBackground
+                }
+                .frame(width: 52, height: 30)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 1.5)
+                .scaleEffect(engine.state == .playing ? 1.0 : 0.92)
+                .animation(.spring(response: 0.35, dampingFraction: 0.8), value: engine.state)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(engine.current?.title ?? "").font(.subheadline.weight(.semibold)).lineLimit(1)
-                Text(engine.current?.artist ?? "").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(engine.current?.title ?? "")
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .fadeOutRight(width: 14)
+                    Text(engine.current?.artist ?? "")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .fadeOutRight(width: 14)
+                }
+                Spacer()
+                Button {
+                    engine.togglePlayPause()
+                } label: {
+                    Image(systemName: engine.state == .playing ? "pause.fill" : "play.fill")
+                        .font(.system(size: 20, weight: .medium))
+                        .contentTransition(.symbolEffect(.replace))
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(MiniPlayerControlButtonStyle())
+                .overlay { if engine.state == .loading { ProgressView().scaleEffect(0.7).tint(AppTheme.label) } }
+                Button {
+                    Task { await engine.playNext() }
+                } label: {
+                    Image(systemName: "forward.fill")
+                        .font(.system(size: 18, weight: .medium))
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(MiniPlayerControlButtonStyle())
+                .disabled(!engine.hasNext)
+                .opacity(engine.hasNext ? 1.0 : 0.4)
             }
-            Spacer()
-            Button {
-                engine.togglePlayPause()
-            } label: {
-                Image(systemName: engine.state == .playing ? "pause.fill" : "play.fill")
-                    .font(.title3)
-                    .contentTransition(.symbolEffect(.replace))
-            }
-            .buttonStyle(.plain)
-            .overlay { if engine.state == .loading { ProgressView().scaleEffect(0.7) } }
-            Button {
-                Task { await engine.playNext() }
-            } label: {
-                Image(systemName: "forward.fill").font(.title3)
-            }
-            .buttonStyle(.plain)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+
+            MiniProgressBar()
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(AppTheme.separator.opacity(0.7))
-                .frame(height: 0.5)
-        }
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(.ultraThinMaterial)
+                .shadow(color: .black.opacity(0.08), radius: 10, x: 0, y: 6)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 0.5)
+        )
         .contentShape(Rectangle())
         .onTapGesture { openFullPlayer() }
-        // 手指按住 mini 播放器上滑即可打开全屏播放页
         .gesture(
             DragGesture(minimumDistance: 22)
                 .onChanged { value in
@@ -972,6 +995,7 @@ struct MiniPlayerBar: View {
                     }
                 }
         )
+        .sensoryFeedback(.impact(flexibility: .solid, intensity: 0.6), trigger: engine.state)
     }
 
     private func openFullPlayer() {

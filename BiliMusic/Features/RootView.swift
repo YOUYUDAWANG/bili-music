@@ -79,6 +79,9 @@ struct RootView: View {
                     showFullPlayer: $showFullPlayer,
                     isDraggingFullPlayer: $isDraggingFullPlayer,
                     openPlayerTranslation: $openPlayerTranslation)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 6)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
     }
