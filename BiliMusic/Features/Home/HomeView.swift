@@ -4,9 +4,14 @@ import SwiftUI
 /// 再用「相关推荐」扩展,音乐关键词兜底。未登录/无收藏夹时回退到当前在播 + 最近缓存。
 struct HomeView: View {
     @Environment(PlayerEngine.self) private var engine
+    @Binding var showSettings: Bool
     @State private var tracks: [Track] = []
     @State private var loading = false
     @State private var errorMessage: String?
+
+    init(showSettings: Binding<Bool> = .constant(false)) {
+        _showSettings = showSettings
+    }
 
     var body: some View {
         NavigationStack {
@@ -34,12 +39,19 @@ struct HomeView: View {
             .background(AppTheme.groupedBackground)
             .navigationTitle("推荐")
             .toolbar {
-                Button {
-                    Task { await load() }
-                } label: {
-                    Label("换一批", systemImage: "arrow.clockwise")
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        Task { await load() }
+                    } label: {
+                        Label("换一批", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(loading)
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
                 }
-                .disabled(loading)
             }
             .refreshable { await load() }
             .overlay {

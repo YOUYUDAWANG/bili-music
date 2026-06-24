@@ -14,16 +14,7 @@ struct RootView: View {
         GeometryReader { proxy in
             ZStack {
                 TabView {
-                    miniBarWrapper(HomeView())
-                        .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
-                                Button {
-                                    showSettings = true
-                                } label: {
-                                    Image(systemName: "gearshape")
-                                }
-                            }
-                        }
+                    miniBarWrapper(HomeView(showSettings: $showSettings))
                         .tabItem { Label("推荐", systemImage: "music.note.house.fill") }
                     miniBarWrapper(SearchView())
                         .tabItem { Label("搜索", systemImage: "magnifyingglass") }
@@ -79,7 +70,6 @@ struct RootView: View {
                     isDraggingFullPlayer: $isDraggingFullPlayer,
                     openPlayerTranslation: $openPlayerTranslation,
                     namespace: playerTransition)
-                .padding(.horizontal, 8)
                 .padding(.bottom, 4)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }

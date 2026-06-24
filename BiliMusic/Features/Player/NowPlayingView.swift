@@ -79,6 +79,7 @@ struct NowPlayingView: View {
             }
             .offset(y: dragOffset)
             .animation(.spring(response: 0.32, dampingFraction: 0.86), value: dragOffset)
+            .simultaneousGesture(pageDismissDrag)
         }
         .sheet(isPresented: $showUPPlaylists) {
             UPPlaylistsView()
@@ -136,26 +137,10 @@ struct NowPlayingView: View {
     }
 
     private var playerHeader: some View {
-        HStack {
-            Button {
-                closePlayer()
-            } label: {
-                Image(systemName: "chevron.down")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 44, height: 44)
-            }
-            Spacer()
-        }
-        .overlay {
-            Capsule()
-                .fill(.secondary.opacity(0.32))
-                .frame(width: 42, height: 5)
-        }
-        .padding(.horizontal, 14)
-        .padding(.top, 8)
-        .contentShape(Rectangle())
-        .gesture(dismissDrag)
+        Color.clear
+            .frame(height: 12)
+            .contentShape(Rectangle())
+            .gesture(dismissDrag)
     }
 
     private func nowPlayingPage(coverSize: CGFloat) -> some View {
@@ -855,6 +840,27 @@ struct NowPlayingView: View {
             }
     }
 
+    /// 整页任意位置下滑关闭播放器（与 ScrollView 共存）。
+    private var pageDismissDrag: some Gesture {
+        DragGesture(minimumDistance: 24)
+            .onChanged { value in
+                guard selectedPage == PlayerPage.nowPlaying.rawValue,
+                      abs(value.translation.height) > abs(value.translation.width),
+                      value.translation.height > 0 else { return }
+                dragOffset = max(0, value.translation.height)
+            }
+            .onEnded { value in
+                guard selectedPage == PlayerPage.nowPlaying.rawValue else { return }
+                if value.translation.height > 130 || value.predictedEndTranslation.height > 260 {
+                    closePlayer()
+                } else {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+                        dragOffset = 0
+                    }
+                }
+            }
+    }
+
     private func format(_ seconds: Double) -> String {
         let s = Int(seconds.isFinite ? max(seconds, 0) : 0)
         return String(format: "%d:%02d", s / 60, s % 60)
@@ -947,15 +953,12 @@ struct MiniPlayerBar: View {
 
             MiniProgressBar()
         }
-        .background(
-            RoundedRectangle(cornerRadius: AppTheme.playerCoverRadius)
-                .fill(.ultraThinMaterial)
-                .shadow(color: .black.opacity(0.08), radius: 10, x: 0, y: 6)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.playerCoverRadius)
-                .stroke(Color.primary.opacity(0.06), lineWidth: 0.5)
-        )
+        .background(.regularMaterial)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(AppTheme.separator.opacity(0.5))
+                .frame(height: 0.5)
+        }
         .contentShape(Rectangle())
         .onTapGesture { openFullPlayer() }
         .gesture(
