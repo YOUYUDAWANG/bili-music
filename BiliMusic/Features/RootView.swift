@@ -224,6 +224,7 @@ struct RootView: View {
                 .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(selectedTab == 3 ? AppTheme.accent : .secondary)
                 .frame(width: 52, height: 52)
+                .contentShape(Rectangle())
                 .background(
                     Circle()
                         .stroke(strokeGradient, lineWidth: 0.3)

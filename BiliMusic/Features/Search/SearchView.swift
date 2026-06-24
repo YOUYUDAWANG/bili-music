@@ -80,6 +80,16 @@ struct SearchView: View {
                         }
                         .buttonStyle(.plain)
                     }
+                    if !trimmedQuery.isEmpty {
+                        Button {
+                            submitSearch()
+                        } label: {
+                            Text("搜索")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(AppTheme.accent)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
                 .padding(.horizontal, 12)
                 .frame(height: 44)
