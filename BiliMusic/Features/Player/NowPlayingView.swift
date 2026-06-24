@@ -79,7 +79,6 @@ struct NowPlayingView: View {
             }
             .offset(y: dragOffset)
             .animation(.spring(response: 0.32, dampingFraction: 0.86), value: dragOffset)
-            .simultaneousGesture(pageDismissDrag)
         }
         .sheet(isPresented: $showUPPlaylists) {
             UPPlaylistsView()
@@ -138,7 +137,7 @@ struct NowPlayingView: View {
 
     private var playerHeader: some View {
         Color.clear
-            .frame(height: 12)
+            .frame(height: 20)
             .contentShape(Rectangle())
             .gesture(dismissDrag)
     }
@@ -840,27 +839,6 @@ struct NowPlayingView: View {
             }
     }
 
-    /// 整页任意位置下滑关闭播放器（与 ScrollView 共存）。
-    private var pageDismissDrag: some Gesture {
-        DragGesture(minimumDistance: 24)
-            .onChanged { value in
-                guard selectedPage == PlayerPage.nowPlaying.rawValue,
-                      abs(value.translation.height) > abs(value.translation.width),
-                      value.translation.height > 0 else { return }
-                dragOffset = max(0, value.translation.height)
-            }
-            .onEnded { value in
-                guard selectedPage == PlayerPage.nowPlaying.rawValue else { return }
-                if value.translation.height > 130 || value.predictedEndTranslation.height > 260 {
-                    closePlayer()
-                } else {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
-                        dragOffset = 0
-                    }
-                }
-            }
-    }
-
     private func format(_ seconds: Double) -> String {
         let s = Int(seconds.isFinite ? max(seconds, 0) : 0)
         return String(format: "%d:%02d", s / 60, s % 60)
@@ -945,31 +923,37 @@ struct MiniPlayerBar: View {
         .frame(height: 52)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(.thinMaterial)
+                .fill(.ultraThinMaterial)
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    .white.opacity(0.22),
+                                    .white.opacity(0.06),
+                                    .clear,
+                                    .black.opacity(0.04),
+                                    .white.opacity(0.12)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 0.5
+                        )
                 )
         )
-        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
+        .shadow(color: .black.opacity(0.08), radius: 10, x: 0, y: 5)
         .contentShape(Rectangle())
         .onTapGesture { openFullPlayer() }
         .gesture(
             DragGesture(minimumDistance: 22)
-                .onChanged { value in
-                    guard abs(value.translation.height) > abs(value.translation.width),
-                          value.translation.height < 0 else { return }
-                    isDraggingFullPlayer = true
-                    openPlayerTranslation = value.translation.height
-                }
                 .onEnded { value in
                     guard abs(value.translation.height) > abs(value.translation.width) else { return }
-                    if value.translation.height < -110 || value.predictedEndTranslation.height < -180 {
+                    if value.translation.height < -80 {
                         openFullPlayer()
-                    } else {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
-                            isDraggingFullPlayer = false
-                            openPlayerTranslation = 0
+                    } else if value.translation.height > 40 {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                            engine.isMiniPlayerHidden = true
                         }
                     }
                 }
@@ -983,6 +967,40 @@ struct MiniPlayerBar: View {
             openPlayerTranslation = 0
             showFullPlayer = true
         }
+    }
+}
+
+// MARK: - 滚动时自动隐藏迷你播放器的修饰符
+struct ScrollHideMiniPlayerModifier: ViewModifier {
+    @Environment(PlayerEngine.self) private var engine
+
+    func body(content: Content) -> some View {
+        content
+            .simultaneousGesture(
+                DragGesture()
+                    .onChanged { value in
+                        guard abs(value.translation.height) > abs(value.translation.width) else { return }
+                        if value.translation.height < -12 {
+                            if !engine.isMiniPlayerHidden {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                    engine.isMiniPlayerHidden = true
+                                }
+                            }
+                        } else if value.translation.height > 12 {
+                            if engine.isMiniPlayerHidden {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                    engine.isMiniPlayerHidden = false
+                                }
+                            }
+                        }
+                    }
+            )
+    }
+}
+
+extension View {
+    func hideMiniPlayerOnScroll() -> some View {
+        self.modifier(ScrollHideMiniPlayerModifier())
     }
 }
 
