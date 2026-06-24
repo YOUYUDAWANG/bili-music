@@ -2,7 +2,7 @@ name: BiliMusic
 options:
   bundleIdPrefix: com.fubuki
   deploymentTarget:
-    iOS: "26.0"
+    iOS: "17.0"
 targets:
   BiliMusic:
     type: application
