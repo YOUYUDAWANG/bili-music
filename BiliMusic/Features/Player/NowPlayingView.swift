@@ -1,6 +1,14 @@
 import AVKit
 import SwiftUI
 
+/// PreferenceKey 用于检测 ScrollView 的滚动偏移。
+private struct ScrollOffsetKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 /// 全屏正在播放页(从 mini bar 上拉打开)。
 struct NowPlayingView: View {
     @Environment(PlayerEngine.self) private var engine
@@ -34,7 +42,13 @@ struct NowPlayingView: View {
     @State private var selectedMode: PlayerEngine.PlaybackMode = .music
     @State private var switchingMode = false
     @State private var dragOffset: CGFloat = 0
-    @GestureState private var isDismissIntent = false
+    @State private var scrollOffset: CGFloat = 0
+    @State private var playHapticTrigger = 0
+    @State private var prevHapticTrigger = 0
+    @State private var nextHapticTrigger = 0
+    @State private var favoriteHapticTrigger = 0
+    @State private var favoriteWasAdded = false
+    @State private var downloadTrigger = 0
     @Environment(\.dismiss) private var dismiss
     private var favorites: FavoriteManager { .shared }
 
@@ -65,6 +79,16 @@ struct NowPlayingView: View {
 
                             ScrollView(showsIndicators: false) {
                                 nowPlayingPage(coverSize: coverSize)
+                                    .background(GeometryReader { geo in
+                                        Color.clear.preference(
+                                            key: ScrollOffsetKey.self,
+                                            value: geo.frame(in: .named("playerScroll")).minY
+                                        )
+                                    })
+                            }
+                            .coordinateSpace(name: "playerScroll")
+                            .onPreferenceChange(ScrollOffsetKey.self) { offset in
+                                scrollOffset = offset
                             }
                             .tag(PlayerPage.nowPlaying.rawValue)
 
@@ -276,9 +300,12 @@ struct NowPlayingView: View {
     private var transportControls: some View {
         HStack(spacing: 34) {
             PlayerIconButton(systemName: "backward.fill", size: 28, accessibilityLabel: "上一曲") {
+                prevHapticTrigger += 1
                 Task { await engine.playPrevious() }
             }
+            .sensoryFeedback(.impact(weight: .medium), trigger: prevHapticTrigger)
             Button {
+                playHapticTrigger += 1
                 engine.togglePlayPause()
             } label: {
                 Image(systemName: engine.state == .playing ? "pause.fill" : "play.fill")
@@ -290,10 +317,13 @@ struct NowPlayingView: View {
                     .shadow(color: .black.opacity(0.18), radius: 16, y: 8)
             }
             .overlay { if engine.state == .loading { ProgressView().tint(AppTheme.background) } }
+            .sensoryFeedback(.impact(weight: .medium), trigger: playHapticTrigger)
             PlayerIconButton(systemName: "forward.fill", size: 28, accessibilityLabel: "下一曲") {
+                nextHapticTrigger += 1
                 Task { await engine.playNext() }
             }
             .disabled(!engine.hasNext)
+            .sensoryFeedback(.impact(weight: .medium), trigger: nextHapticTrigger)
         }
         .foregroundStyle(AppTheme.label)
     }
@@ -322,12 +352,18 @@ struct NowPlayingView: View {
                 systemName: favorites.isFavorite(track) ? "heart.fill" : "heart"
             ) {
                 guard !favorites.busyBVIDs.contains(track.bvid) else { return }
-                Task { await favorites.toggle(track: track) }
+                let wasFavorite = favorites.isFavorite(track)
+                Task {
+                    await favorites.toggle(track: track)
+                    favoriteWasAdded = !wasFavorite
+                    favoriteHapticTrigger += 1
+                }
             }
             .symbolEffect(.bounce, value: favorites.isFavorite(track))
             .opacity(favorites.busyBVIDs.contains(track.bvid) ? 0.55 : 1)
             .accessibilityAddTraits(.isButton)
             .accessibilityHint("收藏到默认收藏夹")
+            .sensoryFeedback(.intent(favoriteWasAdded ? .success : .selection), trigger: favoriteHapticTrigger)
         }
     }
 
@@ -357,8 +393,10 @@ struct NowPlayingView: View {
                 .frame(maxWidth: .infinity)
             } else {
                 ActionSymbolButton(title: "缓存", systemName: "arrow.down.circle") {
+                    downloadTrigger += 1
                     Task { await downloads.download(track: track) }
                 }
+                .sensoryFeedback(.intent(.start), trigger: downloadTrigger)
             }
         }
     }
@@ -834,33 +872,30 @@ struct NowPlayingView: View {
                 if value.translation.height > 130 || value.predictedEndTranslation.height > 260 {
                     closePlayer()
                 } else {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+                    withAnimation(.easeOut(duration: 0.2)) {
                         dragOffset = 0
                     }
                 }
             }
     }
 
-    /// 整页下滑关闭：仅当首次触摸方向为向下时激活，滚动时不产生抖动。
-    /// @GestureState 在每次新手势开始时重置，确保滚动时不会误触发。
+    /// 整页下滑关闭：仅当 ScrollView 在顶部时才激活（和 Apple Music 行为一致）。
+    /// 一旦用户滚动了内容，下滑就只滚动不关闭，完全不会抖动。
     private var pageDismissDrag: some Gesture {
         DragGesture(minimumDistance: 24)
-            .updating($isDismissIntent) { value, state, _ in
-                guard selectedPage == PlayerPage.nowPlaying.rawValue,
-                      !state else { return }
-                state = value.translation.height > 0
-            }
             .onChanged { value in
-                guard isDismissIntent,
+                guard selectedPage == PlayerPage.nowPlaying.rawValue,
+                      scrollOffset >= 0,
                       value.translation.height > 0 else { return }
                 dragOffset = max(0, value.translation.height)
             }
             .onEnded { value in
-                guard isDismissIntent else { return }
+                guard selectedPage == PlayerPage.nowPlaying.rawValue,
+                      scrollOffset >= 0 else { return }
                 if value.translation.height > 130 || value.predictedEndTranslation.height > 260 {
                     closePlayer()
                 } else {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+                    withAnimation(.easeOut(duration: 0.2)) {
                         dragOffset = 0
                     }
                 }
@@ -903,6 +938,8 @@ struct MiniPlayerBar: View {
     @Binding var isDraggingFullPlayer: Bool
     @Binding var openPlayerTranslation: CGFloat
     var namespace: Namespace.ID
+    @State private var playPauseTrigger = 0
+    @State private var nextTrigger = 0
 
     var body: some View {
         HStack(spacing: 10) {
@@ -926,6 +963,7 @@ struct MiniPlayerBar: View {
             }
             Spacer()
             Button {
+                playPauseTrigger += 1
                 engine.togglePlayPause()
             } label: {
                 Image(systemName: engine.state == .playing ? "pause.fill" : "play.fill")
@@ -935,7 +973,9 @@ struct MiniPlayerBar: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(MiniPlayerControlButtonStyle())
+            .sensoryFeedback(.impact(weight: .medium), trigger: playPauseTrigger)
             Button {
+                nextTrigger += 1
                 Task { await engine.playNext() }
             } label: {
                 Image(systemName: "forward.fill")
@@ -946,31 +986,27 @@ struct MiniPlayerBar: View {
             .buttonStyle(MiniPlayerControlButtonStyle())
             .disabled(!engine.hasNext)
             .opacity(engine.hasNext ? 1.0 : 0.3)
+            .sensoryFeedback(.impact(weight: .medium), trigger: nextTrigger)
         }
         .padding(.horizontal, 10)
         .frame(height: 52)
         .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(
-                            LinearGradient(
-                                colors: [
-                                    .white.opacity(0.22),
-                                    .white.opacity(0.06),
-                                    .clear,
-                                    .black.opacity(0.04),
-                                    .white.opacity(0.12)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 0.5
-                        )
+            RoundedRectangle(cornerRadius: 26)
+                .stroke(
+                    LinearGradient(
+                        colors: [
+                            .white.opacity(0.18),
+                            .white.opacity(0.04),
+                            .clear,
+                            .black.opacity(0.02),
+                            .white.opacity(0.10)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 0.3
                 )
         )
-        .shadow(color: .black.opacity(0.08), radius: 10, x: 0, y: 5)
         .contentShape(Rectangle())
         .onTapGesture { openFullPlayer() }
         .gesture(
@@ -986,7 +1022,6 @@ struct MiniPlayerBar: View {
                     }
                 }
         )
-        .sensoryFeedback(.impact(flexibility: .solid, intensity: 0.6), trigger: engine.state)
     }
 
     private func openFullPlayer() {
