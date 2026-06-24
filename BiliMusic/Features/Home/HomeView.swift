@@ -12,7 +12,7 @@ struct HomeView: View {
         NavigationStack {
             List {
                 if let errorMessage {
-                    Text(errorMessage).foregroundStyle(.red).font(.caption)
+                    Text(errorMessage).foregroundStyle(AppTheme.error).font(.caption)
                 }
                 if !tracks.isEmpty {
                     Section {

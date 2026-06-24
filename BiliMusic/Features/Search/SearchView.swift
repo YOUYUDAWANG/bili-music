@@ -5,6 +5,7 @@ struct SearchView: View {
     @State private var query = ""
     @State private var store = SearchStore()
     @State private var preparingTrackKey: TrackKey?
+    @State private var debounceTask: Task<Void, Never>?
     @FocusState private var searchFocused: Bool
     @AppStorage("searchHistory") private var searchHistoryData = "[]"
 
@@ -56,10 +57,6 @@ struct SearchView: View {
                         landingContent
                     }
 
-                    if isTypingUnsubmittedQuery {
-                        typingPrompt
-                    }
-
                     if store.searching {
                         HStack(spacing: 10) {
                             ProgressView()
@@ -75,7 +72,7 @@ struct SearchView: View {
                     } else if let errorMessage = store.errorMessage {
                         VStack(spacing: 10) {
                             Text(errorMessage)
-                                .foregroundStyle(.red)
+                                .foregroundStyle(AppTheme.error)
                                 .font(.caption)
                             Button("重试") {
                                 store.retryCurrentSearch { tracks in
@@ -124,17 +121,21 @@ struct SearchView: View {
         .onChange(of: searchHistoryData) {
             store.reloadHistoryIfNeeded()
         }
-        .onChange(of: query) {
-            store.queryDidChange(query)
+        .onChange(of: query) { _, newValue in
+            store.queryDidChange(newValue)
+            debounceTask?.cancel()
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            debounceTask = Task {
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled else { return }
+                await MainActor.run { submitSearch() }
+            }
         }
     }
 
     private var trimmedQuery: String {
         query.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private var isTypingUnsubmittedQuery: Bool {
-        !trimmedQuery.isEmpty && trimmedQuery != store.resultsQuery && !store.searching
     }
 
     private var recentTracks: [Track] {
@@ -197,7 +198,7 @@ struct SearchView: View {
                 } label: {
                     HStack {
                         Text("清空搜索历史")
-                            .foregroundStyle(.red)
+                            .foregroundStyle(AppTheme.error)
                         Spacer()
                     }
                     .padding(.horizontal, 14)
@@ -321,21 +322,6 @@ struct SearchView: View {
         }
         .background(AppTheme.background, in: RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal, 16)
-    }
-
-    private var typingPrompt: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("按回车搜索 “\(trimmedQuery)”")
-                .font(.subheadline.weight(.semibold))
-            Text("默认只显示音乐内容，找不到时可以查看更多结果。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppTheme.background, in: RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
     }
 
     private func searchResultRow(track: Track) -> some View {

@@ -12,6 +12,20 @@ enum AppTheme {
     static let label = Color(uiColor: .label)
     static let secondaryLabel = Color(uiColor: .secondaryLabel)
 
+    /// 语义颜色
+    static let error = Color.red
+    static let success = Color.green
+
+    /// 通用圆角半径
+    static let cardRadius: CGFloat = 12
+    static let controlRadius: CGFloat = 12
+    static let coverRadius: CGFloat = 6
+
+    /// 封面缩略图尺寸
+    static let listCoverSize: CGFloat = 56
+    static let miniCoverWidth: CGFloat = 52
+    static let miniCoverHeight: CGFloat = 30
+
     /// 没有封面时的中性兜底背景(不含红色)。
     static let playerGradient = LinearGradient(
         colors: [

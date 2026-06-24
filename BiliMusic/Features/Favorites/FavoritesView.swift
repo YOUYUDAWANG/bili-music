@@ -12,7 +12,7 @@ struct FavoritesView: View {
         NavigationStack(path: $path) {
             List {
                 if let errorMessage {
-                    Text(errorMessage).foregroundStyle(.red).font(.caption)
+                    Text(errorMessage).foregroundStyle(AppTheme.error).font(.caption)
                 }
                 ForEach(folders) { folder in
                     NavigationLink(value: folder.id) {
@@ -104,7 +104,7 @@ struct FavFolderDetailView: View {
     var body: some View {
         List {
             if let errorMessage {
-                Text(errorMessage).foregroundStyle(.red).font(.caption)
+                Text(errorMessage).foregroundStyle(AppTheme.error).font(.caption)
             }
             ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
                 Button {

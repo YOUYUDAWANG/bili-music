@@ -99,7 +99,7 @@ struct FavoriteFolderPickerView: View {
                 if let error = favorites.lastError {
                     Text(error)
                         .font(.caption)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(AppTheme.error)
                 }
                 ForEach(favorites.folders) { folder in
                     Button {
@@ -120,7 +120,7 @@ struct FavoriteFolderPickerView: View {
                             Spacer()
                             if favorites.lastFolderId == folder.id {
                                 Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(.green)
+                                    .foregroundStyle(AppTheme.success)
                             }
                         }
                     }
@@ -162,7 +162,7 @@ struct UPPlaylistsView: View {
         NavigationStack {
             List {
                 if let errorMessage {
-                    Text(errorMessage).font(.caption).foregroundStyle(.red)
+                    Text(errorMessage).font(.caption).foregroundStyle(AppTheme.error)
                 }
                 ForEach(playlists) { playlist in
                     NavigationLink(value: playlist) {
@@ -243,7 +243,7 @@ struct UPPlaylistDetailView: View {
     var body: some View {
         List {
             if let errorMessage {
-                Text(errorMessage).font(.caption).foregroundStyle(.red)
+                Text(errorMessage).font(.caption).foregroundStyle(AppTheme.error)
             }
             ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
                 Button {

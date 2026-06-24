@@ -194,7 +194,7 @@ struct NowPlayingView: View {
                 if case .failed(let message) = engine.state {
                     Text(message)
                         .font(.caption)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(AppTheme.error)
                         .lineLimit(2)
                 }
             }
@@ -208,7 +208,7 @@ struct NowPlayingView: View {
             if let favoriteError = favorites.lastError {
                 Text(favoriteError)
                     .font(.caption2)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(AppTheme.error)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 28)
@@ -318,11 +318,7 @@ struct NowPlayingView: View {
                 lyricsButton
             }
             queueModeMenu
-            qualityMenu
-            ActionSymbolButton(title: "合集", systemName: "rectangle.stack") {
-                showUPPlaylists = true
-            }
-            .disabled(engine.current?.ownerMid == nil)
+            moreMenu
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 10)
@@ -359,7 +355,7 @@ struct NowPlayingView: View {
         if let track = engine.current {
             if CacheStore.shared.entry(for: track) != nil {
                 ActionSymbolButton(title: "已缓存", systemName: "arrow.down.circle.fill") {}
-                    .foregroundStyle(.green)
+                    .foregroundStyle(AppTheme.success)
             } else if downloads.progress(for: track) != nil {
                 VStack(spacing: 6) {
                     ZStack {
@@ -393,27 +389,36 @@ struct NowPlayingView: View {
         .buttonStyle(.plain)
     }
 
-    private var qualityMenu: some View {
+    private var moreMenu: some View {
         Menu {
-            ForEach(BiliClient.qualityOptions, id: \.id) { option in
-                Button {
-                    Task { await engine.setPlaybackQuality(option.id) }
-                } label: {
-                    Label(option.title, systemImage: PlayerEngine.playbackQuality == option.id ? "checkmark" : "circle")
+            Section("音质") {
+                ForEach(BiliClient.qualityOptions, id: \.id) { option in
+                    Button {
+                        Task { await engine.setPlaybackQuality(option.id) }
+                    } label: {
+                        Label(option.title, systemImage: PlayerEngine.playbackQuality == option.id ? "checkmark" : "circle")
+                    }
+                }
+                if let quality = engine.currentAudioQuality {
+                    Divider()
+                    Label("当前: \(BiliClient.qualityName(quality))", systemImage: "waveform")
+                    if let bandwidth = engine.currentAudioBandwidth {
+                        Label("码率: \(formatBitrate(bandwidth))", systemImage: "speedometer")
+                    }
+                } else if engine.playbackMode == .mv {
+                    Divider()
+                    Label("当前为 MV 视频流", systemImage: "play.rectangle")
                 }
             }
-            if let quality = engine.currentAudioQuality {
-                Divider()
-                Label("当前: \(BiliClient.qualityName(quality))", systemImage: "waveform")
-                if let bandwidth = engine.currentAudioBandwidth {
-                    Label("码率: \(formatBitrate(bandwidth))", systemImage: "speedometer")
+            if engine.current?.ownerMid != nil {
+                Button {
+                    showUPPlaylists = true
+                } label: {
+                    Label("合集", systemImage: "rectangle.stack")
                 }
-            } else if engine.playbackMode == .mv {
-                Divider()
-                Label("当前为 MV 视频流", systemImage: "play.rectangle")
             }
         } label: {
-            ActionSymbolLabel(title: "播放音质", systemName: "hifispeaker")
+            ActionSymbolLabel(title: "更多", systemName: "ellipsis.circle")
         }
         .buttonStyle(.plain)
     }
