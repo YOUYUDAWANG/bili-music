@@ -104,10 +104,9 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
             image = cached
             return
         }
-        image = nil
+        // 不提前清空 image：保留旧图或占位图，避免磁盘缓存命中时的闪烁
         guard let decoded = await ImageLoadCoordinator.shared.image(for: url, headers: headers),
               !Task.isCancelled else {
-            image = nil
             return
         }
         ImageMemoryCache.shared.insert(decoded, for: url)

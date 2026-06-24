@@ -915,6 +915,7 @@ struct NowPlayingView: View {
     }
 
     private func closePlayer() {
+        dragOffset = 0
         if let onDismiss {
             onDismiss()
         } else {
@@ -943,14 +944,15 @@ struct MiniPlayerBar: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            CachedAsyncImage(url: thumbnailURL(engine.current?.coverURL, width: 100, height: 100)) { image in
+            CachedAsyncImage(url: thumbnailURL(engine.current?.coverURL, width: 150, height: 85)) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
                 AppTheme.secondaryBackground
             }
             .matchedGeometryEffect(id: "playerCover", in: namespace)
-            .frame(width: 36, height: 36)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .frame(width: 52, height: 30)
+            .clipShape(RoundedRectangle(cornerRadius: 5))
+            .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 1.5)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(engine.current?.title ?? "")
@@ -987,6 +989,12 @@ struct MiniPlayerBar: View {
             .disabled(!engine.hasNext)
             .opacity(engine.hasNext ? 1.0 : 0.3)
             .sensoryFeedback(.impact(weight: .medium), trigger: nextTrigger)
+            .task(id: engine.current?.coverURL) {
+                guard let url = engine.current?.coverURL,
+                      let fullURL = thumbnailURL(url, width: 960, height: 540),
+                      ImageMemoryCache.shared.image(for: fullURL) == nil else { return }
+                _ = await ImageLoadCoordinator.shared.image(for: fullURL)
+            }
         }
         .padding(.horizontal, 10)
         .frame(height: 52)
@@ -1010,14 +1018,33 @@ struct MiniPlayerBar: View {
         .contentShape(Rectangle())
         .onTapGesture { openFullPlayer() }
         .gesture(
-            DragGesture(minimumDistance: 22)
-                .onEnded { value in
+            DragGesture(minimumDistance: 15)
+                .onChanged { value in
                     guard abs(value.translation.height) > abs(value.translation.width) else { return }
-                    if value.translation.height < -80 {
-                        openFullPlayer()
-                    } else if value.translation.height > 40 {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                            engine.isMiniPlayerHidden = true
+                    if value.translation.height < 0.0 {
+                        isDraggingFullPlayer = true
+                        openPlayerTranslation = value.translation.height
+                    } else {
+                        isDraggingFullPlayer = false
+                        openPlayerTranslation = 0.0
+                    }
+                }
+                .onEnded { value in
+                    if isDraggingFullPlayer {
+                        if value.translation.height < -100.0 || value.predictedEndTranslation.height < -200.0 {
+                            openFullPlayer()
+                        } else {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                showFullPlayer = false
+                                isDraggingFullPlayer = false
+                                openPlayerTranslation = 0.0
+                            }
+                        }
+                    } else {
+                        if value.translation.height > 40.0 {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                engine.isMiniPlayerHidden = true
+                            }
                         }
                     }
                 }
