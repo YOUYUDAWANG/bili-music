@@ -20,6 +20,7 @@ enum AppTheme {
     static let cardRadius: CGFloat = 12
     static let controlRadius: CGFloat = 12
     static let coverRadius: CGFloat = 6
+    static let playerCoverRadius: CGFloat = 14
 
     /// 封面缩略图尺寸
     static let listCoverSize: CGFloat = 56

@@ -28,7 +28,7 @@ struct ActionSymbolButton: View {
             Image(systemName: systemName)
                 .font(.system(size: 19, weight: .semibold))
                 .frame(maxWidth: .infinity)
-                .frame(height: 42)
+                .frame(height: 44)
                 .contentShape(RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.plain)
@@ -60,27 +60,62 @@ struct PlayerProgressBar: View {
     @Environment(PlayerEngine.self) private var engine
     @State private var scrubValue: Double = 0
     @State private var isScrubbing = false
+    @State private var trackWidth: CGFloat = 0
+
+    private var displayProgress: CGFloat {
+        let current = isScrubbing ? scrubValue : engine.currentTime
+        guard engine.duration > 0 else { return 0 }
+        return CGFloat(min(current, engine.duration) / engine.duration)
+    }
 
     var body: some View {
-        VStack(spacing: 4) {
-            Slider(
-                value: Binding(
-                    get: { isScrubbing ? scrubValue : min(engine.currentTime, engine.duration) },
-                    set: { scrubValue = $0 }
-                ),
-                in: 0...max(engine.duration, 1),
-                onEditingChanged: { editing in
-                    if editing {
-                        scrubValue = min(engine.currentTime, engine.duration)
-                        isScrubbing = true
-                        engine.beginScrub()
-                    } else {
+        VStack(spacing: 6) {
+            ZStack(alignment: .leading) {
+                // 底槽
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(.quaternary)
+                    .frame(height: 3)
+
+                // 进度轨
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(AppTheme.label)
+                    .frame(width: max(0, trackWidth * displayProgress), height: 3)
+
+                // 拇指球
+                Circle()
+                    .fill(AppTheme.label)
+                    .frame(width: 12, height: 12)
+                    .offset(x: max(0, trackWidth * displayProgress - 6))
+                    .scaleEffect(isScrubbing ? 1.15 : 1.0)
+                    .shadow(color: .black.opacity(0.15), radius: 3, y: 1)
+                    .animation(.spring(response: 0.2, dampingFraction: 0.8), value: isScrubbing)
+            }
+            .frame(height: 32)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        if !isScrubbing {
+                            scrubValue = min(engine.currentTime, engine.duration)
+                            isScrubbing = true
+                            engine.beginScrub()
+                        }
+                        let progress = max(0, min(1, value.location.x / max(trackWidth, 1)))
+                        scrubValue = progress * engine.duration
+                    }
+                    .onEnded { _ in
                         engine.endScrub(to: scrubValue)
                         isScrubbing = false
                     }
+            )
+            .background(
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear { trackWidth = geo.size.width }
+                        .onChange(of: geo.size.width) { _, w in trackWidth = w }
                 }
             )
-            .tint(AppTheme.label)
+
             HStack {
                 Text(format(isScrubbing ? scrubValue : engine.currentTime))
                 Spacer()

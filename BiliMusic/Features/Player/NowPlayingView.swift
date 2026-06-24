@@ -5,6 +5,7 @@ import SwiftUI
 struct NowPlayingView: View {
     @Environment(PlayerEngine.self) private var engine
     var onDismiss: (() -> Void)? = nil
+    var namespace: Namespace.ID
     private enum PlayerPage: Int {
         case queue = 0
         case nowPlaying = 1
@@ -71,7 +72,7 @@ struct NowPlayingView: View {
                             }
                             .tag(PlayerPage.recommendations.rawValue)
                         }
-                        .tabViewStyle(.page(indexDisplayMode: .always))
+                        .tabViewStyle(.page(indexDisplayMode: .never))
                         .indexViewStyle(.page(backgroundDisplayMode: .interactive))
                     }
                 }
@@ -249,7 +250,7 @@ struct NowPlayingView: View {
                 }
             }
             .frame(width: min(coverSize, 430), height: min(coverSize, 430) * 9 / 16)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .clipShape(RoundedRectangle(cornerRadius: AppTheme.playerCoverRadius))
             .shadow(color: .black.opacity(0.42), radius: 28, y: 18)
             .onChange(of: showMVControls) { _, visible in
                 guard visible else { return }
@@ -266,6 +267,7 @@ struct NowPlayingView: View {
         } else {
             CachedAsyncImage(url: thumbnailURL(engine.current?.coverURL, width: 960, height: 540)) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
+                    .matchedGeometryEffect(id: "playerCover", in: namespace)
             } placeholder: {
                 ZStack {
                     AppTheme.secondaryBackground
@@ -275,7 +277,7 @@ struct NowPlayingView: View {
                 }
             }
             .frame(width: coverSize, height: coverSize * 9 / 16)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .clipShape(RoundedRectangle(cornerRadius: AppTheme.playerCoverRadius))
             .shadow(color: .black.opacity(0.42), radius: 28, y: 18)
         }
     }
@@ -337,6 +339,7 @@ struct NowPlayingView: View {
                 guard !favorites.busyBVIDs.contains(track.bvid) else { return }
                 Task { await favorites.toggle(track: track) }
             }
+            .symbolEffect(.bounce, value: favorites.isFavorite(track))
             .opacity(favorites.busyBVIDs.contains(track.bvid) ? 0.55 : 1)
             .accessibilityAddTraits(.isButton)
             .accessibilityHint("收藏到默认收藏夹")
@@ -909,6 +912,7 @@ struct MiniPlayerBar: View {
     @Binding var showFullPlayer: Bool
     @Binding var isDraggingFullPlayer: Bool
     @Binding var openPlayerTranslation: CGFloat
+    var namespace: Namespace.ID
 
     var body: some View {
         VStack(spacing: 0) {
@@ -918,6 +922,7 @@ struct MiniPlayerBar: View {
                 } placeholder: {
                     AppTheme.secondaryBackground
                 }
+                .matchedGeometryEffect(id: "playerCover", in: namespace)
                 .frame(width: 52, height: 30)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 1.5)
@@ -965,12 +970,12 @@ struct MiniPlayerBar: View {
             MiniProgressBar()
         }
         .background(
-            RoundedRectangle(cornerRadius: 14)
+            RoundedRectangle(cornerRadius: AppTheme.playerCoverRadius)
                 .fill(.ultraThinMaterial)
                 .shadow(color: .black.opacity(0.08), radius: 10, x: 0, y: 6)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
+            RoundedRectangle(cornerRadius: AppTheme.playerCoverRadius)
                 .stroke(Color.primary.opacity(0.06), lineWidth: 0.5)
         )
         .contentShape(Rectangle())

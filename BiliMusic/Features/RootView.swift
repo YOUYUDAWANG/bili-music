@@ -8,6 +8,7 @@ struct RootView: View {
     @State private var isDraggingFullPlayer = false
     @State private var openPlayerTranslation: CGFloat = 0
     @State private var showSettings = false
+    @Namespace private var playerTransition
 
     var body: some View {
         GeometryReader { proxy in
@@ -32,9 +33,7 @@ struct RootView: View {
                 .tint(AppTheme.accent)
 
                 if showFullPlayer || isDraggingFullPlayer {
-                    NowPlayingView {
-                        closeFullPlayer()
-                    }
+                    NowPlayingView(onDismiss: { closeFullPlayer() }, namespace: playerTransition)
                     .offset(y: fullPlayerOffset(height: proxy.size.height))
                     .ignoresSafeArea()
                     .zIndex(10)
@@ -78,7 +77,8 @@ struct RootView: View {
                 MiniPlayerBar(
                     showFullPlayer: $showFullPlayer,
                     isDraggingFullPlayer: $isDraggingFullPlayer,
-                    openPlayerTranslation: $openPlayerTranslation)
+                    openPlayerTranslation: $openPlayerTranslation,
+                    namespace: playerTransition)
                 .padding(.horizontal, 10)
                 .padding(.bottom, 6)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
