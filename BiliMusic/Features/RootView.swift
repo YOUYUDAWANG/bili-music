@@ -13,7 +13,7 @@ struct RootView: View {
         GeometryReader { proxy in
             ZStack {
                 TabView {
-                    HomeView()
+                    miniBarWrapper(HomeView())
                         .toolbar {
                             ToolbarItem(placement: .topBarTrailing) {
                                 Button {
@@ -24,20 +24,12 @@ struct RootView: View {
                             }
                         }
                         .tabItem { Label("推荐", systemImage: "music.note.house.fill") }
-                    SearchView()
+                    miniBarWrapper(SearchView())
                         .tabItem { Label("搜索", systemImage: "magnifyingglass") }
-                    LibraryTabView()
+                    miniBarWrapper(LibraryTabView())
                         .tabItem { Label("资料库", systemImage: "rectangle.stack.fill") }
                 }
                 .tint(AppTheme.accent)
-                .safeAreaInset(edge: .bottom) {
-                    if engine.current != nil {
-                        MiniPlayerBar(
-                            showFullPlayer: $showFullPlayer,
-                            isDraggingFullPlayer: $isDraggingFullPlayer,
-                            openPlayerTranslation: $openPlayerTranslation)
-                    }
-                }
 
                 if showFullPlayer || isDraggingFullPlayer {
                     NowPlayingView {
@@ -75,6 +67,18 @@ struct RootView: View {
                     await engine.playNext()
                     NSLog("AUTOPLAY_NEXT state=\(String(describing: engine.state)) track=\(engine.current?.title ?? "nil")")
                 }
+            }
+        }
+    }
+
+    /// MiniPlayerBar 作为每个 tab 内容的安全区域底边距，确保内容不被 tab bar 遮挡。
+    private func miniBarWrapper(_ content: some View) -> some View {
+        content.safeAreaInset(edge: .bottom) {
+            if engine.current != nil {
+                MiniPlayerBar(
+                    showFullPlayer: $showFullPlayer,
+                    isDraggingFullPlayer: $isDraggingFullPlayer,
+                    openPlayerTranslation: $openPlayerTranslation)
             }
         }
     }
