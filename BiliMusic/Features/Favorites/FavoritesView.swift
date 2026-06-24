@@ -39,6 +39,7 @@ struct FavoritesView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .hideMiniPlayerOnScroll()
             .scrollContentBackground(.hidden)
             .background(AppTheme.groupedBackground)
             .navigationTitle("收藏夹")
@@ -100,6 +101,7 @@ struct FavFolderDetailView: View {
     @State private var hasMore = true
     @State private var loading = false
     @State private var errorMessage: String?
+    @State private var trackTapTrigger = 0
 
     var body: some View {
         List {
@@ -108,11 +110,13 @@ struct FavFolderDetailView: View {
             }
             ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
                 Button {
+                    trackTapTrigger += 1
                     Task { await engine.play(tracks: tracks, startAt: index) }
                 } label: {
                     TrackRow(track: track, isPlaying: engine.current.map { track.key.matches($0) } ?? false)
                 }
                 .buttonStyle(.plain)
+                .sensoryFeedback(.intent(.lightImpact), trigger: trackTapTrigger)
                 .contextMenu {
                     Button {
                         Task { await engine.playRadio(seed: track) }
@@ -134,6 +138,7 @@ struct FavFolderDetailView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .hideMiniPlayerOnScroll()
         .scrollContentBackground(.hidden)
         .background(AppTheme.groupedBackground)
         .navigationTitle(title)

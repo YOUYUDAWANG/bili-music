@@ -18,8 +18,8 @@ struct TrackRow: View {
                     Image(systemName: "music.note").font(.caption).foregroundStyle(.secondary)
                 }
             }
-            .frame(width: 56, height: 56)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .frame(width: 64, height: 36)
+            .clipShape(RoundedRectangle(cornerRadius: 5))
             VStack(alignment: .leading, spacing: 4) {
                 Text(track.title)
                     .font(.subheadline)

@@ -61,6 +61,7 @@ struct PlayerProgressBar: View {
     @State private var scrubValue: Double = 0
     @State private var isScrubbing = false
     @State private var trackWidth: CGFloat = 0
+    @State private var scrubHapticTrigger = 0
 
     private var displayProgress: CGFloat {
         let current = isScrubbing ? scrubValue : engine.currentTime
@@ -99,6 +100,7 @@ struct PlayerProgressBar: View {
                             scrubValue = min(engine.currentTime, engine.duration)
                             isScrubbing = true
                             engine.beginScrub()
+                            scrubHapticTrigger += 1
                         }
                         let progress = max(0, min(1, value.location.x / max(trackWidth, 1)))
                         scrubValue = progress * engine.duration
@@ -106,8 +108,10 @@ struct PlayerProgressBar: View {
                     .onEnded { _ in
                         engine.endScrub(to: scrubValue)
                         isScrubbing = false
+                        scrubHapticTrigger += 1
                     }
             )
+            .sensoryFeedback(.selection, trigger: scrubHapticTrigger)
             .background(
                 GeometryReader { geo in
                     Color.clear

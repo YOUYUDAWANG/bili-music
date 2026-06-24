@@ -6,6 +6,7 @@ struct LibraryView: View {
     @State private var confirmClear = false
     @State private var searchText = ""
     @State private var sortOrder: CacheSortOrder = .recentlyCached
+    @State private var clearHapticTrigger = 0
 
     private var cache: CacheStore { .shared }
 
@@ -100,6 +101,7 @@ struct LibraryView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .hideMiniPlayerOnScroll()
             .scrollContentBackground(.hidden)
             .background(AppTheme.groupedBackground)
             .navigationTitle("缓存")
@@ -129,8 +131,12 @@ struct LibraryView: View {
             }
             .confirmationDialog("删除全部 \(cache.entries.count) 首缓存?", isPresented: $confirmClear,
                                 titleVisibility: .visible) {
-                Button("全部删除", role: .destructive) { cache.removeAll() }
+                Button("全部删除", role: .destructive) {
+                    clearHapticTrigger += 1
+                    cache.removeAll()
+                }
             }
+            .sensoryFeedback(.intent(.warning), trigger: clearHapticTrigger)
             .overlay {
                 if cache.entries.isEmpty {
                     ContentUnavailableView("还没有缓存", systemImage: "arrow.down.circle",

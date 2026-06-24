@@ -8,6 +8,8 @@ struct HomeView: View {
     @State private var tracks: [Track] = []
     @State private var loading = false
     @State private var errorMessage: String?
+    @State private var trackTapTrigger = 0
+    @State private var refreshTrigger = 0
 
     init(showSettings: Binding<Bool> = .constant(false)) {
         _showSettings = showSettings
@@ -23,11 +25,13 @@ struct HomeView: View {
                     Section {
                         ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
                             Button {
+                                trackTapTrigger += 1
                                 Task { await engine.play(tracks: tracks, startAt: index) }
                             } label: {
                                 TrackRow(track: track, isPlaying: engine.current.map { track.key.matches($0) } ?? false)
                             }
                             .buttonStyle(.plain)
+                            .sensoryFeedback(.intent(.lightImpact), trigger: trackTapTrigger)
                         }
                     } header: {
                         Text("为你推荐")
@@ -35,21 +39,29 @@ struct HomeView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .hideMiniPlayerOnScroll()
             .scrollContentBackground(.hidden)
             .background(AppTheme.groupedBackground)
             .navigationTitle("推荐")
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
+                        refreshTrigger += 1
                         Task { await load() }
                     } label: {
                         Label("换一批", systemImage: "arrow.clockwise")
                     }
                     .disabled(loading)
-                    Button {
-                        showSettings = true
+                    .sensoryFeedback(.intent(.selection), trigger: refreshTrigger)
+                    
+                    Menu {
+                        Button {
+                            showSettings = true
+                        } label: {
+                            Label("设置", systemImage: "gearshape")
+                        }
                     } label: {
-                        Image(systemName: "gearshape")
+                        Image(systemName: "ellipsis.circle")
                     }
                 }
             }
