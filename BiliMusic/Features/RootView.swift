@@ -22,6 +22,7 @@ struct RootView: View {
                         .tabItem { Label("资料库", systemImage: "rectangle.stack.fill") }
                 }
                 .tint(AppTheme.accent)
+                .toolbarBackground(.ultraThinMaterial, for: .tabBar)
 
                 if showFullPlayer || isDraggingFullPlayer {
                     NowPlayingView(onDismiss: { closeFullPlayer() }, namespace: playerTransition)
@@ -70,6 +71,7 @@ struct RootView: View {
                     isDraggingFullPlayer: $isDraggingFullPlayer,
                     openPlayerTranslation: $openPlayerTranslation,
                     namespace: playerTransition)
+                .padding(.horizontal, 8)
                 .padding(.bottom, 4)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
