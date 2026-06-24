@@ -79,7 +79,6 @@ struct NowPlayingView: View {
             }
             .offset(y: dragOffset)
             .animation(.spring(response: 0.32, dampingFraction: 0.86), value: dragOffset)
-            .simultaneousGesture(pageDismissDrag)
         }
         .sheet(isPresented: $showUPPlaylists) {
             UPPlaylistsView()
@@ -856,27 +855,6 @@ struct NowPlayingView: View {
             }
     }
 
-    /// 整页下滑关闭:仅在当前播放页面启用(左右列表页保持正常滑动)。
-    private var pageDismissDrag: some Gesture {
-        DragGesture(minimumDistance: 24)
-            .onChanged { value in
-                guard selectedPage == PlayerPage.nowPlaying.rawValue,
-                      abs(value.translation.height) > abs(value.translation.width),
-                      value.translation.height > 0 else { return }
-                dragOffset = max(0, value.translation.height)
-            }
-            .onEnded { value in
-                guard selectedPage == PlayerPage.nowPlaying.rawValue else { return }
-                if value.translation.height > 130 || value.predictedEndTranslation.height > 260 {
-                    closePlayer()
-                } else {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
-                        dragOffset = 0
-                    }
-                }
-            }
-    }
-
     private func format(_ seconds: Double) -> String {
         let s = Int(seconds.isFinite ? max(seconds, 0) : 0)
         return String(format: "%d:%02d", s / 60, s % 60)
@@ -916,16 +894,16 @@ struct MiniPlayerBar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 CachedAsyncImage(url: thumbnailURL(engine.current?.coverURL, width: 160, height: 90)) { image in
                     image.resizable().aspectRatio(contentMode: .fill)
                 } placeholder: {
                     AppTheme.secondaryBackground
                 }
                 .matchedGeometryEffect(id: "playerCover", in: namespace)
-                .frame(width: 52, height: 30)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 1.5)
+                .frame(width: 48, height: 27)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
                 .scaleEffect(engine.state == .playing ? 1.0 : 0.92)
                 .animation(.spring(response: 0.35, dampingFraction: 0.8), value: engine.state)
 
@@ -945,27 +923,27 @@ struct MiniPlayerBar: View {
                     engine.togglePlayPause()
                 } label: {
                     Image(systemName: engine.state == .playing ? "pause.fill" : "play.fill")
-                        .font(.system(size: 20, weight: .medium))
+                        .font(.system(size: 18, weight: .medium))
                         .contentTransition(.symbolEffect(.replace))
-                        .frame(width: 36, height: 36)
+                        .frame(width: 34, height: 34)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(MiniPlayerControlButtonStyle())
-                .overlay { if engine.state == .loading { ProgressView().scaleEffect(0.7).tint(AppTheme.label) } }
+                .overlay { if engine.state == .loading { ProgressView().scaleEffect(0.6).tint(AppTheme.label) } }
                 Button {
                     Task { await engine.playNext() }
                 } label: {
                     Image(systemName: "forward.fill")
-                        .font(.system(size: 18, weight: .medium))
-                        .frame(width: 36, height: 36)
+                        .font(.system(size: 16, weight: .medium))
+                        .frame(width: 34, height: 34)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(MiniPlayerControlButtonStyle())
                 .disabled(!engine.hasNext)
                 .opacity(engine.hasNext ? 1.0 : 0.4)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
 
             MiniProgressBar()
         }

@@ -142,12 +142,8 @@ struct SearchView: View {
         Array(history.entries.prefix(6).map(\.track))
     }
 
-    private var cachedTracks: [Track] {
-        Array(cache.entries.prefix(6).map(\.track))
-    }
-
     private var hasLandingContent: Bool {
-        trimmedQuery.isEmpty && (!recentTracks.isEmpty || !cachedTracks.isEmpty)
+        trimmedQuery.isEmpty && !recentTracks.isEmpty
     }
 
     @ViewBuilder
@@ -155,7 +151,6 @@ struct SearchView: View {
         if trimmedQuery.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
                 landingSection(title: "最近播放", systemImage: "clock.fill", tracks: recentTracks)
-                landingSection(title: "已缓存", systemImage: "arrow.down.circle.fill", tracks: cachedTracks)
             }
             .padding(.top, 12)
         }
