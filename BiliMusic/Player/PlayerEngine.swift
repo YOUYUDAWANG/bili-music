@@ -119,6 +119,8 @@ final class PlayerEngine {
     /// 队列推进策略:顺序、随机、单曲循环、电台。
     var queueMode: QueueMode = .sequential
     private(set) var playbackMode: PlaybackMode = .music
+    /// 是否在页面滚动或被手动滑动时临时隐藏迷你播放器
+    var isMiniPlayerHidden = false
 
     var current: Track? { queue.indices.contains(queueIndex) ? queue[queueIndex] : nil }
     var duration: Double { Double(current?.duration ?? 0) }
@@ -362,9 +364,15 @@ final class PlayerEngine {
         updateNowPlayingInfo()
     }
 
+
     /// 进度条交互:开始拖动时冻结时间回写,只更新显示;松手时一次性 seek。
-    /// 当前在线播放音质偏好(0=最高)。下载音质单独存 downloadQuality。
-    static var playbackQuality: Int { UserDefaults.standard.integer(forKey: "playbackQuality") }
+    /// 当前在线播放音质偏好。默认30280=192K以平衡加载速度与听感;
+    /// 用户可在播放器中手动切到更高音质(含Hi-Res/杜比)。
+    /// 下载音质单独存 downloadQuality。
+    static var playbackQuality: Int {
+        let raw = UserDefaults.standard.integer(forKey: "playbackQuality")
+        return raw > 0 ? raw : 30280
+    }
 
     /// 在播放器里切换音质:写入偏好并按当前进度重取流续播。本地缓存曲目无需切换。
     func setPlaybackQuality(_ id: Int) async {
@@ -421,6 +429,7 @@ final class PlayerEngine {
     // MARK: - 播放核心
 
     private func startCurrent(resumeAt: Double = 0) async {
+        isMiniPlayerHidden = false
         guard var track = current else { return }
         let generation = UUID()
         playbackGeneration = generation
@@ -660,8 +669,8 @@ final class PlayerEngine {
             ? AVURLAsset(url: url)
             : AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": BiliClient.headers])
         let item = AVPlayerItem(asset: asset)
-        // 本地文件不需要前向缓冲;在线流缓冲 10s,2s 太小,任何小抖动都会掏空导致中途暂停。
-        item.preferredForwardBufferDuration = isLocal ? 0 : 10
+        // 本地文件不需要前向缓冲;在线流缓冲 30s,降低弱网下播一半停住的概率。
+        item.preferredForwardBufferDuration = isLocal ? 0 : 30
         item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
         let player = AVPlayer(playerItem: item)
         // false = 数据一到就播,起播快;代价是断流后不会自己恢复,
