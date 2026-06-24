@@ -32,7 +32,6 @@ struct NowPlayingView: View {
     @State private var showFavoriteFolders = false
     @State private var selectedMode: PlayerEngine.PlaybackMode = .music
     @State private var switchingMode = false
-    @State private var favoriteLongPressTriggered = false
     @State private var dragOffset: CGFloat = 0
     @Environment(\.dismiss) private var dismiss
     private var favorites: FavoriteManager { .shared }
@@ -79,7 +78,6 @@ struct NowPlayingView: View {
             }
             .offset(y: dragOffset)
             .animation(.spring(response: 0.32, dampingFraction: 0.86), value: dragOffset)
-            .simultaneousGesture(pageDismissDrag)
         }
         .sheet(isPresented: $showUPPlaylists) {
             UPPlaylistsView()
@@ -265,7 +263,7 @@ struct NowPlayingView: View {
                 }
             }
         } else {
-            CachedAsyncImage(url: thumbnailURL(engine.current?.coverURL, width: 960, height: 540)) { image in
+            CachedAsyncImage(url: thumbnailURL(engine.current?.coverURL, width: 600, height: 600)) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
                 ZStack {
@@ -275,7 +273,7 @@ struct NowPlayingView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .frame(width: coverSize, height: coverSize * 9 / 16)
+            .frame(width: coverSize, height: coverSize)
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .shadow(color: .black.opacity(0.42), radius: 28, y: 18)
         }
@@ -289,7 +287,7 @@ struct NowPlayingView: View {
 
     private var transportControls: some View {
         HStack(spacing: 34) {
-            PlayerIconButton(systemName: "backward.fill", size: 28) {
+            PlayerIconButton(systemName: "backward.fill", size: 28, accessibilityLabel: "上一曲") {
                 Task { await engine.playPrevious() }
             }
             Button {
@@ -304,7 +302,7 @@ struct NowPlayingView: View {
                     .shadow(color: .black.opacity(0.18), radius: 16, y: 8)
             }
             .overlay { if engine.state == .loading { ProgressView().tint(AppTheme.background) } }
-            PlayerIconButton(systemName: "forward.fill", size: 28) {
+            PlayerIconButton(systemName: "forward.fill", size: 28, accessibilityLabel: "下一曲") {
                 Task { await engine.playNext() }
             }
             .disabled(!engine.hasNext)
@@ -340,24 +338,11 @@ struct NowPlayingView: View {
                 systemName: favorites.isFavorite(track) ? "heart.fill" : "heart"
             ) {
                 guard !favorites.busyBVIDs.contains(track.bvid) else { return }
-                if favoriteLongPressTriggered {
-                    favoriteLongPressTriggered = false
-                    return
-                }
                 Task { await favorites.toggle(track: track) }
             }
-                .opacity(favorites.busyBVIDs.contains(track.bvid) ? 0.55 : 1)
-                .simultaneousGesture(
-                    LongPressGesture(minimumDuration: 0.45)
-                        .onEnded { _ in
-                            guard !favorites.busyBVIDs.contains(track.bvid) else { return }
-                            favoriteLongPressTriggered = true
-                            Task { await favorites.loadFolders() }
-                            showFavoriteFolders = true
-                        }
-                )
-                .accessibilityAddTraits(.isButton)
-                .accessibilityHint("短按收藏到默认收藏夹,长按选择收藏夹")
+            .opacity(favorites.busyBVIDs.contains(track.bvid) ? 0.55 : 1)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint("收藏到默认收藏夹")
         }
     }
 
@@ -820,11 +805,11 @@ struct NowPlayingView: View {
     }
 
     private func scrollCurrentPlaylist(_ proxy: ScrollViewProxy) {
-        guard let bvid = engine.current?.bvid,
-              currentPlaylistTracks.contains(where: { $0.bvid == bvid }) else { return }
+        guard let currentId = engine.current?.id,
+              currentPlaylistTracks.contains(where: { $0.id == currentId }) else { return }
         DispatchQueue.main.async {
             withAnimation(.easeInOut(duration: 0.2)) {
-                proxy.scrollTo(bvid, anchor: .center)
+                proxy.scrollTo(currentId, anchor: .center)
             }
         }
     }
@@ -852,27 +837,6 @@ struct NowPlayingView: View {
                 dragOffset = max(0, value.translation.height)
             }
             .onEnded { value in
-                if value.translation.height > 130 || value.predictedEndTranslation.height > 260 {
-                    closePlayer()
-                } else {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
-                        dragOffset = 0
-                    }
-                }
-            }
-    }
-
-    /// 只在当前播放主页面启用整页下滑收起;左右列表页保留正常列表滚动。
-    private var pageDismissDrag: some Gesture {
-        DragGesture(minimumDistance: 24)
-            .onChanged { value in
-                guard selectedPage == PlayerPage.nowPlaying.rawValue,
-                      abs(value.translation.height) > abs(value.translation.width),
-                      value.translation.height > 0 else { return }
-                dragOffset = max(0, value.translation.height)
-            }
-            .onEnded { value in
-                guard selectedPage == PlayerPage.nowPlaying.rawValue else { return }
                 if value.translation.height > 130 || value.predictedEndTranslation.height > 260 {
                     closePlayer()
                 } else {
@@ -998,398 +962,6 @@ struct MiniPlayerBar: View {
     }
 }
 
-private struct PlayerIconButton: View {
-    let systemName: String
-    let size: CGFloat
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: size, weight: .semibold))
-                .frame(width: 56, height: 56)
-        }
-    }
-}
-
-private struct ActionSymbolButton: View {
-    let title: String
-    let systemName: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 19, weight: .semibold))
-                .frame(maxWidth: .infinity)
-                .frame(height: 42)
-                .contentShape(RoundedRectangle(cornerRadius: 12))
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(AppTheme.accent)
-        .accessibilityLabel(title)
-    }
-}
-
-private struct ActionSymbolLabel: View {
-    let title: String
-    let systemName: String
-
-    var body: some View {
-        Image(systemName: systemName)
-            .font(.system(size: 19, weight: .semibold))
-            .frame(maxWidth: .infinity)
-            .frame(height: 42)
-            .contentShape(RoundedRectangle(cornerRadius: 12))
-            .foregroundStyle(AppTheme.accent)
-            .accessibilityLabel(title)
-    }
-}
-
-private extension Array {
-    subscript(safe index: Int) -> Element? {
-        indices.contains(index) ? self[index] : nil
-    }
-}
-
-/// 进度条独立成视图,把对 `engine.currentTime` 的订阅限制在这里。
-/// scrub 状态也只在本视图持有,避免拖动时反复刷新外层播放器。
-private struct PlayerProgressBar: View {
-    @Environment(PlayerEngine.self) private var engine
-    @State private var scrubValue: Double = 0
-    @State private var isScrubbing = false
-
-    var body: some View {
-        VStack(spacing: 4) {
-            Slider(
-                value: Binding(
-                    get: { isScrubbing ? scrubValue : min(engine.currentTime, engine.duration) },
-                    set: { scrubValue = $0 }
-                ),
-                in: 0...max(engine.duration, 1),
-                onEditingChanged: { editing in
-                    if editing {
-                        scrubValue = min(engine.currentTime, engine.duration)
-                        isScrubbing = true
-                        engine.beginScrub()
-                    } else {
-                        engine.endScrub(to: scrubValue)
-                        isScrubbing = false
-                    }
-                }
-            )
-            .tint(AppTheme.label)
-            HStack {
-                Text(format(isScrubbing ? scrubValue : engine.currentTime))
-                Spacer()
-                Text(format(engine.duration))
-            }
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 28)
-    }
-
-    private func format(_ seconds: Double) -> String {
-        let s = Int(seconds.isFinite ? max(seconds, 0) : 0)
-        return String(format: "%d:%02d", s / 60, s % 60)
-    }
-}
-
-private struct LyricsSheetView: View {
-    @Environment(PlayerEngine.self) private var engine
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        // 每次 body 求值只算一次高亮行,循环里直接比较 index。
-        // 之前每行都读 computed currentLyricIndex(内部线性扫描)→ O(N²),
-        // 配合 currentTime 每 0.5s 变更,长歌词会发烫掉帧。
-        let active = currentLyricIndex
-        return NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 18) {
-                        ForEach(Array(engine.lyrics.enumerated()), id: \.element.id) { index, line in
-                            Text(line.text)
-                                .font(index == active ? .title3.weight(.semibold) : .title3.weight(.regular))
-                                .foregroundStyle(index == active ? AppTheme.label : .secondary)
-                                .id(line.id)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 28)
-                }
-                .background(AppTheme.background)
-                .navigationTitle("歌词")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    Button("完成") { dismiss() }
-                }
-                .onChange(of: currentLyricIndex) { _, index in
-                    guard let line = engine.lyrics[safe: index] else { return }
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        proxy.scrollTo(line.id, anchor: .center)
-                    }
-                }
-            }
-        }
-    }
-
-    private var currentLyricIndex: Int {
-        guard !engine.lyrics.isEmpty else { return 0 }
-        if let active = engine.lyrics.firstIndex(where: { line in
-            engine.currentTime >= line.from && engine.currentTime < line.to
-        }) {
-            return active
-        }
-        return engine.lyrics.lastIndex { line in engine.currentTime >= line.from } ?? 0
-    }
-}
-
-private struct MVFullscreenView: View {
-    @Environment(PlayerEngine.self) private var engine
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Color.black.ignoresSafeArea()
-            if let player = engine.avPlayer {
-                VideoPlayer(player: player)
-                    .ignoresSafeArea()
-            } else {
-                ProgressView()
-                    .tint(.white)
-            }
-
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 42, height: 42)
-                    .background(.black.opacity(0.48), in: Circle())
-            }
-            .buttonStyle(.plain)
-            .padding(16)
-        }
-        .task {
-            await engine.upgradeMVForFullscreen()
-        }
-    }
-}
-
-private struct FavoriteFolderPickerView: View {
-    @Environment(PlayerEngine.self) private var engine
-    @Environment(\.dismiss) private var dismiss
-    private var favorites: FavoriteManager { .shared }
-
-    var body: some View {
-        NavigationStack {
-            List {
-                if let error = favorites.lastError {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-                ForEach(favorites.folders) { folder in
-                    Button {
-                        guard let track = engine.current else { return }
-                        Task {
-                            await favorites.toggle(track: track, folder: folder)
-                            dismiss()
-                        }
-                    } label: {
-                        HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(folder.title)
-                                    .font(.subheadline.weight(.semibold))
-                                Text("\(folder.media_count) 个内容")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            if favorites.lastFolderId == folder.id {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(.green)
-                            }
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
-            .background(AppTheme.groupedBackground)
-            .navigationTitle("选择收藏夹")
-            .navigationBarTitleDisplayMode(.inline)
-            .overlay {
-                if favorites.foldersLoading {
-                    ProgressView()
-                } else if favorites.folders.isEmpty && favorites.lastError == nil {
-                    ContentUnavailableView("没有收藏夹", systemImage: "heart",
-                                           description: Text("请先在 B 站创建收藏夹"))
-                }
-            }
-            .toolbar {
-                Button("完成") { dismiss() }
-            }
-            .task {
-                await favorites.loadFolders()
-            }
-        }
-    }
-}
-
-private struct UPPlaylistsView: View {
-    @Environment(PlayerEngine.self) private var engine
-    @State private var playlists: [BiliClient.UPPlaylist] = []
-    @State private var loading = false
-    @State private var errorMessage: String?
-
-    var body: some View {
-        NavigationStack {
-            List {
-                if let errorMessage {
-                    Text(errorMessage).font(.caption).foregroundStyle(.red)
-                }
-                ForEach(playlists) { playlist in
-                    NavigationLink(value: playlist) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(playlist.title)
-                                .font(.subheadline.weight(.semibold))
-                            Text("\(playlist.mediaCount) 首")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
-            .background(AppTheme.groupedBackground)
-            .navigationTitle("合集")
-            .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: BiliClient.UPPlaylist.self) { playlist in
-                UPPlaylistDetailView(playlist: playlist)
-            }
-            .overlay {
-                if loading {
-                    ProgressView()
-                } else if playlists.isEmpty && errorMessage == nil {
-                    ContentUnavailableView("没有公开歌单", systemImage: "rectangle.stack",
-                                           description: Text("这个 UP 主可能没有公开合集或系列"))
-                }
-            }
-            .task { await load() }
-        }
-    }
-
-    private func load() async {
-        guard let current = engine.current, let mid = current.ownerMid else {
-            errorMessage = "当前歌曲缺少 UP 主信息"
-            return
-        }
-        loading = true
-        defer { loading = false }
-        do {
-            let client = BiliClient()
-            var loaded: [BiliClient.UPPlaylist] = []
-            if let currentPlaylist = try await client.currentVideoPlaylist(bvid: current.bvid) {
-                loaded.append(currentPlaylist)
-            }
-            loaded.append(contentsOf: try await client.upPlaylists(mid: mid))
-            playlists = dedupePlaylists(loaded)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    private func dedupePlaylists(_ playlists: [BiliClient.UPPlaylist]) -> [BiliClient.UPPlaylist] {
-        var seen = Set<String>()
-        return playlists.filter { playlist in
-            let key = "\(playlist.type)-\(playlist.id)"
-            guard !seen.contains(key) else { return false }
-            seen.insert(key)
-            return true
-        }
-    }
-}
-
-private struct UPPlaylistDetailView: View {
-    @Environment(PlayerEngine.self) private var engine
-    @Environment(\.dismiss) private var dismiss
-    let playlist: BiliClient.UPPlaylist
-
-    @State private var tracks: [Track] = []
-    @State private var page = 1
-    @State private var hasMore = true
-    @State private var loading = false
-    @State private var errorMessage: String?
-
-    var body: some View {
-        List {
-            if let errorMessage {
-                Text(errorMessage).font(.caption).foregroundStyle(.red)
-            }
-            ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                Button {
-                    Task {
-                        await engine.play(tracks: tracks, startAt: index)
-                        dismiss()
-                    }
-                } label: {
-                    TrackRow(track: track, isPlaying: engine.current.map { track.key.matches($0) } ?? false)
-                }
-                .buttonStyle(.plain)
-                .onAppear {
-                    if track == tracks.last {
-                        Task { await loadMore() }
-                    }
-                }
-            }
-            if loading {
-                ProgressView().frame(maxWidth: .infinity)
-            }
-        }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
-        .background(AppTheme.groupedBackground)
-        .navigationTitle(playlist.title)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if !tracks.isEmpty {
-                Button {
-                    engine.appendToQueue(tracks)
-                } label: {
-                    Label("加入队列", systemImage: "text.badge.plus")
-                }
-            }
-        }
-        .task {
-            if tracks.isEmpty {
-                await loadMore()
-            }
-        }
-    }
-
-    private func loadMore() async {
-        guard hasMore, !loading, let mid = engine.current?.ownerMid else { return }
-        loading = true
-        defer { loading = false }
-        do {
-            let result = try await BiliClient().upPlaylistItems(mid: mid, playlist: playlist, page: page)
-            page += 1
-            hasMore = result.hasMore
-            let artist = engine.current?.artist ?? ""
-            let newTracks = result.items
-                .map { Track(playlist: $0, artist: artist, ownerMid: mid) }
-                .filter(MusicFilter.isMusic)
-            tracks.append(contentsOf: newTracks)
-            engine.preload(tracks: newTracks, limit: 2, delay: .milliseconds(700))
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-}
+// MARK: - Control views and sheet views are in separate files:
+// PlayerControlViews.swift (PlayerIconButton, ActionSymbolButton, PlayerProgressBar, etc.)
+// PlayerSheetViews.swift (LyricsSheetView, MVFullscreenView, FavoriteFolderPickerView, UPPlaylistsView, etc.)

@@ -12,18 +12,26 @@ struct RootView: View {
         GeometryReader { proxy in
             ZStack {
                 TabView {
-                    withMiniBar(HomeView())
+                    HomeView()
                         .tabItem { Label("推荐", systemImage: "music.note.house.fill") }
-                    withMiniBar(SearchView())
+                    SearchView()
                         .tabItem { Label("搜索", systemImage: "magnifyingglass") }
-                    withMiniBar(FavoritesView())
+                    FavoritesView()
                         .tabItem { Label("收藏", systemImage: "heart.fill") }
-                    withMiniBar(LibraryView())
+                    LibraryView()
                         .tabItem { Label("缓存", systemImage: "arrow.down.circle.fill") }
-                    withMiniBar(SettingsView())
+                    SettingsView()
                         .tabItem { Label("设置", systemImage: "gearshape.fill") }
                 }
                 .tint(AppTheme.accent)
+                .safeAreaInset(edge: .bottom) {
+                    if engine.current != nil {
+                        MiniPlayerBar(
+                            showFullPlayer: $showFullPlayer,
+                            isDraggingFullPlayer: $isDraggingFullPlayer,
+                            openPlayerTranslation: $openPlayerTranslation)
+                    }
+                }
 
                 if showFullPlayer || isDraggingFullPlayer {
                     NowPlayingView {

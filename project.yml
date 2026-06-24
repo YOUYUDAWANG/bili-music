@@ -7,7 +7,10 @@ targets:
   BiliMusic:
     type: application
     platform: iOS
-    sources: [BiliMusic]
+    sources:
+      - path: BiliMusic
+        excludes:
+          - "**/CLAUDE.md"
     settings:
       base:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
