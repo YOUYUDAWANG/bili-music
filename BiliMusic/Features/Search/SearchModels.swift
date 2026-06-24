@@ -2,7 +2,6 @@ import Foundation
 
 enum SearchResultMode: String, CaseIterable, Identifiable {
     case music
-    case mv
     case expanded
 
     var id: String { rawValue }
@@ -10,14 +9,13 @@ enum SearchResultMode: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .music: "音乐"
-        case .mv: "MV"
-        case .expanded: "扩大"
+        case .expanded: "更多"
         }
     }
 
     var usesBiliMusicOnlySearch: Bool {
         switch self {
-        case .music, .mv: true
+        case .music: true
         case .expanded: false
         }
     }

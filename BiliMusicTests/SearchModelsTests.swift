@@ -9,9 +9,10 @@ final class SearchModelsTests: XCTestCase {
     }
 
     func testModeControlsBiliMusicOnlySearch() {
+        XCTAssertEqual(SearchResultMode.allCases, [.music, .expanded])
         XCTAssertTrue(SearchResultMode.music.usesBiliMusicOnlySearch)
-        XCTAssertTrue(SearchResultMode.mv.usesBiliMusicOnlySearch)
         XCTAssertFalse(SearchResultMode.expanded.usesBiliMusicOnlySearch)
+        XCTAssertEqual(SearchResultMode.expanded.title, "更多")
     }
 
     func testSectionsPromoteFirstResultAndSplitMV() {
@@ -36,11 +37,11 @@ final class SearchModelsTests: XCTestCase {
         XCTAssertFalse(MusicFilter.isSearchResult(gameplay, query: "三国杀", mode: .expanded))
     }
 
-    func testMVModeAcceptsMVSignal() {
+    func testMusicModeAcceptsMVSignalAsResultSection() {
         let mv = Track(typeID: 193, bvid: "BV3", title: "周杰伦《晴天》Official MV", artist: "周杰伦",
                        coverURL: nil, duration: 269)
 
-        XCTAssertTrue(MusicFilter.isSearchResult(mv, query: "晴天", mode: .mv))
+        XCTAssertTrue(MusicFilter.isSearchResult(mv, query: "晴天", mode: .music))
     }
 
     @MainActor
@@ -67,10 +68,20 @@ final class SearchModelsTests: XCTestCase {
     @MainActor
     func testChangingModeClearsTransientResultsForSameQuery() {
         let store = SearchStore()
-        store.setMode(.mv, query: "晴天")
+        store.setMode(.expanded, query: "晴天")
 
-        XCTAssertEqual(store.mode, .mv)
+        XCTAssertEqual(store.mode, .expanded)
         XCTAssertTrue(store.results.isEmpty)
         XCTAssertFalse(store.hasMoreResults)
+    }
+
+    @MainActor
+    func testChangingQueryAfterMoreResultsReturnsToMusicMode() {
+        let store = SearchStore()
+        store.setMode(.expanded, query: "晴天")
+
+        store.queryDidChange("七里香")
+
+        XCTAssertEqual(store.mode, .music)
     }
 }

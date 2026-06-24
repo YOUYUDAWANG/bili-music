@@ -40,70 +40,21 @@ struct SearchView: View {
                 .padding(.horizontal, 12)
                 .frame(height: 44)
                 .background(AppTheme.secondaryBackground, in: RoundedRectangle(cornerRadius: 12))
-                .padding(.horizontal, 16)
-
-                Picker("搜索范围", selection: Binding(
-                    get: { store.mode },
-                    set: { mode in store.setMode(mode, query: query) }
-                )) {
-                    ForEach(SearchResultMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    searchFocused = true
                 }
-                .pickerStyle(.segmented)
                 .padding(.horizontal, 16)
             }
             .padding(.bottom, 10)
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    if store.shouldShowSearchHistory() && trimmedQuery.isEmpty {
-                        Text("搜索历史")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 20)
-                            .padding(.top, 12)
-                            .padding(.bottom, 6)
-                        VStack(spacing: 0) {
-                            ForEach(store.searchHistory, id: \.self) { term in
-                                Button {
-                                    query = term
-                                    submitSearch()
-                                } label: {
-                                    HStack(spacing: 12) {
-                                        Image(systemName: "clock")
-                                            .foregroundStyle(.secondary)
-                                            .frame(width: 24)
-                                        Text(term)
-                                            .foregroundStyle(.primary)
-                                        Spacer()
-                                    }
-                                    .padding(.horizontal, 14)
-                                    .frame(height: 46)
-                                }
-                                .buttonStyle(.plain)
-                                if term != store.searchHistory.last {
-                                    Divider().padding(.leading, 50)
-                                }
-                            }
-                            Button {
-                                store.clearHistory()
-                            } label: {
-                                HStack {
-                                    Text("清空搜索历史")
-                                        .foregroundStyle(.red)
-                                    Spacer()
-                                }
-                                .padding(.horizontal, 14)
-                                .frame(height: 46)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .background(AppTheme.background, in: RoundedRectangle(cornerRadius: 12))
-                        .padding(.horizontal, 16)
+                    if searchFocused && trimmedQuery.isEmpty {
+                        searchHistoryView
+                    } else {
+                        landingContent
                     }
-
-                    landingContent
 
                     if isTypingUnsubmittedQuery {
                         typingPrompt
@@ -143,9 +94,9 @@ struct SearchView: View {
                         ContentUnavailableView {
                             Label("没有找到音乐结果", systemImage: "music.note.list")
                         } description: {
-                            Text("当前只显示音乐内容，可以扩大搜索范围。")
+                            Text("当前只显示音乐内容，可以查看更多结果。")
                         } actions: {
-                            Button("扩大搜索") {
+                            Button("更多结果") {
                                 store.broadenCurrentSearch { tracks in
                                     engine.preload(tracks: tracks, limit: 2, delay: .milliseconds(500))
                                 }
@@ -206,6 +157,57 @@ struct SearchView: View {
                 landingSection(title: "已缓存", systemImage: "arrow.down.circle.fill", tracks: cachedTracks)
             }
             .padding(.top, 12)
+        }
+    }
+
+    @ViewBuilder
+    private var searchHistoryView: some View {
+        if store.shouldShowSearchHistory() {
+            Text("搜索历史")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .padding(.bottom, 6)
+            VStack(spacing: 0) {
+                ForEach(store.searchHistory, id: \.self) { term in
+                    Button {
+                        query = term
+                        submitSearch()
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "clock")
+                                .foregroundStyle(.secondary)
+                                .frame(width: 24)
+                            Text(term)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 14)
+                        .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if term != store.searchHistory.last {
+                        Divider().padding(.leading, 50)
+                    }
+                }
+                Button {
+                    store.clearHistory()
+                } label: {
+                    HStack {
+                        Text("清空搜索历史")
+                            .foregroundStyle(.red)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14)
+                    .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .background(AppTheme.background, in: RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal, 16)
         }
     }
 
@@ -306,6 +308,7 @@ struct SearchView: View {
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             } else {
@@ -324,7 +327,7 @@ struct SearchView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("按回车搜索 “\(trimmedQuery)”")
                 .font(.subheadline.weight(.semibold))
-            Text("默认只显示音乐内容，可切换到 MV 或扩大搜索。")
+            Text("默认只显示音乐内容，找不到时可以查看更多结果。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -346,6 +349,8 @@ struct SearchView: View {
                     .scaleEffect(0.75)
             }
         }
+        .frame(maxWidth: .infinity, minHeight: 66, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     private func isPreparing(_ track: Track) -> Bool {

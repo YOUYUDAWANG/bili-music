@@ -45,8 +45,10 @@ final class SearchStore {
     func queryDidChange(_ query: String) {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty {
+            mode = .music
             resetTransientState(cancelTask: true)
         } else if text != resultsQuery {
+            mode = .music
             resetTransientState(cancelTask: true)
         }
     }
