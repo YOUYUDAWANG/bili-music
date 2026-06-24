@@ -34,6 +34,7 @@ struct NowPlayingView: View {
     @State private var selectedMode: PlayerEngine.PlaybackMode = .music
     @State private var switchingMode = false
     @State private var dragOffset: CGFloat = 0
+    @GestureState private var isDismissIntent = false
     @Environment(\.dismiss) private var dismiss
     private var favorites: FavoriteManager { .shared }
 
@@ -79,6 +80,7 @@ struct NowPlayingView: View {
             }
             .offset(y: dragOffset)
             .animation(.spring(response: 0.32, dampingFraction: 0.86), value: dragOffset)
+            .simultaneousGesture(pageDismissDrag)
         }
         .sheet(isPresented: $showUPPlaylists) {
             UPPlaylistsView()
@@ -829,6 +831,32 @@ struct NowPlayingView: View {
                 dragOffset = max(0, value.translation.height)
             }
             .onEnded { value in
+                if value.translation.height > 130 || value.predictedEndTranslation.height > 260 {
+                    closePlayer()
+                } else {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+                        dragOffset = 0
+                    }
+                }
+            }
+    }
+
+    /// 整页下滑关闭：仅当首次触摸方向为向下时激活，滚动时不产生抖动。
+    /// @GestureState 在每次新手势开始时重置，确保滚动时不会误触发。
+    private var pageDismissDrag: some Gesture {
+        DragGesture(minimumDistance: 24)
+            .updating($isDismissIntent) { value, state, _ in
+                guard selectedPage == PlayerPage.nowPlaying.rawValue,
+                      !state else { return }
+                state = value.translation.height > 0
+            }
+            .onChanged { value in
+                guard isDismissIntent,
+                      value.translation.height > 0 else { return }
+                dragOffset = max(0, value.translation.height)
+            }
+            .onEnded { value in
+                guard isDismissIntent else { return }
                 if value.translation.height > 130 || value.predictedEndTranslation.height > 260 {
                     closePlayer()
                 } else {
