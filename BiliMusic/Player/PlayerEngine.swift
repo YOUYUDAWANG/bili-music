@@ -173,6 +173,12 @@ final class PlayerEngine {
 
     /// 用一组曲目替换队列并从指定位置开播(搜索页点击)
     func play(tracks: [Track], startAt index: Int, queueMode: QueueMode? = nil) async {
+#if DEBUG
+        if UITestFixtures.enabled {
+            installUITestFixture(tracks: tracks, startAt: index)
+            return
+        }
+#endif
         prefetchTask?.cancel()
         queuePrefetchTask?.cancel()
         autoMVTask?.cancel()
@@ -188,6 +194,13 @@ final class PlayerEngine {
     }
 
     func playRadio(seed track: Track) async {
+#if DEBUG
+        if UITestFixtures.enabled {
+            installUITestFixture(tracks: [track], startAt: 0)
+            queueMode = .radio
+            return
+        }
+#endif
         prefetchTask?.cancel()
         queuePrefetchTask?.cancel()
         autoMVTask?.cancel()
@@ -313,6 +326,12 @@ final class PlayerEngine {
 
     func jump(to index: Int) async {
         guard queue.indices.contains(index) else { return }
+#if DEBUG
+        if UITestFixtures.enabled {
+            installUITestFixture(tracks: queue, startAt: index)
+            return
+        }
+#endif
         preloadTask?.cancel()
         prefetchTask?.cancel()
         queuePrefetchTask?.cancel()
@@ -511,6 +530,31 @@ final class PlayerEngine {
             state = .failed(error.localizedDescription)
         }
     }
+
+#if DEBUG
+    func installUITestFixture(tracks: [Track], startAt index: Int = 0) {
+        preloadTask?.cancel()
+        prefetchTask?.cancel()
+        queuePrefetchTask?.cancel()
+        autoMVTask?.cancel()
+        postPlaybackTask?.cancel()
+        player?.pause()
+        player = nil
+        queue = tracks
+        queueIndex = min(max(index, 0), max(tracks.count - 1, 0))
+        playedKeys = []
+        manualPlaybackModeOverride = nil
+        playbackMode = .music
+        queueMode = .sequential
+        state = tracks.isEmpty ? .idle : .paused
+        currentTime = 0
+        lyrics = []
+        videoAvailable = !tracks.isEmpty
+        currentAudioQuality = nil
+        currentAudioBandwidth = nil
+        isMiniPlayerHidden = false
+    }
+#endif
 
     private func resolve(bvid: String) async throws -> Track {
         let start = CFAbsoluteTimeGetCurrent()

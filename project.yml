@@ -40,3 +40,13 @@ targets:
       base:
         SWIFT_VERSION: "5.10"
         CODE_SIGNING_ALLOWED: NO
+  BiliMusicUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [BiliMusicUITests]
+    dependencies:
+      - target: BiliMusic
+    settings:
+      base:
+        SWIFT_VERSION: "5.10"
+        CODE_SIGNING_ALLOWED: NO
