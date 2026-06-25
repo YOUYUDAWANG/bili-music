@@ -1,0 +1,11 @@
+// 本地签名配置模板。
+//
+// 用法：复制本文件为 Local.xcconfig（已被 git 忽略），填入你自己的 Apple 开发者 Team ID，
+// 然后运行 `xcodegen generate`。每个开发者各自维护，互不影响、不会再产生 project.yml 冲突。
+//
+// Team ID 查看方式：
+//   - https://developer.apple.com/account 右上角
+//   - 或 Xcode > Settings > Accounts > 选中账号 > 右下 Team 后面的括号内
+//
+// CI 不签名（CODE_SIGNING_ALLOWED=NO），会用本模板生成一个占位 Local.xcconfig，留空即可。
+DEVELOPMENT_TEAM =
