@@ -56,51 +56,49 @@ struct SearchView: View {
     private var cache: CacheStore { .shared }
 
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("搜索")
-                    .font(.largeTitle.weight(.bold))
+        NavigationStack {
+            VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(.secondary)
+                        TextField("歌名或 UP 主", text: $query)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .submitLabel(.search)
+                            .focused($searchFocused)
+                            .onSubmit { submitSearch() }
+                        if !query.isEmpty {
+                            Button {
+                                query = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        if !trimmedQuery.isEmpty {
+                            Button {
+                                submitSearch()
+                            } label: {
+                                Text("搜索")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(AppTheme.accent)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(height: 44)
+                    .background(AppTheme.secondaryBackground, in: RoundedRectangle(cornerRadius: 12))
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        searchFocused = true
+                    }
                     .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                HStack(spacing: 10) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                    TextField("歌名或 UP 主", text: $query)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .submitLabel(.search)
-                        .focused($searchFocused)
-                        .onSubmit { submitSearch() }
-                    if !query.isEmpty {
-                        Button {
-                            query = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    if !trimmedQuery.isEmpty {
-                        Button {
-                            submitSearch()
-                        } label: {
-                            Text("搜索")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(AppTheme.accent)
-                        }
-                        .buttonStyle(.plain)
-                    }
                 }
-                .padding(.horizontal, 12)
-                .frame(height: 44)
-                .background(AppTheme.secondaryBackground, in: RoundedRectangle(cornerRadius: 12))
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    searchFocused = true
-                }
-                .padding(.horizontal, 16)
-            }
-            .padding(.bottom, 10)
+                .padding(.top, 8)
+                .padding(.bottom, 10)
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -169,6 +167,9 @@ struct SearchView: View {
             .scrollDismissesKeyboard(.immediately)
         }
         .background(AppTheme.groupedBackground)
+        .navigationTitle("搜索")
+        .navigationBarTitleDisplayMode(.inline)
+        }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         // 键盘预加热:极小尺寸+极低透明度,让 UITextField 可聚焦但用户无感知
         .background(

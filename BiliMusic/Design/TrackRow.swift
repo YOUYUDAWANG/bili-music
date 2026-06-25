@@ -41,7 +41,7 @@ struct TrackRow: View {
                     Image(systemName: "speaker.wave.2.fill")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(AppTheme.accent)
-                        .frame(width: 28, height: 28)
+                        .frame(width: 44, height: 44)
                 } else {
                     Menu {
                         Button {
@@ -58,7 +58,7 @@ struct TrackRow: View {
                         Image(systemName: "ellipsis")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.secondary)
-                            .frame(width: 28, height: 28)
+                            .frame(width: 44, height: 44)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)

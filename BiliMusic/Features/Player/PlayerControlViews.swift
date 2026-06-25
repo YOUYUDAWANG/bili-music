@@ -91,7 +91,7 @@ struct PlayerProgressBar: View {
                     .shadow(color: .black.opacity(0.15), radius: 3, y: 1)
                     .animation(.spring(response: 0.2, dampingFraction: 0.8), value: isScrubbing)
             }
-            .frame(height: 32)
+            .frame(height: 44)
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)

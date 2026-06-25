@@ -70,7 +70,7 @@ struct NowPlayingView: View {
                         .ignoresSafeArea()
 
                     VStack(spacing: 0) {
-                        playerHeader
+                        playerHeader(safeAreaTop: proxy.safeAreaInsets.top)
                         TabView(selection: $selectedPage) {
                             playerListPage(title: "播放列表", systemName: "list.bullet") {
                                 queueList
@@ -161,9 +161,9 @@ struct NowPlayingView: View {
         engine.playbackMode == .mv && size.width > size.height
     }
 
-    private var playerHeader: some View {
+    private func playerHeader(safeAreaTop: CGFloat) -> some View {
         Color.clear
-            .frame(height: 20)
+            .frame(height: max(16, safeAreaTop))
             .contentShape(Rectangle())
             .gesture(dismissDrag)
     }
