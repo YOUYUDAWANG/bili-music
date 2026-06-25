@@ -42,7 +42,6 @@ struct FavoritesView: View {
             .hideMiniPlayerOnScroll()
             .scrollContentBackground(.hidden)
             .background(AppTheme.groupedBackground)
-            .navigationTitle("收藏夹")
             .navigationDestination(for: Int.self) { folderId in
                 FavFolderDetailView(
                     folderId: folderId,

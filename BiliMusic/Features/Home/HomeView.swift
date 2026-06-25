@@ -42,7 +42,6 @@ struct HomeView: View {
             .hideMiniPlayerOnScroll()
             .scrollContentBackground(.hidden)
             .background(AppTheme.groupedBackground)
-            .navigationTitle("推荐")
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {

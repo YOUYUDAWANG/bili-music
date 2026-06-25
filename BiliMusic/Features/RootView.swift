@@ -11,7 +11,7 @@ struct RootView: View {
     @State private var selectedTab = 0
     @Namespace private var playerTransition
     @State private var pageOffsets: [Int: CGFloat] = [:]
-    @State private var tabDragOffset: CGFloat? = nil
+    @GestureState private var tabDragOffset: CGFloat? = nil
 
     var body: some View {
         GeometryReader { proxy in
@@ -383,9 +383,9 @@ struct RootView: View {
         .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 10)
-                .onChanged { value in
+                .updating($tabDragOffset) { value, state, _ in
                     let initialOffset = CGFloat(selectedTab - 1) * 90.0
-                    tabDragOffset = initialOffset + value.translation.width
+                    state = initialOffset + value.translation.width
                 }
                 .onEnded { value in
                     let finalOffset = CGFloat(selectedTab - 1) * 90.0 + value.translation.width
@@ -393,7 +393,6 @@ struct RootView: View {
                     let newIndex = min(max(Int(round(rawIndex)), 0), 2)
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                         selectedTab = newIndex
-                        tabDragOffset = nil
                     }
                 }
         )
