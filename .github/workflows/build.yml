@@ -23,14 +23,27 @@ concurrency:
 jobs:
   build:
     name: Compile (iOS Simulator)
-    runs-on: macos-latest   # iOS 编译必须用 macOS runner；如需可复现可改成 macos-15 并 xcode-select 指定版本
+    runs-on: macos-15   # iOS 编译必须用 macOS runner；固定镜像以求可复现
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 钉 Xcode 版本：iOS 26 部署目标需 Xcode 26 SDK。
+      # 26.3 是 macos-15 runner 当前最新的 26.x（见 actions/runner-images 清单）；
+      # 本机 .xcode-version 为 26.5，二者都含 iOS 26 SDK，CI 只做编译门禁，patch 差异无碍。
+      # 若 GitHub 轮换镜像移除 26.3，CI 会明确报「version not found」，届时照清单上调即可。
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '26.3'
+
       # .xcodeproj 不入库，由 project.yml 生成，所以 CI 里要先装 xcodegen 再生成
       - name: Install XcodeGen
         run: brew install xcodegen
+
+      # Local.xcconfig 不入库（含各自 Team ID），CI 不签名，用模板生成占位文件即可
+      - name: Prepare local signing config
+        run: cp Local.xcconfig.example Local.xcconfig
 
       - name: Generate Xcode project
         run: xcodegen generate

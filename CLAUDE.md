@@ -60,6 +60,14 @@ graph TD
 xcodegen generate
 ```
 
+**首次拉取**需要先建本地签名配置（签名 Team ID 不入库，各自维护）：
+
+```bash
+cp Local.xcconfig.example Local.xcconfig   # 填入自己的 Apple 开发者 Team ID
+```
+
+所需 Xcode 版本见仓库根 `.xcode-version`（当前 26.5；iOS 26 部署目标需 Xcode 26 SDK）。
+
 编译检查（无交互式测试 —— 由用户在真机上验证）：
 
 ```bash
@@ -72,7 +80,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 
 ## 架构
 
-单 Module 的 SwiftUI app，iOS 17+，`@Observable` MVVM。无第三方依赖 —— 只用 URLSession + AVPlayer。
+单 Module 的 SwiftUI app，iOS 26.0+（部署目标有意保持 26.0），`@Observable` MVVM。无第三方依赖 —— 只用 URLSession + AVPlayer。
 
 ### 全局状态
 
