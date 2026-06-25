@@ -39,9 +39,10 @@ struct FavoritesView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .hideMiniPlayerOnScroll()
             .scrollContentBackground(.hidden)
             .background(AppTheme.groupedBackground)
+            .navigationTitle("收藏夹")
+            .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: Int.self) { folderId in
                 FavFolderDetailView(
                     folderId: folderId,
@@ -137,11 +138,18 @@ struct FavFolderDetailView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .hideMiniPlayerOnScroll()
         .scrollContentBackground(.hidden)
         .background(AppTheme.groupedBackground)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .overlay {
+            if loading && tracks.isEmpty {
+                ProgressView()
+            } else if tracks.isEmpty && errorMessage == nil {
+                ContentUnavailableView("没有可播放音乐", systemImage: "music.note.list",
+                                       description: Text("这个收藏夹里暂时没有符合音乐筛选的内容"))
+            }
+        }
         .task {
             if tracks.isEmpty { await loadMore() }
         }

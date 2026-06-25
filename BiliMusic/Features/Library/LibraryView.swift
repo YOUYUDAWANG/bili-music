@@ -101,9 +101,10 @@ struct LibraryView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .hideMiniPlayerOnScroll()
             .scrollContentBackground(.hidden)
             .background(AppTheme.groupedBackground)
+            .navigationTitle("缓存")
+            .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "搜索缓存")
             .task {
                 await cache.loadIfNeeded()
@@ -116,16 +117,16 @@ struct LibraryView: View {
                                 Label(order.title, systemImage: order.icon).tag(order)
                             }
                         }
+                        if !cache.entries.isEmpty {
+                            Divider()
+                            Button("清空缓存", role: .destructive) {
+                                confirmClear = true
+                            }
+                        }
                     } label: {
-                        Label("排序", systemImage: "arrow.up.arrow.down")
+                        Label("排序与操作", systemImage: "ellipsis.circle")
                     }
                     .disabled(cache.entries.isEmpty)
-                }
-
-                if !cache.entries.isEmpty {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("清空", role: .destructive) { confirmClear = true }
-                    }
                 }
             }
             .confirmationDialog("删除全部 \(cache.entries.count) 首缓存?", isPresented: $confirmClear,

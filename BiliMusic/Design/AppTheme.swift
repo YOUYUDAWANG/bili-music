@@ -4,7 +4,7 @@ import SwiftUI
 enum AppTheme {
     /// 单色控件语言:不强加品牌色,tint/高亮用自适应的 primary(黑/白),
     /// 唯一的色彩来自正在播放页的专辑封面虚化背景。更接近 Apple Music 的克制感。
-    static let accent = Color.primary
+    static let accent = Color(uiColor: .systemRed)
     static let background = Color(uiColor: .systemBackground)
     static let groupedBackground = Color(uiColor: .systemGroupedBackground)
     static let secondaryBackground = Color(uiColor: .secondarySystemGroupedBackground)

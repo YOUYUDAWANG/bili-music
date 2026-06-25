@@ -50,7 +50,7 @@ CachedAsyncImage(url: coverURL) { image in
 
 - 封面缩略图 URL 处理：所有 hdslb.com 的 URL 追加 `@widthw_heighth_1c.webp` 参数，以获取指定尺寸的 WebP 缩略图。
 - 播放器封面（PlayerEngine 内）：追加 `@600w_600h_1c.webp`。
-- 列表封面（TrackRow、MiniPlayerBar）：追加 `@160w_160h_1c.webp` 或 `@160w_90h_1c.webp`。
+- 列表封面（TrackRow、RootView 底部 mini 播放器）：追加 `@160w_160h_1c.webp` 或 `@160w_90h_1c.webp`。
 - 全屏播放器封面（NowPlayingView）：追加 `@960w_540h_1c.webp`。
 
 ## 相关文件清单

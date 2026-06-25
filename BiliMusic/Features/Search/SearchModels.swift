@@ -1,6 +1,6 @@
 import Foundation
 
-enum SearchResultMode: String, CaseIterable, Identifiable {
+enum SearchResultMode: String, CaseIterable, Identifiable, Hashable {
     case music
     case expanded
 

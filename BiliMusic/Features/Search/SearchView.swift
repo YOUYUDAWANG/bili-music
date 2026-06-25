@@ -6,40 +6,6 @@
 //
 
 import SwiftUI
-import UIKit
-
-/// 键盘预加热:iOS 首次触发 TextField 时需加载键盘进程(尤其是第三方输入法),
-/// 导致第一次聚焦和第一次按键均有明显卡顿。此组件在视图出现时提前激活再释放
-/// 一个透明的 UITextField,强制系统加载键盘框架,用户无感知。
-///
-/// 注意:UITextField 必须满足以下条件才能 becomeFirstResponder():
-///   - 已 attach 到 window hierarchy (view.window != nil)
-///   - isHidden = false
-///   - alpha > 0.01
-/// 所以不能用 .hidden() 或 isHidden=true,而要用极小尺寸 + 极低透明度 + allowsHitTesting(false)。
-private struct KeyboardPrewarmer: UIViewRepresentable {
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
-        view.backgroundColor = .clear
-        view.alpha = 0.02
-        view.isUserInteractionEnabled = false
-
-        let field = UITextField(frame: .zero)
-        view.addSubview(field)
-
-        DispatchQueue.main.async {
-            guard view.window != nil else { return }
-            field.becomeFirstResponder()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                field.resignFirstResponder()
-                field.removeFromSuperview()
-            }
-        }
-        return view
-    }
-
-    func updateUIView(_ uiView: UIView, context: Context) {}
-}
 
 struct SearchView: View {
     @Environment(PlayerEngine.self) private var engine
@@ -48,8 +14,6 @@ struct SearchView: View {
     @State private var preparingTrackKey: TrackKey?
     @State private var debounceTask: Task<Void, Never>?
     @State private var searchResultTapTrigger = 0
-    @State private var searchHistoryTapTrigger = 0
-    @FocusState private var searchFocused: Bool
     @AppStorage("searchHistory") private var searchHistoryData = "[]"
 
     private var history: PlaybackHistoryStore { .shared }
@@ -57,135 +21,43 @@ struct SearchView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundStyle(.secondary)
-                        TextField("歌名或 UP 主", text: $query)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .submitLabel(.search)
-                            .focused($searchFocused)
-                            .onSubmit { submitSearch() }
-                        if !query.isEmpty {
-                            Button {
-                                query = ""
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        if !trimmedQuery.isEmpty {
-                            Button {
-                                submitSearch()
-                            } label: {
-                                Text("搜索")
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(AppTheme.accent)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .frame(height: 44)
-                    .background(AppTheme.secondaryBackground, in: RoundedRectangle(cornerRadius: 12))
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        searchFocused = true
-                    }
-                    .padding(.horizontal, 16)
-                }
-                .padding(.top, 8)
-                .padding(.bottom, 10)
-
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    // ZStack + opacity:两视图始终在层级中,焦点变化只改透明度,
-                    // 不触发视图树的创建/销毁,避免与键盘动画抢主线程。
-                    ZStack(alignment: .top) {
-                        landingContent
-                            .opacity(searchFocused && trimmedQuery.isEmpty ? 0 : 1)
-                        searchHistoryView
-                            .opacity(searchFocused && trimmedQuery.isEmpty ? 1 : 0)
-                    }
-
-                    if store.searching {
-                        HStack(spacing: 10) {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                            Text("正在搜索音乐...")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
-                    } else if let errorMessage = store.errorMessage {
-                        VStack(spacing: 10) {
-                            Text(errorMessage)
-                                .foregroundStyle(AppTheme.error)
-                                .font(.caption)
-                            Button("重试") {
-                                store.retryCurrentSearch { tracks in
-                                    engine.preload(tracks: tracks, limit: 2, delay: .milliseconds(500))
-                                }
-                            }
-                            .font(.subheadline.weight(.semibold))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 20)
-                    } else if store.shouldShowEmptyState(searchFocused: searchFocused) && !hasLandingContent {
-                        ContentUnavailableView("搜点什么吧", systemImage: "music.note.list")
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 60)
-                    } else if store.shouldShowNoResults(query: query) {
-                        ContentUnavailableView {
-                            Label("没有找到音乐结果", systemImage: "music.note.list")
-                        } description: {
-                            Text("当前只显示音乐内容，可以查看更多结果。")
-                        } actions: {
-                            Button("更多结果") {
-                                store.broadenCurrentSearch { tracks in
-                                    engine.preload(tracks: tracks, limit: 2, delay: .milliseconds(500))
-                                }
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 36)
-                    }
-
-                    if store.shouldShowResults(query: query) {
-                        searchResultsView
-                    }
-                }
-                .padding(.bottom, 24)
+            List {
+                searchContent
             }
-            .hideMiniPlayerOnScroll()
+            .listStyle(.insetGrouped)
+            .accessibilityIdentifier("searchList")
+            .scrollContentBackground(.hidden)
+            .background(AppTheme.groupedBackground)
+            .navigationTitle("搜索")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(
+                text: $query,
+                placement: .navigationBarDrawer(displayMode: .automatic),
+                prompt: "歌名或 UP 主"
+            ) {
+                searchSuggestions
+            }
+            .searchScopes(searchModeBinding, activation: .onSearchPresentation) {
+                ForEach(SearchResultMode.allCases) { mode in
+                    Text(mode.title)
+                        .tag(mode)
+                        .accessibilityIdentifier("searchScope_\(mode.rawValue)")
+                }
+            }
+            .onSubmit(of: .search) {
+                submitSearch()
+            }
             .scrollDismissesKeyboard(.immediately)
         }
-        .background(AppTheme.groupedBackground)
-        .navigationTitle("搜索")
-        .navigationBarTitleDisplayMode(.inline)
-        }
-        .ignoresSafeArea(.keyboard, edges: .bottom)
-        // 键盘预加热:极小尺寸+极低透明度,让 UITextField 可聚焦但用户无感知
-        .background(
-            KeyboardPrewarmer()
-                .frame(width: 1, height: 1)
-                .opacity(0.01)
-                .allowsHitTesting(false)
-        )
         .task {
-            // 搜索历史是搜索栏必需,优先加载
             await store.loadHistory()
-            // 播放历史与缓存索引只用于 landing 页"最近播放",不阻塞搜索栏交互
             Task(priority: .background) {
                 await history.loadIfNeeded()
                 await cache.loadIfNeeded()
             }
+        }
+        .onDisappear {
+            debounceTask?.cancel()
         }
         .onChange(of: searchHistoryData) {
             store.reloadHistoryIfNeeded()
@@ -193,10 +65,12 @@ struct SearchView: View {
         .onChange(of: query) { _, newValue in
             store.queryDidChange(newValue)
             debounceTask?.cancel()
+
             let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return }
+            if store.restoreCachedResultsIfAvailable(for: trimmed) { return }
             debounceTask = Task {
-                try? await Task.sleep(for: .milliseconds(300))
+                try? await Task.sleep(for: .milliseconds(450))
                 guard !Task.isCancelled else { return }
                 await MainActor.run { debouncedSearch() }
             }
@@ -211,161 +85,139 @@ struct SearchView: View {
         Array(history.entries.prefix(6).map(\.track))
     }
 
-    private var hasLandingContent: Bool {
-        trimmedQuery.isEmpty && !recentTracks.isEmpty
+    @ViewBuilder
+    private var searchContent: some View {
+        if trimmedQuery.isEmpty {
+            if !recentTracks.isEmpty {
+                trackSection(title: "最近播放", tracks: recentTracks)
+            } else {
+                unavailableRow {
+                    ContentUnavailableView(
+                        "搜索音乐",
+                        systemImage: "magnifyingglass",
+                        description: Text("输入歌名或 UP 主查找音乐内容")
+                    )
+                }
+            }
+        } else if store.searching {
+            loadingRow
+        } else if let errorMessage = store.errorMessage {
+            errorRow(errorMessage)
+        } else if store.shouldShowNoResults(query: query) {
+            noResultsRow
+        } else if store.shouldShowResults(query: query), let sections = store.sections {
+            resultSections(sections)
+            paginationControl
+        }
     }
 
-    @ViewBuilder
-    private var landingContent: some View {
-        if trimmedQuery.isEmpty {
-            VStack(alignment: .leading, spacing: 16) {
-                landingSection(title: "最近播放", systemImage: "clock.fill", tracks: recentTracks)
-            }
-            .padding(.top, 12)
+    private var searchModeBinding: Binding<SearchResultMode> {
+        Binding {
+            store.mode
+        } set: { mode in
+            store.setMode(mode, query: query)
+            guard !trimmedQuery.isEmpty else { return }
+            submitSearch()
         }
     }
 
     @ViewBuilder
-    private var searchHistoryView: some View {
-        if store.shouldShowSearchHistory() {
-            Text("搜索历史")
-                .font(.footnote.weight(.semibold))
+    private var searchSuggestions: some View {
+        if store.historyLoaded, !store.searchHistory.isEmpty {
+            ForEach(Array(store.searchHistory.prefix(8)), id: \.self) { term in
+                Label(term, systemImage: "clock")
+                    .searchCompletion(term)
+            }
+            Button(role: .destructive) {
+                store.clearHistory()
+            } label: {
+                Label("清空搜索历史", systemImage: "trash")
+            }
+        }
+    }
+
+    private var loadingRow: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .scaleEffect(0.82)
+            Text("正在搜索音乐...")
+                .font(.footnote)
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-                .padding(.bottom, 6)
-            VStack(spacing: 0) {
-                ForEach(store.searchHistory, id: \.self) { term in
+        }
+        .frame(maxWidth: .infinity, minHeight: 68)
+        .listRowSeparator(.hidden)
+    }
+
+    private func errorRow(_ message: String) -> some View {
+        VStack(spacing: 10) {
+            Text(message)
+                .foregroundStyle(AppTheme.error)
+                .font(.caption)
+                .multilineTextAlignment(.center)
+            Button("重试") {
+                store.retryCurrentSearch { tracks in
+                    engine.preload(tracks: tracks, limit: 2, delay: .milliseconds(500))
+                }
+            }
+            .font(.subheadline.weight(.semibold))
+        }
+        .frame(maxWidth: .infinity, minHeight: 96)
+        .listRowSeparator(.hidden)
+    }
+
+    private var noResultsRow: some View {
+        unavailableRow {
+            ContentUnavailableView {
+                Label("没有找到音乐结果", systemImage: "music.note.list")
+            } description: {
+                Text("当前只显示音乐内容，可以查看更多结果。")
+            } actions: {
+                Button("更多结果") {
+                    store.broadenCurrentSearch { tracks in
+                        engine.preload(tracks: tracks, limit: 2, delay: .milliseconds(500))
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func resultSections(_ sections: SearchResultSections) -> some View {
+        if let bestMatch = sections.bestMatch {
+            trackSection(title: "最佳匹配", tracks: [bestMatch])
+        }
+        trackSection(title: "歌曲", tracks: sections.songs)
+        trackSection(title: "MV", tracks: sections.mvs)
+    }
+
+    @ViewBuilder
+    private func trackSection(title: String, tracks: [Track]) -> some View {
+        if !tracks.isEmpty {
+            Section(title) {
+                ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
                     Button {
-                        searchHistoryTapTrigger += 1
-                        query = term
-                        submitSearch()
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "clock")
-                                .foregroundStyle(.secondary)
-                                .frame(width: 24)
-                            Text(term)
-                                .foregroundStyle(.primary)
-                            Spacer()
+                        searchResultTapTrigger += 1
+                        if store.shouldShowResults(query: query) {
+                            playSearchResult(track)
+                        } else {
+                            play(tracks: tracks, startAt: index, selected: track)
                         }
-                        .padding(.horizontal, 14)
-                        .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
-                        .contentShape(Rectangle())
+                    } label: {
+                        searchResultRow(track: track)
                     }
                     .buttonStyle(.plain)
-                    .sensoryFeedback(.intent(.selection), trigger: searchHistoryTapTrigger)
-                    if term != store.searchHistory.last {
-                        Divider().padding(.leading, 50)
-                    }
+                    .sensoryFeedback(.intent(.lightImpact), trigger: searchResultTapTrigger)
                 }
-                Button {
-                    store.clearHistory()
-                } label: {
-                    HStack {
-                        Text("清空搜索历史")
-                            .foregroundStyle(AppTheme.error)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 14)
-                    .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-            .background(AppTheme.background, in: RoundedRectangle(cornerRadius: 12))
-            .padding(.horizontal, 16)
-        }
-    }
-
-    @ViewBuilder
-    private var searchResultsView: some View {
-        if let sections = store.sections {
-            VStack(alignment: .leading, spacing: 16) {
-                if let bestMatch = sections.bestMatch {
-                    searchSection(title: "最佳匹配", tracks: [bestMatch])
-                }
-                searchSection(title: "歌曲", tracks: sections.songs)
-                searchSection(title: "MV", tracks: sections.mvs)
-                paginationControl
-            }
-            .padding(.top, 8)
-        }
-    }
-
-    @ViewBuilder
-    private func searchSection(title: String, tracks: [Track]) -> some View {
-        if !tracks.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                sectionHeader(title)
-                VStack(spacing: 0) {
-                    ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                        Button {
-                            searchResultTapTrigger += 1
-                            playSearchResult(track)
-                        } label: {
-                            searchResultRow(track: track)
-                                .padding(.horizontal, 14)
-                        }
-                        .buttonStyle(.plain)
-                        .sensoryFeedback(.intent(.lightImpact), trigger: searchResultTapTrigger)
-                        if index != tracks.count - 1 {
-                            Divider().padding(.leading, 84)
-                        }
-                    }
-                }
-                .background(AppTheme.background, in: RoundedRectangle(cornerRadius: 12))
-                .padding(.horizontal, 16)
             }
         }
     }
 
     @ViewBuilder
-    private func landingSection(title: String, systemImage: String, tracks: [Track]) -> some View {
-        if !tracks.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    Image(systemName: systemImage)
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(AppTheme.accent)
-                    Text(title)
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(.primary)
-                }
-                .padding(.horizontal, 20)
-                VStack(spacing: 0) {
-                    ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                        Button {
-                            play(tracks: tracks, startAt: index, selected: track)
-                        } label: {
-                            searchResultRow(track: track)
-                                .padding(.horizontal, 14)
-                        }
-                        .buttonStyle(.plain)
-                        if index != tracks.count - 1 {
-                            Divider().padding(.leading, 84)
-                        }
-                    }
-                }
-                .background(AppTheme.background, in: RoundedRectangle(cornerRadius: 12))
-                .padding(.horizontal, 16)
-            }
-        }
-    }
-
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.headline.weight(.bold))
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 20)
-    }
-
     private var paginationControl: some View {
-        Group {
+        Section {
             if store.loadingMore {
                 ProgressView()
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
+                    .frame(maxWidth: .infinity, minHeight: 48)
             } else if store.hasMoreResults {
                 Button {
                     Task {
@@ -376,36 +228,40 @@ struct SearchView: View {
                 } label: {
                     Text("加载更多")
                         .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .contentShape(Rectangle())
+                        .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.plain)
             } else {
                 Text("没有更多结果")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
+                    .frame(maxWidth: .infinity, minHeight: 44)
             }
         }
-        .background(AppTheme.background, in: RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal, 16)
     }
 
     private func searchResultRow(track: Track) -> some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 10) {
             TrackRow(
                 track: track,
                 isPlaying: engine.current.map { track.key.matches($0) } ?? false,
-                showsTrailingIcon: false)
+                showsTrailingIcon: false
+            )
             if isPreparing(track) {
                 ProgressView()
                     .scaleEffect(0.75)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 66, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
         .contentShape(Rectangle())
+    }
+
+    private func unavailableRow<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .frame(maxWidth: .infinity, minHeight: 220)
+            .listRowInsets(EdgeInsets(top: 24, leading: 0, bottom: 24, trailing: 0))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
     }
 
     private func isPreparing(_ track: Track) -> Bool {
@@ -433,14 +289,11 @@ struct SearchView: View {
     private func submitSearch() {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        // 显式提交(键盘 search 按钮)收起键盘;防抖触发的搜索不打扰用户输入
-        searchFocused = false
         store.submitSearch(text) { tracks in
             engine.preload(tracks: tracks, limit: 2, delay: .milliseconds(500))
         }
     }
 
-    /// 防抖触发的自动搜索——不收起键盘,不打断用户输入。
     private func debouncedSearch() {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }

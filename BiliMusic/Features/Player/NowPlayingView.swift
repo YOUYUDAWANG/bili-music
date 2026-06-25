@@ -12,8 +12,10 @@ private struct ScrollOffsetKey: PreferenceKey {
 /// 全屏正在播放页(从 mini bar 上拉打开)。
 struct NowPlayingView: View {
     @Environment(PlayerEngine.self) private var engine
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var onDismiss: (() -> Void)? = nil
     var namespace: Namespace.ID
+    var safeAreaTop: CGFloat = 0
     private enum PlayerPage: Int {
         case queue = 0
         case nowPlaying = 1
@@ -39,9 +41,9 @@ struct NowPlayingView: View {
     @State private var showMVControls = false
     @State private var showUPPlaylists = false
     @State private var showFavoriteFolders = false
-    @State private var selectedMode: PlayerEngine.PlaybackMode = .music
     @State private var switchingMode = false
-    @State private var dragOffset: CGFloat = 0
+    @State private var selectedMode: PlayerEngine.PlaybackMode = .music
+    @GestureState private var dismissDragOffset: CGFloat = 0
     @State private var scrollOffset: CGFloat = 0
     @State private var playHapticTrigger = 0
     @State private var prevHapticTrigger = 0
@@ -52,6 +54,15 @@ struct NowPlayingView: View {
     @Environment(\.dismiss) private var dismiss
     private var favorites: FavoriteManager { .shared }
 
+    private enum Layout {
+        static let topSwitcherInset: CGFloat = 16
+        static let topSwitcherHeight: CGFloat = 32
+        static let contentTopInset: CGFloat = 16
+        static let contextPreviewLimit = 8
+        static let compactRowHeight: CGFloat = 34
+        static let dismissGrabZoneHeight: CGFloat = 150
+    }
+
     private struct PlaylistLookupResult {
         let playlist: BiliClient.UPPlaylist?
         let tracks: [Track]
@@ -61,50 +72,32 @@ struct NowPlayingView: View {
     var body: some View {
         GeometryReader { proxy in
             let coverSize = min(proxy.size.width - 28, max(260, proxy.size.height * 0.46), 420)
+            let effectiveSafeAreaTop = max(proxy.safeAreaInsets.top, safeAreaTop)
             ZStack {
+                playerBackground
+                    .ignoresSafeArea()
+
                 if isLandscapeMV(size: proxy.size), let player = engine.avPlayer {
-                    VideoPlayer(player: player)
-                        .ignoresSafeArea()
+                    landscapeMVPlayer(
+                        player: player,
+                        width: proxy.size.width,
+                        safeAreaTop: effectiveSafeAreaTop
+                    )
                 } else {
-                    playerBackground
-                        .ignoresSafeArea()
-
-                    VStack(spacing: 0) {
-                        playerHeader(safeAreaTop: proxy.safeAreaInsets.top)
-                        TabView(selection: $selectedPage) {
-                            playerListPage(title: "播放列表", systemName: "list.bullet") {
-                                queueList
-                            }
-                            .tag(PlayerPage.queue.rawValue)
-
-                            ScrollView(showsIndicators: false) {
-                                nowPlayingPage(coverSize: coverSize)
-                                    .background(GeometryReader { geo in
-                                        Color.clear.preference(
-                                            key: ScrollOffsetKey.self,
-                                            value: geo.frame(in: .named("playerScroll")).minY
-                                        )
-                                    })
-                            }
-                            .coordinateSpace(name: "playerScroll")
-                            .onPreferenceChange(ScrollOffsetKey.self) { offset in
-                                scrollOffset = offset
-                            }
-                            .tag(PlayerPage.nowPlaying.rawValue)
-
-                            playerListPage(title: "推荐歌曲", systemName: "sparkles") {
-                                recommendationsList
-                            }
-                            .tag(PlayerPage.recommendations.rawValue)
-                        }
-                        .tabViewStyle(.page(indexDisplayMode: .never))
-                        .indexViewStyle(.page(backgroundDisplayMode: .interactive))
-                    }
+                    playerPages(
+                        coverSize: coverSize,
+                        width: proxy.size.width,
+                        safeAreaTop: effectiveSafeAreaTop
+                    )
                 }
             }
-            .offset(y: dragOffset)
-            .animation(.spring(response: 0.32, dampingFraction: 0.86), value: dragOffset)
-            .simultaneousGesture(pageDismissDrag)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .background(playerBackground.ignoresSafeArea())
+            .offset(y: dismissDragOffset)
+            .accessibilityIdentifier("nowPlayingView")
+            .simultaneousGesture(dismissDrag, including: .gesture)
+            .animation(dismissDragAnimation, value: dismissDragOffset)
         }
         .sheet(isPresented: $showUPPlaylists) {
             UPPlaylistsView()
@@ -161,37 +154,10 @@ struct NowPlayingView: View {
         engine.playbackMode == .mv && size.width > size.height
     }
 
-    private func playerHeader(safeAreaTop: CGFloat) -> some View {
-        Color.clear
-            .frame(height: max(16, safeAreaTop))
-            .contentShape(Rectangle())
-            .gesture(dismissDrag)
-    }
-
     private func nowPlayingPage(coverSize: CGFloat) -> some View {
         VStack(spacing: 15) {
-            Picker("播放模式", selection: $selectedMode) {
-                ForEach(PlayerEngine.PlaybackMode.allCases) { mode in
-                    Text(mode.rawValue).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 210)
-            .tint(AppTheme.accent)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
-            .onChange(of: selectedMode) { _, mode in
-                guard mode != engine.playbackMode else { return }
-                Task {
-                    switchingMode = true
-                    await engine.setPlaybackMode(mode)
-                    selectedMode = engine.playbackMode
-                    switchingMode = false
-                }
-            }
-            .disabled(switchingMode || (!engine.videoAvailable && engine.playbackMode == .music))
-
             mediaView(coverSize: coverSize)
-                .padding(.top, 2)
+                .padding(.top, 6)
 
             VStack(spacing: 5) {
                 Text(engine.current?.title ?? "")
@@ -232,10 +198,58 @@ struct NowPlayingView: View {
         .padding(.bottom, 12)
     }
 
+    private func playerPages(coverSize: CGFloat, width: CGFloat, safeAreaTop: CGFloat) -> some View {
+        TabView(selection: $selectedPage) {
+            horizontalListPage {
+                queueList
+            }
+            .tag(PlayerPage.queue.rawValue)
+
+            ScrollView(showsIndicators: false) {
+                nowPlayingPage(coverSize: coverSize)
+                    .padding(.top, Layout.contentTopInset)
+                    .background(GeometryReader { geo in
+                        Color.clear.preference(
+                            key: ScrollOffsetKey.self,
+                            value: geo.frame(in: .named("playerScroll")).minY
+                        )
+                    })
+            }
+            .coordinateSpace(name: "playerScroll")
+            .onPreferenceChange(ScrollOffsetKey.self) { offset in
+                scrollOffset = offset
+            }
+            .tag(PlayerPage.nowPlaying.rawValue)
+
+            horizontalListPage {
+                recommendationsList
+            }
+            .tag(PlayerPage.recommendations.rawValue)
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .indexViewStyle(.page(backgroundDisplayMode: .never))
+        .contentShape(Rectangle())
+        .simultaneousGesture(pageSwipeGesture(width: width), including: .gesture)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            playerTopModeSwitcher(safeAreaTop: safeAreaTop)
+        }
+    }
+
+    private func landscapeMVPlayer(player: AVPlayer, width: CGFloat, safeAreaTop: CGFloat) -> some View {
+        VideoPlayer(player: player)
+            .ignoresSafeArea()
+            .contentShape(Rectangle())
+            .simultaneousGesture(pageSwipeGesture(width: width), including: .all)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                playerTopModeSwitcher(safeAreaTop: safeAreaTop)
+            }
+    }
+
     @ViewBuilder
     private func mediaView(coverSize: CGFloat) -> some View {
         if engine.playbackMode == .mv, let player = engine.avPlayer {
             ZStack(alignment: .topTrailing) {
+                artworkPlaceholder(cornerRadius: AppTheme.playerCoverRadius)
                 VideoPlayer(player: player)
                     .contentShape(Rectangle())
                     .onTapGesture {
@@ -274,20 +288,44 @@ struct NowPlayingView: View {
                 }
             }
         } else {
-            CachedAsyncImage(url: thumbnailURL(engine.current?.coverURL, width: 960, height: 540)) { image in
-                image.resizable().aspectRatio(contentMode: .fill)
-                    .matchedGeometryEffect(id: "playerCover", in: namespace)
-            } placeholder: {
-                ZStack {
-                    AppTheme.secondaryBackground
-                    Image(systemName: "music.note")
-                        .font(.system(size: 50))
-                        .foregroundStyle(.secondary)
+            let coverURL = thumbnailURL(engine.current?.coverURL, width: 960, height: 540)
+            Group {
+                if let coverURL {
+                    CachedAsyncImage(url: coverURL) { image in
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        artworkPlaceholder(cornerRadius: AppTheme.playerCoverRadius)
+                    }
+                } else {
+                    artworkPlaceholder(cornerRadius: AppTheme.playerCoverRadius)
                 }
             }
+            .matchedGeometryEffect(id: "playerCover", in: namespace)
             .frame(width: coverSize, height: coverSize * 9 / 16)
             .clipShape(RoundedRectangle(cornerRadius: AppTheme.playerCoverRadius))
+            .overlay {
+                RoundedRectangle(cornerRadius: AppTheme.playerCoverRadius)
+                    .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+            }
             .shadow(color: .black.opacity(0.42), radius: 28, y: 18)
+        }
+    }
+
+    private func artworkPlaceholder(cornerRadius: CGFloat) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(Color.primary.opacity(0.055))
+            LinearGradient(
+                colors: [
+                    Color.primary.opacity(0.12),
+                    Color.primary.opacity(0.035)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            Image(systemName: "music.note")
+                .font(.system(size: 54, weight: .semibold))
+                .foregroundStyle(Color.primary.opacity(0.42))
         }
     }
 
@@ -450,18 +488,70 @@ struct NowPlayingView: View {
         .buttonStyle(.plain)
     }
 
-    private func playerListPage<Content: View>(title: String, systemName: String, @ViewBuilder content: () -> Content) -> some View {
+    private var playbackModeSwitcher: some View {
+        Picker("播放模式", selection: $selectedMode) {
+            ForEach(PlayerEngine.PlaybackMode.allCases) { mode in
+                Text(mode.rawValue).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .controlSize(.small)
+        .frame(maxWidth: 214)
+        .frame(height: 32)
+        .tint(AppTheme.accent)
+        .accessibilityIdentifier("playerModeSwitcher")
+        .disabled(switchingMode || (!engine.videoAvailable && engine.playbackMode == .music))
+        .onChange(of: selectedMode) { _, mode in
+            guard mode != engine.playbackMode else { return }
+            setPlaybackMode(mode)
+        }
+    }
+
+    private func playerTopModeSwitcher(safeAreaTop: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            Color.clear
+                .frame(height: max(safeAreaTop, 44) + Layout.topSwitcherInset)
+                .accessibilityHidden(true)
+
+            HStack {
+                Spacer()
+                playbackModeSwitcher
+                    .padding(3)
+                    .background(.thinMaterial, in: Capsule())
+                    .overlay {
+                        Capsule()
+                            .stroke(Color.primary.opacity(0.07), lineWidth: 0.5)
+                    }
+                Spacer()
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 6)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: max(safeAreaTop, 44) + Layout.topSwitcherInset + Layout.topSwitcherHeight + 6)
+        .contentShape(Rectangle())
+        .highPriorityGesture(topChromeDismissDrag, including: .all)
+    }
+
+    private func setPlaybackMode(_ mode: PlayerEngine.PlaybackMode) {
+        guard mode != engine.playbackMode, !switchingMode else { return }
+        guard mode == .music || engine.videoAvailable else { return }
+        Task {
+            switchingMode = true
+            await engine.setPlaybackMode(mode)
+            switchingMode = false
+        }
+    }
+
+    private func horizontalListPage<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 12) {
-                Label(title, systemImage: systemName)
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 24)
-                    .padding(.top, 18)
                 content()
                     .padding(.horizontal, 20)
                 Spacer(minLength: 32)
             }
+            .padding(.top, Layout.contentTopInset)
+            .padding(.bottom, 28)
         }
     }
 
@@ -551,6 +641,7 @@ struct NowPlayingView: View {
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
             .padding(.horizontal, 24)
         } else if let currentPlaylist, !currentPlaylistTracks.isEmpty {
+            let visibleRows = min(currentPlaylistTracks.count, Layout.contextPreviewLimit)
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     Image(systemName: "rectangle.stack.fill")
@@ -584,7 +675,7 @@ struct NowPlayingView: View {
                             }
                         }
                     }
-                    .frame(maxHeight: 148)
+                    .frame(maxHeight: CGFloat(visibleRows) * Layout.compactRowHeight)
                     .onAppear { scrollCurrentPlaylist(proxy) }
                     .onChange(of: engine.current?.id) { _, _ in
                         scrollCurrentPlaylist(proxy)
@@ -606,6 +697,8 @@ struct NowPlayingView: View {
     @ViewBuilder
     private var queuePreviewPanel: some View {
         if !engine.queue.isEmpty {
+            let previewItems = queuePreviewItems
+            let visibleRows = min(previewItems.count, Layout.contextPreviewLimit)
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     Image(systemName: "text.line.first.and.arrowtriangle.forward")
@@ -619,14 +712,27 @@ struct NowPlayingView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                VStack(spacing: 0) {
-                    ForEach(queuePreviewItems, id: \.track.id) { item in
-                        Button {
-                            Task { await engine.jump(to: item.index) }
-                        } label: {
-                            compactPlaylistRow(track: item.track, index: item.index)
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical, showsIndicators: previewItems.count > visibleRows) {
+                        LazyVStack(spacing: 0) {
+                            ForEach(previewItems, id: \.track.id) { item in
+                                Button {
+                                    Task { await engine.jump(to: item.index) }
+                                } label: {
+                                    compactPlaylistRow(track: item.track, index: item.index)
+                                        .id(item.track.id)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
-                        .buttonStyle(.plain)
+                    }
+                    .frame(maxHeight: CGFloat(visibleRows) * Layout.compactRowHeight)
+                    .onAppear { scrollCurrentQueue(proxy) }
+                    .onChange(of: engine.queueIndex) { _, _ in
+                        scrollCurrentQueue(proxy)
+                    }
+                    .onChange(of: engine.current?.id) { _, _ in
+                        scrollCurrentQueue(proxy)
                     }
                 }
             }
@@ -669,11 +775,8 @@ struct NowPlayingView: View {
     }
 
     private var queuePreviewItems: [(index: Int, track: Track)] {
-        guard !engine.queue.isEmpty else { return [] }
-        let start = max(0, min(engine.queueIndex, engine.queue.count - 1))
-        let end = min(engine.queue.count, start + 3)
-        return Array(engine.queue[start..<end].enumerated()).map { offset, track in
-            (start + offset, track)
+        Array(engine.queue.enumerated()).map { index, track in
+            (index, track)
         }
     }
 
@@ -840,7 +943,17 @@ struct NowPlayingView: View {
         guard let currentId = engine.current?.id,
               currentPlaylistTracks.contains(where: { $0.id == currentId }) else { return }
         DispatchQueue.main.async {
-            withAnimation(.easeInOut(duration: 0.2)) {
+            animate(.easeInOut(duration: 0.2)) {
+                proxy.scrollTo(currentId, anchor: .center)
+            }
+        }
+    }
+
+    private func scrollCurrentQueue(_ proxy: ScrollViewProxy) {
+        guard engine.queue.indices.contains(engine.queueIndex) else { return }
+        let currentId = engine.queue[engine.queueIndex].id
+        DispatchQueue.main.async {
+            animate(.easeInOut(duration: 0.2)) {
                 proxy.scrollTo(currentId, anchor: .center)
             }
         }
@@ -860,46 +973,26 @@ struct NowPlayingView: View {
         }
     }
 
-    /// 从顶部抓手下拉关闭播放页;拖动时整页跟手,超过阈值松手即收起。
+    /// 垂直下拉关闭播放页;拖动时整页跟手,超过阈值松手即收起。
     private var dismissDrag: some Gesture {
-        DragGesture(minimumDistance: 24)
-            .onChanged { value in
-                guard abs(value.translation.height) > abs(value.translation.width),
-                      value.translation.height > 0 else { return }
-                dragOffset = max(0, value.translation.height)
+        DragGesture(minimumDistance: 18, coordinateSpace: .global)
+            .updating($dismissDragOffset) { value, state, _ in
+                guard shouldTrackDismissDrag(value) else { return }
+                state = min(340, max(0, value.translation.height))
             }
             .onEnded { value in
+                guard shouldTrackDismissDrag(value) else { return }
                 if value.translation.height > 130 || value.predictedEndTranslation.height > 260 {
                     closePlayer()
-                } else {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        dragOffset = 0
-                    }
                 }
             }
     }
 
-    /// 整页下滑关闭：仅当 ScrollView 在顶部时才激活（和 Apple Music 行为一致）。
-    /// 一旦用户滚动了内容，下滑就只滚动不关闭，完全不会抖动。
-    private var pageDismissDrag: some Gesture {
-        DragGesture(minimumDistance: 24)
-            .onChanged { value in
-                guard selectedPage == PlayerPage.nowPlaying.rawValue,
-                      scrollOffset >= 0,
-                      value.translation.height > 0 else { return }
-                dragOffset = max(0, value.translation.height)
-            }
-            .onEnded { value in
-                guard selectedPage == PlayerPage.nowPlaying.rawValue,
-                      scrollOffset >= 0 else { return }
-                if value.translation.height > 130 || value.predictedEndTranslation.height > 260 {
-                    closePlayer()
-                } else {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        dragOffset = 0
-                    }
-                }
-            }
+    private func shouldTrackDismissDrag(_ value: DragGesture.Value) -> Bool {
+        let isDownward = value.translation.height > 0
+        let isVertical = abs(value.translation.height) > abs(value.translation.width) * 1.08
+        let startsInDismissZone = value.startLocation.y < Layout.dismissGrabZoneHeight
+        return isDownward && isVertical && startsInDismissZone
     }
 
     private func format(_ seconds: Double) -> String {
@@ -915,11 +1008,61 @@ struct NowPlayingView: View {
     }
 
     private func closePlayer() {
-        dragOffset = 0
         if let onDismiss {
             onDismiss()
         } else {
             dismiss()
+        }
+    }
+
+    private func pageSwipeGesture(width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 12, coordinateSpace: .local)
+            .onEnded { value in
+                let horizontalIntent = abs(value.predictedEndTranslation.width) > abs(value.translation.width)
+                    ? value.predictedEndTranslation.width
+                    : value.translation.width
+                let verticalIntent = abs(value.predictedEndTranslation.height) > abs(value.translation.height)
+                    ? value.predictedEndTranslation.height
+                    : value.translation.height
+                let horizontalThreshold = max(28, width * 0.07)
+                guard abs(horizontalIntent) > horizontalThreshold,
+                      abs(horizontalIntent) > abs(verticalIntent) * 0.82 else { return }
+
+                animate(.snappy(duration: 0.28, extraBounce: 0.02)) {
+                    if horizontalIntent < 0 {
+                        selectedPage = min(PlayerPage.recommendations.rawValue, selectedPage + 1)
+                    } else {
+                        selectedPage = max(PlayerPage.queue.rawValue, selectedPage - 1)
+                    }
+                }
+            }
+    }
+
+    private var topChromeDismissDrag: some Gesture {
+        DragGesture(minimumDistance: 12, coordinateSpace: .global)
+            .updating($dismissDragOffset) { value, state, _ in
+                guard value.translation.height > 0,
+                      abs(value.translation.height) > abs(value.translation.width) * 1.08 else { return }
+                state = min(340, max(0, value.translation.height))
+            }
+            .onEnded { value in
+                guard value.translation.height > 0,
+                      abs(value.translation.height) > abs(value.translation.width) * 1.08 else { return }
+                if value.translation.height > 90 || value.predictedEndTranslation.height > 180 {
+                    closePlayer()
+                }
+            }
+    }
+
+    private var dismissDragAnimation: Animation {
+        reduceMotion ? .easeOut(duration: 0.12) : .interactiveSpring(response: 0.26, dampingFraction: 0.9)
+    }
+
+    private func animate(_ animation: Animation, _ updates: @escaping () -> Void) {
+        if reduceMotion {
+            updates()
+        } else {
+            withAnimation(animation, updates)
         }
     }
 }
@@ -928,170 +1071,9 @@ struct NowPlayingView: View {
 private func thumbnailURL(_ url: URL?, width: Int, height: Int) -> URL? {
     guard let url else { return nil }
     let raw = url.absoluteString
+    guard !raw.localizedCaseInsensitiveContains("transparent.png") else { return nil }
     guard raw.contains("hdslb.com"), !raw.contains("@") else { return url }
     return URL(string: raw + "@\(width)w_\(height)h_1c.webp")
-}
-
-/// 底部常驻迷你播放条。
-struct MiniPlayerBar: View {
-    @Environment(PlayerEngine.self) private var engine
-    @Binding var showFullPlayer: Bool
-    @Binding var isDraggingFullPlayer: Bool
-    @Binding var openPlayerTranslation: CGFloat
-    var namespace: Namespace.ID
-    @State private var playPauseTrigger = 0
-    @State private var nextTrigger = 0
-
-    var body: some View {
-        HStack(spacing: 10) {
-            CachedAsyncImage(url: thumbnailURL(engine.current?.coverURL, width: 150, height: 85)) { image in
-                image.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: {
-                AppTheme.secondaryBackground
-            }
-            .matchedGeometryEffect(id: "playerCover", in: namespace)
-            .frame(width: 52, height: 30)
-            .clipShape(RoundedRectangle(cornerRadius: 5))
-            .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 1.5)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(engine.current?.title ?? "")
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                Text(engine.current?.artist ?? "")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer()
-            Button {
-                playPauseTrigger += 1
-                engine.togglePlayPause()
-            } label: {
-                Image(systemName: engine.state == .playing ? "pause.fill" : "play.fill")
-                    .font(.system(size: 16, weight: .semibold))
-                    .contentTransition(.symbolEffect(.replace))
-                    .frame(width: 32, height: 32)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(MiniPlayerControlButtonStyle())
-            .sensoryFeedback(.impact(weight: .medium), trigger: playPauseTrigger)
-            Button {
-                nextTrigger += 1
-                Task { await engine.playNext() }
-            } label: {
-                Image(systemName: "forward.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .frame(width: 32, height: 32)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(MiniPlayerControlButtonStyle())
-            .disabled(!engine.hasNext)
-            .opacity(engine.hasNext ? 1.0 : 0.3)
-            .sensoryFeedback(.impact(weight: .medium), trigger: nextTrigger)
-            .task(id: engine.current?.coverURL) {
-                guard let url = engine.current?.coverURL,
-                      let fullURL = thumbnailURL(url, width: 960, height: 540),
-                      ImageMemoryCache.shared.image(for: fullURL) == nil else { return }
-                _ = await ImageLoadCoordinator.shared.image(for: fullURL)
-            }
-        }
-        .padding(.horizontal, 10)
-        .frame(height: 52)
-        .background(
-            RoundedRectangle(cornerRadius: 26)
-                .stroke(
-                    LinearGradient(
-                        colors: [
-                            .white.opacity(0.18),
-                            .white.opacity(0.04),
-                            .clear,
-                            .black.opacity(0.02),
-                            .white.opacity(0.10)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 0.3
-                )
-        )
-        .contentShape(Rectangle())
-        .onTapGesture { openFullPlayer() }
-        .gesture(
-            DragGesture(minimumDistance: 15)
-                .onChanged { value in
-                    guard abs(value.translation.height) > abs(value.translation.width) else { return }
-                    if value.translation.height < 0.0 {
-                        isDraggingFullPlayer = true
-                        openPlayerTranslation = value.translation.height
-                    } else {
-                        isDraggingFullPlayer = false
-                        openPlayerTranslation = 0.0
-                    }
-                }
-                .onEnded { value in
-                    if isDraggingFullPlayer {
-                        if value.translation.height < -100.0 || value.predictedEndTranslation.height < -200.0 {
-                            openFullPlayer()
-                        } else {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                showFullPlayer = false
-                                isDraggingFullPlayer = false
-                                openPlayerTranslation = 0.0
-                            }
-                        }
-                    } else {
-                        if value.translation.height > 40.0 {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                engine.isMiniPlayerHidden = true
-                            }
-                        }
-                    }
-                }
-        )
-    }
-
-    private func openFullPlayer() {
-        withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
-            isDraggingFullPlayer = false
-            openPlayerTranslation = 0
-            showFullPlayer = true
-        }
-    }
-}
-
-// MARK: - 滚动时自动隐藏迷你播放器的修饰符
-struct ScrollHideMiniPlayerModifier: ViewModifier {
-    @Environment(PlayerEngine.self) private var engine
-
-    func body(content: Content) -> some View {
-        content
-            .simultaneousGesture(
-                DragGesture()
-                    .onChanged { value in
-                        guard abs(value.translation.height) > abs(value.translation.width) else { return }
-                        if value.translation.height < -12 {
-                            if !engine.isMiniPlayerHidden {
-                                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                    engine.isMiniPlayerHidden = true
-                                }
-                            }
-                        } else if value.translation.height > 12 {
-                            if engine.isMiniPlayerHidden {
-                                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                    engine.isMiniPlayerHidden = false
-                                }
-                            }
-                        }
-                    }
-            )
-    }
-}
-
-extension View {
-    func hideMiniPlayerOnScroll() -> some View {
-        self.modifier(ScrollHideMiniPlayerModifier())
-    }
 }
 
 // MARK: - Control views and sheet views are in separate files:

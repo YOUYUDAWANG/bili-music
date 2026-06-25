@@ -30,18 +30,19 @@ struct HomeView: View {
                             } label: {
                                 TrackRow(track: track, isPlaying: engine.current.map { track.key.matches($0) } ?? false)
                             }
+                            .accessibilityIdentifier("homeTrackRow\(index)")
                             .buttonStyle(.plain)
                             .sensoryFeedback(.intent(.lightImpact), trigger: trackTapTrigger)
                         }
-                    } header: {
-                        Text("为你推荐")
                     }
                 }
             }
+            .accessibilityIdentifier("homeList")
             .listStyle(.insetGrouped)
-            .hideMiniPlayerOnScroll()
             .scrollContentBackground(.hidden)
             .background(AppTheme.groupedBackground)
+            .navigationTitle("推荐")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
@@ -83,6 +84,14 @@ struct HomeView: View {
     /// 取一批推荐：排除「最近 3 小时已在首页推过」的曲目(跨重启生效)。
     /// 若排除集把候选掏空了就放宽一次,保证首页不空。
     private func load() async {
+#if DEBUG
+        if UITestFixtures.enabled {
+            errorMessage = nil
+            tracks = UITestFixtures.homeTracks
+            engine.preload(tracks: tracks, limit: 0, delay: .zero)
+            return
+        }
+#endif
         loading = true
         defer { loading = false }
         errorMessage = nil

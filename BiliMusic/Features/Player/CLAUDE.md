@@ -2,13 +2,13 @@
 
 ## 模块职责
 
-全屏正在播放页的 UI 实现。包括三页 TabView（队列/当前播放/推荐）、迷你播放条、进度条、歌词页、MV 全屏、收藏夹选择器、UP 主合集视图。
+全屏正在播放页的 UI 实现。包括当前播放页、进度条、歌词页、MV 全屏、收藏夹选择器、UP 主合集视图。
 
 ## 入口与启动
 
-- **文件**: `NowPlayingView.swift`（约 1396 行，全仓最大文件）
+- **文件**: `NowPlayingView.swift`
 - 由 `RootView` 通过 `.ignoresSafeArea()` 和 `.offset(y:)` 以浮层方式呈现。
-- `MiniPlayerBar` 在未展开时作为 tab content 的 safeAreaInset 显示。
+- 迷你播放器由 `RootView` 的自定义 `GlassEffectContainer` 底部浮层呈现，和导航胶囊/搜索圆按钮组成 Apple Music 风格的内缩底部组。
 
 ## 对外接口
 
@@ -27,15 +27,8 @@
 | 控制按钮 | 上一曲、播放/暂停、下一曲 |
 | 操作栏 | 收藏（短按/长按）、下载、歌词、播放模式、音质、合集 |
 | 底部面板 | 合集列表 / 队列预览 |
-| 播放列表页 | 队列列表（可删除） |
-| 推荐歌曲页 | 推荐列表（电台模式播放） |
 | 歌词页 | LyricSheetView（滚动高亮、自动居中） |
 | MV 全屏 | MVFullscreenView（全屏视频播放） |
-
-### MiniPlayerBar
-
-- 底部常驻迷你播放条（封面、标题、播放/暂停、下一曲）。
-- 支持上滑手势打开全屏播放器。
 
 ## 关键依赖与配置
 
@@ -50,7 +43,7 @@
 
 所有使用的模型在 PlayerEngine 或其他模块中定义。本模块内：
 - `PlaylistLookupResult` — 合集查找结果（private struct）
-- `PlayerPage` — 三页枚举（queue/nowPlaying/recommendations）
+- `PlayerPage` — 推荐/队列辅助状态枚举（不再驱动顶部滑动分页 UI）
 
 ## 相关文件清单
 

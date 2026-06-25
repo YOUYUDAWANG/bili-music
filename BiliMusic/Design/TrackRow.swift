@@ -30,7 +30,11 @@ struct TrackRow: View {
                         Image(systemName: "waveform").font(.caption2).foregroundStyle(AppTheme.accent)
                     }
                     Text(track.artist)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                     Text(format(track.duration))
+                        .font(.caption.monospacedDigit())
+                        .fixedSize(horizontal: true, vertical: false)
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -78,6 +82,7 @@ struct TrackRow: View {
     private func thumbnailURL(_ url: URL?, size: Int) -> URL? {
         guard let url else { return nil }
         let raw = url.absoluteString
+        guard !raw.localizedCaseInsensitiveContains("transparent.png") else { return nil }
         guard raw.contains("hdslb.com"), !raw.contains("@") else { return url }
         return URL(string: raw + "@\(size)w_\(size)h_1c.webp")
     }
