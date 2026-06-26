@@ -2,38 +2,37 @@ import XCTest
 @testable import BiliMusic
 
 final class RecommendationSchedulingTests: XCTestCase {
-    func testFirstPlaybackMarksHomeStaleWithoutRefreshingVisibleRows() {
-        var fixture = RecommendationSchedulingFixture(visibleRows: [Self.track()])
+    func testHomeRecommendationPolicyIsExplicitBoundedAndLowerPriority() {
+        let policy = RecommendationSchedulingPolicy.home(trigger: .initialHomeLoad)
 
-        fixture.recordFirstPlayback()
-
-        XCTAssertTrue(fixture.isStale)
-        XCTAssertEqual(fixture.refreshCount, 0)
-        XCTAssertEqual(fixture.visibleRows.map(\.bvid), ["BVRECO001"])
+        XCTAssertEqual(policy.trigger, .initialHomeLoad)
+        XCTAssertEqual(policy.favoriteSeedLimit, 5)
+        XCTAssertEqual(policy.relatedPerFavoriteSeedLimit, 10)
+        XCTAssertEqual(policy.historySeedLimit, 2)
+        XCTAssertEqual(policy.cachedSeedLimit, 2)
+        XCTAssertEqual(policy.fallbackKeywordLimit, 1)
+        XCTAssertEqual(policy.scoringPriority, .utility)
     }
 
-    private static func track() -> Track {
-        Track(
-            typeID: 3,
-            bvid: "BVRECO001",
-            cid: 1001,
-            title: "Recommendation Song",
-            artist: "Fixture Artist",
-            coverURL: nil,
-            duration: 211)
-    }
-}
+    func testDirectPlaybackDoesNotReferenceHomeRecommendationRefresh() throws {
+        let source = try Self.sourceFile("BiliMusic/Player/PlayerEngine.swift")
 
-private struct RecommendationSchedulingFixture {
-    private(set) var visibleRows: [Track]
-    private(set) var isStale = false
-    private(set) var refreshCount = 0
-
-    mutating func recordFirstPlayback() {
-        isStale = true
+        XCTAssertFalse(source.contains("mode: .home"))
+        XCTAssertFalse(source.contains("initialHomeLoad"))
+        XCTAssertFalse(source.contains("manualRefresh"))
     }
 
-    mutating func manualRefresh() {
-        refreshCount += 1
+    func testRadioRecommendationPolicyKeepsInteractivePriority() {
+        let policy = RecommendationSchedulingPolicy.default(for: .radio)
+
+        XCTAssertEqual(policy.scoringPriority, .userInitiated)
+        XCTAssertNil(policy.trigger)
+    }
+
+    private static func sourceFile(_ relativePath: String) throws -> String {
+        let testURL = URL(fileURLWithPath: #filePath)
+        let rootURL = testURL.deletingLastPathComponent().deletingLastPathComponent()
+        let url = rootURL.appendingPathComponent(relativePath)
+        return try String(contentsOf: url, encoding: .utf8)
     }
 }
