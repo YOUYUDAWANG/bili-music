@@ -15,6 +15,7 @@ final class StreamResolver {
         let quality: Int
         let bandwidth: Int
         let fetchedAt: Date
+        let cdnWarmedAt: Date?
 
         init(
             url: URL,
@@ -23,7 +24,8 @@ final class StreamResolver {
             duration: Int,
             quality: Int,
             bandwidth: Int,
-            fetchedAt: Date
+            fetchedAt: Date,
+            cdnWarmedAt: Date? = nil
         ) {
             self.url = url
             self.candidateURLs = AudioCDNSelector.deduped([url] + candidateURLs)
@@ -32,12 +34,14 @@ final class StreamResolver {
             self.quality = quality
             self.bandwidth = bandwidth
             self.fetchedAt = fetchedAt
+            self.cdnWarmedAt = cdnWarmedAt
         }
     }
 
     private let client: BiliClient
     private var preparedStreams: [TrackKey: PreparedAudioStream] = [:]
     private var preparingStreams: [TrackKey: Task<PreparedAudioStream, Error>] = [:]
+    private var warmingStreams = Set<TrackKey>()
 
     init(client: BiliClient = BiliClient()) {
         self.client = client
@@ -58,7 +62,7 @@ final class StreamResolver {
     }
 
     func isPreparing(_ track: Track) -> Bool {
-        preparingStreams[track.key] != nil
+        preparingStreams[track.key] != nil || warmingStreams.contains(track.key)
     }
 
     func invalidateAudio(for track: Track) {
@@ -118,6 +122,40 @@ final class StreamResolver {
         }
     }
 
+    func warmAudioCDN(for track: Track, preferredQuality: Int) async {
+        let key = track.key
+        guard !warmingStreams.contains(key) else { return }
+        warmingStreams.insert(key)
+        defer { warmingStreams.remove(key) }
+
+        do {
+            let prepared = try await prepareAudio(for: track, preferredQuality: preferredQuality)
+            guard prepared.candidateURLs.count > 1 else { return }
+            if let warmedAt = prepared.cdnWarmedAt,
+               Date().timeIntervalSince(warmedAt) < 10 * 60 {
+                return
+            }
+            guard let selected = await AudioCDNSelector.fastestReachableURL(
+                from: prepared.candidateURLs,
+                timeout: .milliseconds(700)) else { return }
+            let warmed = PreparedAudioStream(
+                url: selected,
+                candidateURLs: prepared.candidateURLs,
+                cid: prepared.cid,
+                duration: prepared.duration,
+                quality: prepared.quality,
+                bandwidth: prepared.bandwidth,
+                fetchedAt: prepared.fetchedAt,
+                cdnWarmedAt: Date())
+            let resolvedKey = TrackKey(bvid: track.bvid, cid: prepared.cid)
+            preparedStreams[resolvedKey] = warmed
+            preparedStreams[key] = warmed
+            streamLog.debug("warm audio cdn(bvid:\(track.bvid)) host=\(selected.host() ?? "nil", privacy: .public)")
+        } catch {
+            // 预热失败不影响真正播放;播放时仍会走普通取流和慢启动 fallback。
+        }
+    }
+
     private static func resolveCidDuration(client: BiliClient, bvid: String, cid: Int?, duration: Int) async throws -> (cid: Int, duration: Int) {
         if let cid, duration > 0 {
             return (cid, duration)
@@ -135,6 +173,7 @@ protocol AudioStreamResolving: AnyObject {
     func isPreparing(_ track: Track) -> Bool
     func invalidateAudio(for track: Track)
     func prepareAudio(for track: Track, preferredQuality: Int) async throws -> StreamResolver.PreparedAudioStream
+    func warmAudioCDN(for track: Track, preferredQuality: Int) async
 }
 
 extension StreamResolver: AudioStreamResolving {}

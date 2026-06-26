@@ -87,10 +87,37 @@ final class PlaybackCriticalPathTests: XCTestCase {
         XCTAssertFalse(events.contains(.autoCacheScheduled))
     }
 
-    private static func track(cid: Int? = 1001) -> Track {
+    func testFirstObservedPlayingSchedulesUpcomingTrackPrewarmAfterFirstPlaying() async throws {
+        let current = Self.track()
+        let next = Self.track(bvid: "BVPATH002", cid: 1002)
+        let cached = Self.stream(
+            url: URL(fileURLWithPath: "/tmp/critical-path.m4a"),
+            cid: 1001,
+            duration: 211,
+            quality: 30280,
+            bandwidth: 0)
+        let resolver = CriticalPathAudioResolver(
+            cached: cached,
+            prepared: cached)
+        var events: [PlayerEngine.PlaybackStartupTestEvent] = []
+        let engine = PlayerEngine(
+            streamResolver: resolver,
+            startupTestHooks: .init(
+                record: { events.append($0) },
+                startPlaybackOverride: { _, _, _ in },
+                reportFirstPlayingImmediately: true))
+
+        await engine.play(tracks: [current, next], startAt: 0)
+
+        let firstPlayingIndex = try XCTUnwrap(events.firstIndex(of: .firstPlaying(.preparedRemote)))
+        let prefetchIndex = try XCTUnwrap(events.firstIndex(of: .queuePrefetchScheduled))
+        XCTAssertGreaterThan(prefetchIndex, firstPlayingIndex)
+    }
+
+    private static func track(bvid: String = "BVPATH001", cid: Int? = 1001) -> Track {
         Track(
             typeID: 3,
-            bvid: "BVPATH001",
+            bvid: bvid,
             cid: cid,
             title: "Critical Path Song",
             artist: "Fixture Artist",
@@ -145,4 +172,6 @@ private final class CriticalPathAudioResolver: AudioStreamResolving {
         }
         return prepared
     }
+
+    func warmAudioCDN(for track: Track, preferredQuality: Int) async {}
 }

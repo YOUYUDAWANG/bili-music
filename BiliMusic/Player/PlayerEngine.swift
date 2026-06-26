@@ -337,9 +337,8 @@ final class PlayerEngine {
     /// 单曲预加载:列表行滚入视野时调用。不影响 preloadTask,多次调用安全。
     /// StreamResolver 内部会去重,play() 点击时可直接 await 同一 Task。
     func schedulePreload(_ track: Track) {
-        // 已缓存/已预加载的直接跳过,不占并发名额。
+        // 已缓存的直接跳过;已准备的远程流仍可继续做一次 CDN 预热。
         guard CacheStore.shared.entry(for: track) == nil,
-              streamResolver.cachedAudio(for: track) == nil,
               !streamResolver.isPreparing(track),
               schedulePreloadInflight < Self.maxSchedulePreloadInflight else { return }
         schedulePreloadInflight += 1
@@ -750,6 +749,7 @@ final class PlayerEngine {
         let seedKey = current.key
         let bvid = current.bvid
         let expectedIndex = queueIndex
+        startupTestHooks.record(.queuePrefetchScheduled)
         prefetchTask = Task { [weak self] in
             guard let self else { return }
             try? await Task.sleep(for: .milliseconds(700))
@@ -767,6 +767,7 @@ final class PlayerEngine {
         guard queue.indices.contains(queueIndex + 1) else { return }
         let next = queue[queueIndex + 1]
         let expectedIndex = queueIndex
+        startupTestHooks.record(.queuePrefetchScheduled)
         queuePrefetchTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(900))
             guard !Task.isCancelled,
@@ -788,15 +789,8 @@ final class PlayerEngine {
     }
 
     private func prepare(track: Track) async {
-        guard CacheStore.shared.entry(for: track) == nil,
-              streamResolver.cachedAudio(for: track) == nil else { return }
-        do {
-            _ = try await streamResolver.prepareAudio(
-                for: track,
-                preferredQuality: Self.playbackQuality)
-        } catch {
-            // 预加载失败不影响手动播放,真正播放时会再取一次。
-        }
+        guard CacheStore.shared.entry(for: track) == nil else { return }
+        await streamResolver.warmAudioCDN(for: track, preferredQuality: Self.playbackQuality)
     }
 
     private func schedulePostPlaybackWork(for track: Track, generation: UUID, resumeAt: Double) {
@@ -829,7 +823,7 @@ final class PlayerEngine {
         playbackGeneration == generation && (current.map { track.key.matches($0) } ?? false)
     }
 
-    private func prefetchUpcomingTracks() async {
+    private func prefetchUpcomingTracks() {
         scheduleRadioPrefetch()
         scheduleQueuePrefetch()
     }
@@ -998,6 +992,7 @@ final class PlayerEngine {
                       !self.remoteStartupFallbackGenerations.contains(generation) else { return }
 
                 self.remoteStartupFallbackGenerations.insert(generation)
+                Task { await AudioCDNSelector.recordPlaybackFailure(url: source.url) }
                 log.debug("remote startup fallback host=\(fallbackURL.host() ?? "nil", privacy: .public)")
                 let retrySource = PlaybackSource(
                     track: source.track,
@@ -1050,6 +1045,10 @@ final class PlayerEngine {
             bandwidth: source.bandwidth)
         startupTestHooks.record(.firstPlaying(source.kind))
         schedulePostPlaybackWork(for: source.track, generation: generation, resumeAt: resumeAt)
+        if !source.isLocal, source.kind != .mvRemote {
+            Task { await AudioCDNSelector.recordPlaybackSuccess(url: source.url) }
+        }
+        prefetchUpcomingTracks()
     }
 
     private func handlePlaybackItemFailure(
@@ -1060,6 +1059,10 @@ final class PlayerEngine {
     ) async {
         guard playbackGeneration == generation,
               current.map({ source.track.key.matches($0) }) ?? false else { return }
+
+        if !source.isLocal, source.kind != .mvRemote {
+            Task { await AudioCDNSelector.recordPlaybackFailure(url: source.url) }
+        }
 
         if let fallbackSource = await remoteFallbackSource(for: source, generation: generation) {
             startPlayback(

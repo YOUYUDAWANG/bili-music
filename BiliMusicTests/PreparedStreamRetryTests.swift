@@ -175,6 +175,8 @@ private final class PreparedRetryAudioResolver: AudioStreamResolving {
         }
         return try preparedResults.removeFirst().get()
     }
+
+    func warmAudioCDN(for track: Track, preferredQuality: Int) async {}
 }
 
 private enum RetryFixtureError: LocalizedError {
