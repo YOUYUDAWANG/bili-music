@@ -39,7 +39,7 @@ v1 聚焦当前用户已经反复遇到的卡顿和稳定性问题。目标不�
 
 ### Player Interaction
 
-- [ ] **PLYR-01**: User can expand the mini-player with an upward drag that visually tracks the finger and feels like the full player is being pulled up from the bottom.
+- [x] **PLYR-01**: User can expand the mini-player with an upward drag that visually tracks the finger and feels like the full player is being pulled up from the bottom.
 - [ ] **PLYR-02**: User can minimize the full player with a deliberate downward gesture outside scrollable queue/recommendation lists.
 - [ ] **PLYR-03**: User can scroll queue and recommendation lists without accidentally triggering player minimize.
 - [ ] **PLYR-04**: User can scrub the progress bar and swipe between player pages without those gestures fighting the minimize gesture.
@@ -48,10 +48,10 @@ v1 聚焦当前用户已经反复遇到的卡顿和稳定性问题。目标不�
 ### Regression Coverage
 
 - [x] **TEST-01**: Search store tests cover query identity, mode identity, pagination, stale-result rejection, and music-only filtering.
-- [ ] **TEST-02**: Playback tests or instrumentation verify post-start enrichment is not awaited before the playback request.
+- [x] **TEST-02**: Playback tests or instrumentation verify post-start enrichment is not awaited before the playback request.
 - [x] **TEST-03**: Recommendation tests or UI tests verify first playback does not reset Home recommendations and tapping a related track does not immediately refresh the related list.
 - [x] **TEST-04**: Player chrome UI tests cover mini-player expansion, full-player minimization, and list scrolling without accidental dismissal.
-- [ ] **TEST-05**: Image/cache behavior has at least one regression check for bounded image work or memory-pressure cleanup.
+- [x] **TEST-05**: Image/cache behavior has at least one regression check for bounded image work or memory-pressure cleanup.
 
 ## v2 Requirements
 
@@ -121,16 +121,16 @@ Roadmap mapping is filled during roadmap creation.
 | MEM-01 | Phase 1 | Complete |
 | MEM-02 | Phase 1 | Complete |
 | MEM-03 | Phase 1 | Complete |
-| PLYR-01 | Phase 3 | Pending |
+| PLYR-01 | Phase 3 | Complete |
 | PLYR-02 | Phase 3 | Pending |
 | PLYR-03 | Phase 3 | Pending |
 | PLYR-04 | Phase 3 | Pending |
 | PLYR-05 | Phase 3 | Pending |
 | TEST-01 | Phase 2 | Complete |
-| TEST-02 | Phase 3 | Pending |
+| TEST-02 | Phase 3 | Complete |
 | TEST-03 | Phase 2 | Complete |
 | TEST-04 | Phase 1 | Complete |
-| TEST-05 | Phase 3 | Pending |
+| TEST-05 | Phase 3 | Complete |
 
 **Coverage:**
 
