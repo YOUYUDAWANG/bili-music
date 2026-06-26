@@ -46,15 +46,18 @@ final class SearchStore {
     func queryDidChange(_ query: String) {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty {
-            guard !resultsQuery.isEmpty || !results.isEmpty else { return }
+            guard mode != .music || !resultsQuery.isEmpty || !results.isEmpty || !activeQuery.isEmpty else { return }
             mode = .music
             resetTransientState(cancelTask: true)
         } else if text != resultsQuery {
-            guard !resultsQuery.isEmpty || !results.isEmpty else {
+            let shouldReset = !resultsQuery.isEmpty || !results.isEmpty || !activeQuery.isEmpty
+            if mode != .music {
+                mode = .music
+            }
+            guard shouldReset else {
                 // 首个字符:state 已在默认值,不触发无意义的 @Observable 写入
                 return
             }
-            mode = .music
             resetTransientState(cancelTask: true)
         }
     }
