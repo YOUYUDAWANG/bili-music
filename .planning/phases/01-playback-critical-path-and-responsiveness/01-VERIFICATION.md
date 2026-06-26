@@ -63,7 +63,7 @@ accepted_risk_items:
 | PLAY-01 | SATISFIED | Real-device audible feel passed UAT: target iPhone starts audio in approximately 1-2 seconds after tapping a song. |
 | PLAY-02 | SATISFIED | Real-device first-audible playback passed UAT; no blocking source-resolution issue observed. |
 | PLAY-03 | SATISFIED | None. |
-| PLAY-04 | SATISFIED | None for deterministic retry path; real CDN/expired-url behavior pending UAT. |
+| PLAY-04 | SATISFIED | None for deterministic retry path; real CDN/expired-url behavior recorded as accepted residual risk. |
 | PLAY-05 | SATISFIED | Real-device first-audible playback passed UAT; enrichment work did not visibly block first sound. |
 | SRCH-01 | SATISFIED | None. |
 | SRCH-02 | SATISFIED | None. |

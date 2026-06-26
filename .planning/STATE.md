@@ -4,9 +4,9 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 2
 current_phase_name: Discovery Reliability and Music-Only Results
-status: verifying
-stopped_at: Phase 01 automated verification complete and first-audible UAT passed; CDN prepared-stream retry UAT pending
-last_updated: "2026-06-26T08:11:02.509Z"
+status: planning
+stopped_at: Phase 2 context gathered; ready to plan discovery reliability and music-only results
+last_updated: "2026-06-26T08:18:30.297Z"
 last_activity: 2026-06-26
 last_activity_desc: Phase 01 complete, transitioned to Phase 2
 progress:
@@ -24,13 +24,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-26)
 
 **Core value:** 让音乐尽快、稳定地响起来；当功能冲突时，播放启动速度和不中断播放优先于推荐、歌词、MV、UI 动效和其他增强体验。
-**Current focus:** Phase 01 — Playback Critical Path and Responsiveness
+**Current focus:** Phase 02 — Discovery Reliability and Music-Only Results
 
 ## Current Position
 
 Phase: 2 — Discovery Reliability and Music-Only Results
 Plan: Not started
-Status: Automated verification passed; real iPhone first-audible playback UAT passed; CDN expired prepared-stream retry UAT pending
+Status: Phase 2 context gathered; Phase 1 automated verification and real iPhone first-audible playback UAT passed, with the CDN expired prepared-stream retry case recorded as accepted residual risk.
 Last activity: 2026-06-26 — Phase 01 complete, transitioned to Phase 2
 
 Progress: [##########] 100%
@@ -88,7 +88,7 @@ Recent decisions affecting current work:
 - Brownfield risk: PlayerEngine and NowPlayingView are large; phase planning should keep playback-path changes scoped and regression-backed.
 - Private Bilibili APIs and WBI behavior are fragile; avoid broad API restructuring during v1 unless required for a specific stability fix.
 - Image decoding and unbounded request fan-out were bounded in Phase 1; keep watching this risk in Phase 2 discovery surfaces as result volume grows.
-- Phase 01 automated verification passed and real iPhone first-audible playback UAT passed at approximately 1-2 seconds. The real expired/unauthorized Bilibili prepared-stream retry check remains in `01-UAT.md`. DEBUG builds mirror recent sanitized playback checkpoints into `AUTOPLAY_DIAGNOSTIC` console lines for easier real-device UAT.
+- Phase 01 automated verification passed and real iPhone first-audible playback UAT passed at approximately 1-2 seconds. The real expired/unauthorized Bilibili prepared-stream retry check is recorded in `01-UAT.md` as accepted residual risk because no reproducible live CDN failure was available. DEBUG builds mirror recent sanitized playback checkpoints into `AUTOPLAY_DIAGNOSTIC` console lines for easier real-device UAT.
 
 ## Deferred Items
 
@@ -102,6 +102,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-26T08:10:51.414Z
-Stopped at: Phase 01 automated verification complete and first-audible UAT passed; CDN prepared-stream retry UAT pending
-Resume file: .planning/phases/01-playback-critical-path-and-responsiveness/01-UAT.md
+Last session: 2026-06-26T08:18:30.291Z
+Stopped at: Phase 2 context gathered; ready to plan discovery reliability and music-only results
+Resume file: .planning/phases/02-discovery-reliability-and-music-only-results/02-CONTEXT.md
