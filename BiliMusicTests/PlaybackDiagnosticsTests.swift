@@ -55,6 +55,44 @@ final class PlaybackDiagnosticsTests: XCTestCase {
         XCTAssertFalse(rendered.contains("mcdn.bilivideo.cn"))
     }
 
+#if DEBUG
+    func testDefaultDebugDiagnosticsMirrorRecentEventsForRealDeviceUAT() throws {
+        PlaybackDiagnostics.DebugRecentEventStore.shared.clear()
+        var ticks: [TimeInterval] = [200, 200.01, 200.04, 200.08]
+        let diagnostics = PlaybackDiagnostics {
+            ticks.removeFirst()
+        }
+        let track = Self.track()
+
+        diagnostics.begin(track: track)
+        diagnostics.record(.tap, track: track)
+        diagnostics.record(.playRequested, track: track, sourceKind: .freshRemote, quality: 30280, bandwidth: 192_000)
+        diagnostics.record(.firstPlaying, track: track, sourceKind: .freshRemote, quality: 30280, bandwidth: 192_000)
+
+        let events = PlaybackDiagnostics.DebugRecentEventStore.shared.snapshot()
+
+        XCTAssertEqual(events.map(\.checkpoint), [.tap, .playRequested, .firstPlaying])
+        XCTAssertEqual(events.last?.bvid, "BVDIAG001")
+        XCTAssertEqual(events.last?.sourceKind, .freshRemote)
+        XCTAssertEqual(events.last?.bandwidth, 192_000)
+        XCTAssertFalse(try XCTUnwrap(events.last).description.contains("https://"))
+    }
+
+    func testDebugRecentEventStoreKeepsOnlyNewestEvents() {
+        let store = PlaybackDiagnostics.DebugRecentEventStore(capacity: 3)
+        let track = Self.track()
+        let diagnostics = PlaybackDiagnostics(sink: store) { 300 }
+
+        diagnostics.begin(track: track)
+        diagnostics.record(.tap, track: track)
+        diagnostics.record(.currentAssigned, track: track)
+        diagnostics.record(.sourceResolved, track: track, sourceKind: .freshRemote)
+        diagnostics.record(.playRequested, track: track, sourceKind: .freshRemote)
+
+        XCTAssertEqual(store.snapshot().map(\.checkpoint), [.currentAssigned, .sourceResolved, .playRequested])
+    }
+#endif
+
     private static func track() -> Track {
         Track(
             typeID: 3,

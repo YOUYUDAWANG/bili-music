@@ -8,6 +8,7 @@ automated_status: passed
 human_status: pending
 verified: 2026-06-26T07:38:02Z
 uat_instructions_updated: 2026-06-26T07:43:28Z
+debug_autoplay_console_updated: 2026-06-26T07:49:21Z
 ---
 
 # Phase 01 - Validation Strategy
@@ -22,15 +23,17 @@ Per-phase validation contract and execution record for Phase 01.
 | Config file | `project.yml`; generated `BiliMusic.xcodeproj` |
 | Focused unit command | `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test -project BiliMusic.xcodeproj -scheme BiliMusic -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17' -only-testing:BiliMusicTests CODE_SIGNING_ALLOWED=NO` |
 | Full suite command | `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test -project BiliMusic.xcodeproj -scheme BiliMusic -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17' CODE_SIGNING_ALLOWED=NO` |
-| Final automated run | 2026-06-26T07:36:12Z to 2026-06-26T07:37:25Z |
+| Final automated run | 2026-06-26T07:50:06Z to 2026-06-26T07:51:23Z |
+| Release simulator build | 2026-06-26T07:51:31Z to 2026-06-26T07:51:54Z |
 
 ## Final Automated Result
 
 | Suite | Result |
 |-------|--------|
-| `BiliMusicTests` | PASS - 39 tests, 0 failures |
+| `BiliMusicTests` | PASS - 41 tests, 0 failures |
 | `BiliMusicUITests` | PASS - 6 tests, 0 failures |
 | Full command exit | PASS - `TEST SUCCEEDED` |
+| Release build exit | PASS |
 
 Xcode printed known passcode-protected physical-device `notification_proxy` warnings while the simulator run was executing. The simulator test session completed successfully and exited with code 0.
 
@@ -56,6 +59,7 @@ Xcode printed known passcode-protected physical-device `notification_proxy` warn
 
 - [x] `BiliMusicTests/PlaybackCriticalPathTests.swift` covers PLAY-01, PLAY-02, PLAY-05.
 - [x] `BiliMusicTests/PlaybackDiagnosticsTests.swift` covers PLAY-03.
+- [x] `PlaybackDiagnostics.DebugRecentEventStore` is covered by unit tests proving DEBUG recent events mirror sanitized checkpoints and remain bounded.
 - [x] `BiliMusicTests/PreparedStreamRetryTests.swift` covers PLAY-04.
 - [x] `BiliMusicTests/SearchFocusTests.swift` covers SRCH-01 and SRCH-02.
 - [x] `BiliMusicTests/RecommendationSchedulingTests.swift` covers RECO-04.
@@ -80,7 +84,7 @@ The app already emits sanitized unified logs from `PlaybackDiagnostics`:
 - checkpoints: `tap`, `currentAssigned`, `sourceResolved`, `playerItemCreated`, `playRequested`, `firstPlaying`
 - safe payload fields: `bvid`, `cid`, `source`, `quality`, `bandwidth`, `elapsedMs`
 
-For real-device UAT, run a DEBUG build on the iPhone and inspect logs through Xcode's device console or the macOS Console app. Optional DEBUG autoplay can be triggered by adding launch environment variable `AUTOPLAY_BV=<real playable BV id>`, then watching `AUTOPLAY state=` plus the diagnostic checkpoint sequence. `AUTOPLAY_BV` is only an auxiliary diagnostic because it resolves the BV into a track before the normal tap-to-track path begins.
+For real-device UAT, run a DEBUG build on the iPhone and inspect logs through Xcode's device console or the macOS Console app. Optional DEBUG autoplay can be triggered by adding launch environment variable `AUTOPLAY_BV=<real playable BV id>`, then watching `AUTOPLAY state=` plus `AUTOPLAY_DIAGNOSTIC checkpoint=...` lines in the Xcode console. `AUTOPLAY_BV` is only an auxiliary diagnostic because it resolves the BV into a track before the normal tap-to-track path begins.
 
 ## Security Notes
 

@@ -82,8 +82,16 @@ struct RootView: View {
 #endif
             // 调试用:simctl launch 注入 AUTOPLAY_BV 即可无交互验证播放链路。
             if let bv = ProcessInfo.processInfo.environment["AUTOPLAY_BV"] {
+#if DEBUG
+                PlaybackDiagnostics.DebugRecentEventStore.shared.clear()
+#endif
                 await engine.play(bvid: bv)
                 NSLog("AUTOPLAY state=\(String(describing: engine.state)) track=\(engine.current?.title ?? "nil")")
+#if DEBUG
+                for event in PlaybackDiagnostics.DebugRecentEventStore.shared.snapshot() {
+                    NSLog("AUTOPLAY_DIAGNOSTIC \(event.description)")
+                }
+#endif
                 if ProcessInfo.processInfo.environment["AUTOPLAY_TEST_NEXT"] != nil {
                     await engine.playNext()
                     NSLog("AUTOPLAY_NEXT state=\(String(describing: engine.state)) track=\(engine.current?.title ?? "nil")")

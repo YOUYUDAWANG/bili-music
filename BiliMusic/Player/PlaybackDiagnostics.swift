@@ -54,6 +54,20 @@ final class PlaybackDiagnostics {
         }
     }
 
+    final class FanoutSink: PlaybackDiagnosticSink {
+        private let sinks: [PlaybackDiagnosticSink]
+
+        init(_ sinks: [PlaybackDiagnosticSink]) {
+            self.sinks = sinks
+        }
+
+        func record(_ event: PlaybackDiagnosticEvent) {
+            for sink in sinks {
+                sink.record(event)
+            }
+        }
+    }
+
     final class InMemorySink: PlaybackDiagnosticSink {
         private(set) var events: [PlaybackDiagnosticEvent] = []
 
@@ -62,14 +76,55 @@ final class PlaybackDiagnostics {
         }
     }
 
+#if DEBUG
+    final class DebugRecentEventStore: PlaybackDiagnosticSink {
+        static let shared = DebugRecentEventStore()
+
+        private let lock = NSLock()
+        private let capacity: Int
+        private var events: [PlaybackDiagnosticEvent] = []
+
+        init(capacity: Int = 60) {
+            self.capacity = max(1, capacity)
+        }
+
+        func record(_ event: PlaybackDiagnosticEvent) {
+            lock.withLock {
+                events.append(event)
+                if events.count > capacity {
+                    events.removeFirst(events.count - capacity)
+                }
+            }
+        }
+
+        func snapshot() -> [PlaybackDiagnosticEvent] {
+            lock.withLock { events }
+        }
+
+        func clear() {
+            lock.withLock {
+                events.removeAll(keepingCapacity: true)
+            }
+        }
+    }
+#endif
+
     private let sink: PlaybackDiagnosticSink
     private let clock: Clock
     private var startedAt: TimeInterval?
     private var activeTrackKey: String?
 
-    init(sink: PlaybackDiagnosticSink = OSLogSink(), clock: @escaping Clock = { CFAbsoluteTimeGetCurrent() }) {
-        self.sink = sink
+    init(sink: PlaybackDiagnosticSink? = nil, clock: @escaping Clock = { CFAbsoluteTimeGetCurrent() }) {
+        self.sink = sink ?? Self.defaultSink()
         self.clock = clock
+    }
+
+    private static func defaultSink() -> PlaybackDiagnosticSink {
+#if DEBUG
+        FanoutSink([OSLogSink(), DebugRecentEventStore.shared])
+#else
+        OSLogSink()
+#endif
     }
 
     func begin(track: Track) {

@@ -3,7 +3,7 @@ status: testing
 phase: 01-playback-critical-path-and-responsiveness
 source: [01-VERIFICATION.md]
 started: 2026-06-26T07:26:33Z
-updated: 2026-06-26T07:43:28Z
+updated: 2026-06-26T07:49:21Z
 ---
 
 ## Current Test
@@ -47,7 +47,7 @@ pass_if:
 debug_autoplay_optional:
 
 - Add a launch environment variable in the Xcode scheme: `AUTOPLAY_BV=<real playable BV id>`.
-- Launch the app from Xcode and filter for both `playback-diagnostics` and `AUTOPLAY state=`.
+- Launch the app from Xcode and look for `AUTOPLAY state=` plus `AUTOPLAY_DIAGNOSTIC checkpoint=...` lines in the Xcode console. These lines mirror the same sanitized recent checkpoint events as `playback-diagnostics`.
 - This validates the playback startup chain with timestamps, but it does not replace the manual tap test because `AUTOPLAY_BV` resolves the BV into a track before `PlayerEngine.play(tracks:startAt:)` starts diagnostics.
 
 ### 2. Real Bilibili Expired Prepared Stream Retry

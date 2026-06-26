@@ -5,6 +5,7 @@ status: human_needed
 score: 12/12 must-haves verified
 behavior_unverified: 2
 uat_instructions_updated: 2026-06-26T07:43:28Z
+debug_autoplay_console_updated: 2026-06-26T07:49:21Z
 behavior_unverified_items:
   - truth: "Real first-audible playback feel on the target iPhone is acceptable after cold launch."
     test: "Install on the user's iPhone, cold-launch, tap a first Home/Search track, and listen for startup latency."
@@ -47,7 +48,7 @@ behavior_unverified_items:
 
 | Artifact | Expected | Status | Details |
 |----------|----------|--------|---------|
-| `BiliMusic/Player/PlaybackDiagnostics.swift` | Sanitized playback checkpoint model | EXISTS + SUBSTANTIVE | Added in 01-01 and covered by diagnostics tests. |
+| `BiliMusic/Player/PlaybackDiagnostics.swift` | Sanitized playback checkpoint model | EXISTS + SUBSTANTIVE | Added in 01-01 and covered by diagnostics tests, including bounded DEBUG recent-event mirroring for UAT. |
 | `BiliMusic/Player/PlayerEngine.swift` | Protected startup path and prepared-stream retry | EXISTS + SUBSTANTIVE | Covered by playback critical path and retry tests. |
 | `BiliMusic/Features/Search/SearchStore.swift` | Local-only search focus content projection | EXISTS + SUBSTANTIVE | Covered by `SearchFocusTests`. |
 | `BiliMusic/Features/Search/SearchView.swift` | Submit-only network search path | EXISTS + SUBSTANTIVE | Source guard verifies debounce removal and explicit submit entry point. |
@@ -90,7 +91,7 @@ None found during this verification pass.
 **Test:** Install on the user's iPhone, cold-launch, tap a first Home/Search track, and observe the immediate current-track feedback plus audible startup.
 **Expected:** The selected track becomes current immediately and audio begins before lyrics, recommendations, MV, artwork, history, or cache enrichment visibly blocks the path.
 **Why human:** Simulator/unit tests prove ordering but cannot verify audible latency and AVAudioSession feel on the target iPhone.
-**Diagnostics:** Use Xcode's device console or the macOS Console app to filter subsystem `com.fubuki.BiliMusic`, category `playback-diagnostics`. For the tapped `bvid`, confirm the sequence reaches `checkpoint=firstPlaying` after `checkpoint=playRequested` and record `elapsedMs`. Repeated fresh-remote starts over roughly 5 seconds on stable Wi-Fi should be treated as a performance regression candidate.
+**Diagnostics:** Use Xcode's device console or the macOS Console app to filter subsystem `com.fubuki.BiliMusic`, category `playback-diagnostics`. For the tapped `bvid`, confirm the sequence reaches `checkpoint=firstPlaying` after `checkpoint=playRequested` and record `elapsedMs`. Optional `AUTOPLAY_BV` DEBUG runs also print `AUTOPLAY_DIAGNOSTIC checkpoint=...` lines directly to the Xcode console. Repeated fresh-remote starts over roughly 5 seconds on stable Wi-Fi should be treated as a performance regression candidate.
 
 ### 2. Real Bilibili Expired Prepared Stream Retry
 
@@ -113,15 +114,16 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test -projec
 
 Result:
 
-- PASS: `BiliMusicTests` - 39 tests, 0 failures.
+- PASS: `BiliMusicTests` - 41 tests, 0 failures.
 - PASS: `BiliMusicUITests` - 6 tests, 0 failures.
 - PASS: Full test session exited with `TEST SUCCEEDED`.
+- PASS: Release simulator build completed with `CODE_SIGNING_ALLOWED=NO`.
 
 ## Verification Metadata
 
 **Verification approach:** Goal-backward from ROADMAP Phase 01 success criteria plus SUMMARY evidence.
 **Must-haves source:** `.planning/ROADMAP.md`, `.planning/REQUIREMENTS.md`, and `01-01` through `01-05` summaries.
-**Automated checks:** 45 passed, 0 failed.
+**Automated checks:** 47 passed, 0 failed.
 **Human checks required:** 2.
 **Total verification time:** 71 seconds for final automated full-suite command.
 
