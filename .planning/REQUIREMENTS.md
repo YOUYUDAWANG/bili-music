@@ -17,8 +17,8 @@ v1 聚焦当前用户已经反复遇到的卡顿和稳定性问题。目标不�
 
 ### Search Responsiveness
 
-- [ ] **SRCH-01**: User can enter the Search screen and focus the search field without triggering Bilibili network requests or expensive local work on the focus path.
-- [ ] **SRCH-02**: User sees local search history and suggestions when the search field is focused with an empty query.
+- [x] **SRCH-01**: User can enter the Search screen and focus the search field without triggering Bilibili network requests or expensive local work on the focus path.
+- [x] **SRCH-02**: User sees local search history and suggestions when the search field is focused with an empty query.
 - [ ] **SRCH-03**: User can submit a search and results are scoped to the active query and search mode; stale results from older queries cannot appear in the current result list.
 - [ ] **SRCH-04**: User can load more search results through pagination without losing existing results when a later page fails.
 - [ ] **SRCH-05**: Search results apply music-only filtering on every page and do not mix general Bilibili videos into the default song result surface.
@@ -108,8 +108,8 @@ Roadmap mapping is filled during roadmap creation.
 | PLAY-03 | Phase 1 | Complete |
 | PLAY-04 | Phase 1 | Complete |
 | PLAY-05 | Phase 1 | Complete |
-| SRCH-01 | Phase 1 | Pending |
-| SRCH-02 | Phase 1 | Pending |
+| SRCH-01 | Phase 1 | Complete |
+| SRCH-02 | Phase 1 | Complete |
 | SRCH-03 | Phase 2 | Pending |
 | SRCH-04 | Phase 2 | Pending |
 | SRCH-05 | Phase 2 | Pending |
