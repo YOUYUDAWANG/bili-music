@@ -1,6 +1,40 @@
 import Foundation
 import Observation
 
+struct SearchLocalContent: Equatable {
+    let historyTerms: [String]
+    let recentTracks: [Track]
+    let cachedTracks: [Track]
+
+    var isEmpty: Bool {
+        historyTerms.isEmpty && recentTracks.isEmpty && cachedTracks.isEmpty
+    }
+
+    init(
+        historyTerms: [String],
+        recentTracks: [Track],
+        cachedTracks: [Track],
+        historyLimit: Int = 8,
+        trackLimit: Int = 6
+    ) {
+        self.historyTerms = Array(historyTerms.prefix(historyLimit))
+        self.recentTracks = Self.deduped(recentTracks, excluding: [], limit: trackLimit)
+        self.cachedTracks = Self.deduped(cachedTracks, excluding: self.recentTracks.map(\.key), limit: trackLimit)
+    }
+
+    private static func deduped(_ tracks: [Track], excluding excluded: [TrackKey], limit: Int) -> [Track] {
+        var seen = excluded
+        var result: [Track] = []
+        for track in tracks {
+            guard !seen.contains(where: { $0.matches(track) }) else { continue }
+            result.append(track)
+            seen.append(track.key)
+            if result.count == limit { break }
+        }
+        return result
+    }
+}
+
 @Observable
 @MainActor
 final class SearchStore {

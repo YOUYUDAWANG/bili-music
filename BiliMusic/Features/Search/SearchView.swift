@@ -71,12 +71,22 @@ struct SearchView: View {
         Array(history.entries.prefix(6).map(\.track))
     }
 
+    private var cachedTracks: [Track] {
+        Array(cache.entries.prefix(6).map(\.track))
+    }
+
+    private var localContent: SearchLocalContent {
+        SearchLocalContent(
+            historyTerms: store.searchHistory,
+            recentTracks: recentTracks,
+            cachedTracks: cachedTracks)
+    }
+
     @ViewBuilder
     private var searchContent: some View {
         if trimmedQuery.isEmpty {
-            if !recentTracks.isEmpty {
-                trackSection(title: "最近播放", tracks: recentTracks)
-            } else {
+            let content = localContent
+            if content.recentTracks.isEmpty && content.cachedTracks.isEmpty {
                 unavailableRow {
                     ContentUnavailableView(
                         "搜索音乐",
@@ -84,6 +94,9 @@ struct SearchView: View {
                         description: Text("输入歌名或 UP 主查找音乐内容")
                     )
                 }
+            } else {
+                trackSection(title: "最近播放", tracks: content.recentTracks)
+                trackSection(title: "本地缓存", tracks: content.cachedTracks)
             }
         } else if store.searching {
             loadingRow
@@ -109,8 +122,9 @@ struct SearchView: View {
 
     @ViewBuilder
     private var searchSuggestions: some View {
-        if store.historyLoaded, !store.searchHistory.isEmpty {
-            ForEach(Array(store.searchHistory.prefix(8)), id: \.self) { term in
+        let content = localContent
+        if store.historyLoaded, !content.historyTerms.isEmpty {
+            ForEach(content.historyTerms, id: \.self) { term in
                 Label(term, systemImage: "clock")
                     .searchCompletion(term)
             }
