@@ -9,3 +9,8 @@
 //
 // CI 不签名（CODE_SIGNING_ALLOWED=NO），会用本模板生成一个占位 Local.xcconfig，留空即可。
 DEVELOPMENT_TEAM =
+
+// 真机运行必须使用你自己 Apple Team 下可注册的唯一 Bundle ID。
+// 如果 Xcode 报 “Failed Registering Bundle Identifier”，把这里改成更独特的值，
+// 例如 com.<你的 GitHub 用户名小写>.BiliMusic 或 com.<你的域名反写>.BiliMusic。
+BILIMUSIC_BUNDLE_ID = com.example.BiliMusic

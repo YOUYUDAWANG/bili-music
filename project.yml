@@ -19,6 +19,7 @@ targets:
       base:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_CFBundleDisplayName: BiliMusic
+        PRODUCT_BUNDLE_IDENTIFIER: $(BILIMUSIC_BUNDLE_ID)
         SWIFT_VERSION: "5.10"
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic
@@ -34,19 +35,27 @@ targets:
     type: bundle.unit-test
     platform: iOS
     sources: [BiliMusicTests]
+    configFiles:
+      Debug: Local.xcconfig
+      Release: Local.xcconfig
     dependencies:
       - target: BiliMusic
     settings:
       base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(BILIMUSIC_BUNDLE_ID).Tests
         SWIFT_VERSION: "5.10"
         CODE_SIGNING_ALLOWED: NO
   BiliMusicUITests:
     type: bundle.ui-testing
     platform: iOS
     sources: [BiliMusicUITests]
+    configFiles:
+      Debug: Local.xcconfig
+      Release: Local.xcconfig
     dependencies:
       - target: BiliMusic
     settings:
       base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(BILIMUSIC_BUNDLE_ID).UITests
         SWIFT_VERSION: "5.10"
         CODE_SIGNING_ALLOWED: NO
