@@ -51,6 +51,9 @@ struct NowPlayingView: View {
     @State private var favoriteHapticTrigger = 0
     @State private var favoriteWasAdded = false
     @State private var downloadTrigger = 0
+    @State private var isProgressScrubbing = false
+    @State private var suppressPageSwipeForScrub = false
+    @State private var progressScrubGeneration = 0
     @Environment(\.dismiss) private var dismiss
     private var favorites: FavoriteManager { .shared }
 
@@ -228,6 +231,7 @@ struct NowPlayingView: View {
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
         .indexViewStyle(.page(backgroundDisplayMode: .never))
+        .scrollDisabled(suppressPageSwipeForScrub)
         .contentShape(Rectangle())
         .simultaneousGesture(pageSwipeGesture(width: width), including: .gesture)
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -332,7 +336,9 @@ struct NowPlayingView: View {
     private var progressView: some View {
         // 独立子视图:只有它订阅 engine.currentTime(每 0.5s 变),
         // 避免整个播放器 body(封面、操作栏、TabView)跟着每半秒重渲染。
-        PlayerProgressBar()
+        PlayerProgressBar { scrubbing in
+            setProgressScrubbing(scrubbing)
+        }
     }
 
     private var transportControls: some View {
@@ -1018,6 +1024,7 @@ struct NowPlayingView: View {
     private func pageSwipeGesture(width: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 12, coordinateSpace: .local)
             .onEnded { value in
+                guard !suppressPageSwipeForScrub else { return }
                 let horizontalIntent = abs(value.predictedEndTranslation.width) > abs(value.translation.width)
                     ? value.predictedEndTranslation.width
                     : value.translation.width
@@ -1036,6 +1043,20 @@ struct NowPlayingView: View {
                     }
                 }
             }
+    }
+
+    private func setProgressScrubbing(_ scrubbing: Bool) {
+        progressScrubGeneration += 1
+        let generation = progressScrubGeneration
+        isProgressScrubbing = scrubbing
+        suppressPageSwipeForScrub = true
+
+        guard !scrubbing else { return }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(220))
+            guard progressScrubGeneration == generation else { return }
+            suppressPageSwipeForScrub = false
+        }
     }
 
     private var topChromeDismissDrag: some Gesture {

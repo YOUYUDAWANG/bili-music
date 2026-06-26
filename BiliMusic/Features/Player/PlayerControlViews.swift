@@ -58,6 +58,7 @@ struct ActionSymbolLabel: View {
 /// scrub 状态也只在本视图持有,避免拖动时反复刷新外层播放器。
 struct PlayerProgressBar: View {
     @Environment(PlayerEngine.self) private var engine
+    var onScrubChanged: (Bool) -> Void = { _ in }
     @State private var scrubValue: Double = 0
     @State private var isScrubbing = false
     @State private var trackWidth: CGFloat = 0
@@ -93,13 +94,14 @@ struct PlayerProgressBar: View {
             }
             .frame(height: 44)
             .contentShape(Rectangle())
-            .gesture(
+            .highPriorityGesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
                         if !isScrubbing {
                             scrubValue = min(engine.currentTime, engine.duration)
                             isScrubbing = true
                             engine.beginScrub()
+                            onScrubChanged(true)
                             scrubHapticTrigger += 1
                         }
                         let progress = max(0, min(1, value.location.x / max(trackWidth, 1)))
@@ -108,8 +110,10 @@ struct PlayerProgressBar: View {
                     .onEnded { _ in
                         engine.endScrub(to: scrubValue)
                         isScrubbing = false
+                        onScrubChanged(false)
                         scrubHapticTrigger += 1
-                    }
+                    },
+                including: .all
             )
             .sensoryFeedback(.selection, trigger: scrubHapticTrigger)
             .background(
@@ -129,6 +133,12 @@ struct PlayerProgressBar: View {
             .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 28)
+        .onDisappear {
+            guard isScrubbing else { return }
+            engine.endScrub(to: scrubValue)
+            isScrubbing = false
+            onScrubChanged(false)
+        }
     }
 
     private func format(_ seconds: Double) -> String {
