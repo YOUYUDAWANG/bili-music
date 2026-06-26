@@ -47,7 +47,7 @@ struct HomeView: View {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
                         refreshTrigger += 1
-                        Task { await load() }
+                        Task { await load(trigger: .manualRefresh) }
                     } label: {
                         Label("换一批", systemImage: "arrow.clockwise")
                     }
@@ -65,7 +65,7 @@ struct HomeView: View {
                     }
                 }
             }
-            .refreshable { await load() }
+            .refreshable { await load(trigger: .manualRefresh) }
             .overlay {
                 if loading && tracks.isEmpty { ProgressView() }
                 else if tracks.isEmpty && errorMessage == nil {
@@ -76,14 +76,14 @@ struct HomeView: View {
                 }
             }
             .task {
-                if tracks.isEmpty { await load() }
+                if tracks.isEmpty { await load(trigger: .initialHomeLoad) }
             }
         }
     }
 
     /// 取一批推荐：排除「最近 3 小时已在首页推过」的曲目(跨重启生效)。
     /// 若排除集把候选掏空了就放宽一次,保证首页不空。
-    private func load() async {
+    private func load(trigger: RecommendationSchedulingPolicy.Trigger = .manualRefresh) async {
 #if DEBUG
         if UITestFixtures.enabled {
             errorMessage = nil
@@ -92,13 +92,14 @@ struct HomeView: View {
             return
         }
 #endif
+        let policy = RecommendationSchedulingPolicy.home(trigger: trigger)
         loading = true
         defer { loading = false }
         errorMessage = nil
         let excluded = RecentHomeFeedStore.shared.recentKeys()
-        var result = await fetch(excluding: excluded)
+        var result = await fetch(excluding: excluded, policy: policy)
         if result.isEmpty, !excluded.isEmpty {
-            result = await fetch(excluding: [])
+            result = await fetch(excluding: [], policy: policy)
         }
         if result.isEmpty {
             errorMessage = CookieStore.isLoggedIn ? "暂时没有找到合适的音乐推荐" : nil
@@ -109,10 +110,11 @@ struct HomeView: View {
         }
     }
 
-    private func fetch(excluding excluded: Set<TrackKey>) async -> [Track] {
+    private func fetch(excluding excluded: Set<TrackKey>, policy: RecommendationSchedulingPolicy) async -> [Track] {
         await RecommendationEngine().recommendations(
             mode: .home,
             context: .init(current: engine.current, queue: engine.queue, excludedKeys: excluded),
-            limit: 30)
+            limit: 30,
+            policy: policy)
     }
 }

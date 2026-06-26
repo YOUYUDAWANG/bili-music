@@ -34,6 +34,48 @@ private actor RecommendationPoolCache {
     }
 }
 
+struct RecommendationSchedulingPolicy: Equatable {
+    enum Trigger: Equatable {
+        case initialHomeLoad
+        case manualRefresh
+    }
+
+    var trigger: Trigger?
+    var favoriteSeedLimit: Int
+    var relatedPerFavoriteSeedLimit: Int
+    var historySeedLimit: Int
+    var cachedSeedLimit: Int
+    var fallbackKeywordLimit: Int
+    var scoringPriority: TaskPriority
+
+    static func home(trigger: Trigger) -> RecommendationSchedulingPolicy {
+        RecommendationSchedulingPolicy(
+            trigger: trigger,
+            favoriteSeedLimit: 5,
+            relatedPerFavoriteSeedLimit: 10,
+            historySeedLimit: 2,
+            cachedSeedLimit: 2,
+            fallbackKeywordLimit: 1,
+            scoringPriority: .utility)
+    }
+
+    static func `default`(for mode: RecommendationEngine.Mode) -> RecommendationSchedulingPolicy {
+        switch mode {
+        case .home:
+            return home(trigger: .manualRefresh)
+        case .radio, .relatedPanel:
+            return RecommendationSchedulingPolicy(
+                trigger: nil,
+                favoriteSeedLimit: 4,
+                relatedPerFavoriteSeedLimit: 18,
+                historySeedLimit: 1,
+                cachedSeedLimit: 1,
+                fallbackKeywordLimit: 2,
+                scoringPriority: .userInitiated)
+        }
+    }
+}
+
 struct RecommendationEngine {
     enum Mode {
         case home
@@ -90,7 +132,13 @@ struct RecommendationEngine {
 
     private let client = BiliClient()
 
-    func recommendations(mode: Mode, context: Context, limit: Int = 24) async -> [Track] {
+    func recommendations(
+        mode: Mode,
+        context: Context,
+        limit: Int = 24,
+        policy: RecommendationSchedulingPolicy? = nil
+    ) async -> [Track] {
+        let schedulingPolicy = policy ?? RecommendationSchedulingPolicy.default(for: mode)
         let snapshot = await Self.makeSnapshot(mode: mode)
         let cacheKey = Self.cacheKey(mode: mode, context: context, snapshot: snapshot)
 
@@ -104,8 +152,12 @@ struct RecommendationEngine {
             }
         }
 
-        let candidates = await buildCandidates(mode: mode, context: context, snapshot: snapshot)
-        let pool = await Task.detached(priority: .userInitiated) {
+        let candidates = await buildCandidates(
+            mode: mode,
+            context: context,
+            snapshot: snapshot,
+            policy: schedulingPolicy)
+        let pool = await Task.detached(priority: schedulingPolicy.scoringPriority) {
             Self.scoredPool(candidates, mode: mode, context: context, snapshot: snapshot)
         }.value
         if mode != .radio {
@@ -123,28 +175,53 @@ struct RecommendationEngine {
         return pool.filter { !snapshot.favoriteBVIDs.contains($0.track.bvid) }
     }
 
-    private func buildCandidates(mode: Mode, context: Context, snapshot: Snapshot) async -> [Candidate] {
+    private func buildCandidates(
+        mode: Mode,
+        context: Context,
+        snapshot: Snapshot,
+        policy: RecommendationSchedulingPolicy
+    ) async -> [Candidate] {
         var candidates: [Candidate] = []
 
         switch mode {
         case .home:
             // 首页刷新必须快:旧逻辑会串行请求收藏/历史/缓存/当前歌曲十几个 related,
             // 真机上点击"换一批"会明显变慢。这里按质量分层短路,够用就停止补源。
-            // 种子取多一些(5 个)以扩大候选池,配合加权随机抽样减少重复。
-            let favorites = await favoriteSeeds(maxCount: 5, snapshot: snapshot)
-            candidates += await relatedCandidates(from: favorites, source: .favoriteSeed, perSeedLimit: 10)
+            let favorites = await favoriteSeeds(
+                maxCount: policy.favoriteSeedLimit,
+                snapshot: snapshot,
+                priority: policy.scoringPriority)
+            candidates += await relatedCandidates(
+                from: favorites,
+                source: .favoriteSeed,
+                perSeedLimit: policy.relatedPerFavoriteSeedLimit,
+                priority: policy.scoringPriority)
 
             if candidates.count < 16, let current = context.current {
-                candidates += await relatedCandidates(from: [current], source: .relatedCurrent, perSeedLimit: 12)
+                candidates += await relatedCandidates(
+                    from: [current],
+                    source: .relatedCurrent,
+                    perSeedLimit: 12,
+                    priority: policy.scoringPriority)
             }
             if candidates.count < 16 {
-                candidates += await relatedCandidates(from: Array(snapshot.historyTracks.prefix(2)), source: .relatedHistory, perSeedLimit: 8)
+                candidates += await relatedCandidates(
+                    from: Array(snapshot.historyTracks.prefix(policy.historySeedLimit)),
+                    source: .relatedHistory,
+                    perSeedLimit: 8,
+                    priority: policy.scoringPriority)
             }
             if candidates.count < 16 {
-                candidates += await relatedCandidates(from: Array(snapshot.cachedTracks.prefix(2)), source: .relatedHistory, perSeedLimit: 8)
+                candidates += await relatedCandidates(
+                    from: Array(snapshot.cachedTracks.prefix(policy.cachedSeedLimit)),
+                    source: .relatedHistory,
+                    perSeedLimit: 8,
+                    priority: policy.scoringPriority)
             }
             if candidates.isEmpty {
-                candidates += await fallbackSearchCandidates(keywordLimit: 1)
+                candidates += await fallbackSearchCandidates(
+                    keywordLimit: policy.fallbackKeywordLimit,
+                    priority: policy.scoringPriority)
             }
 
         case .radio:
@@ -179,10 +256,15 @@ struct RecommendationEngine {
         return tracks.first
     }
 
-    private func relatedCandidates(from seeds: [Track], source: Source, perSeedLimit: Int = 18) async -> [Candidate] {
+    private func relatedCandidates(
+        from seeds: [Track],
+        source: Source,
+        perSeedLimit: Int = 18,
+        priority: TaskPriority? = nil
+    ) async -> [Candidate] {
         await withTaskGroup(of: [Candidate].self) { group in
             for seed in seeds {
-                group.addTask {
+                group.addTask(priority: priority) {
                     guard let items = try? await client.related(bvid: seed.bvid) else { return [] }
                     return items
                         .map(Track.init(related:))
@@ -221,7 +303,7 @@ struct RecommendationEngine {
         }
     }
 
-    private func fallbackSearchCandidates(keywordLimit: Int = 2) async -> [Candidate] {
+    private func fallbackSearchCandidates(keywordLimit: Int = 2, priority: TaskPriority? = nil) async -> [Candidate] {
         let keywords = [
             "华语音乐 MV",
             "日语歌 翻唱",
@@ -230,7 +312,7 @@ struct RecommendationEngine {
         ].shuffled().prefix(keywordLimit)
         return await withTaskGroup(of: [Candidate].self) { group in
             for keyword in keywords {
-                group.addTask {
+                group.addTask(priority: priority) {
                     guard let items = try? await client.search(keyword: keyword, musicOnly: true) else { return [] }
                     return items
                         .map(Track.init(search:))
@@ -255,7 +337,7 @@ struct RecommendationEngine {
             .map { Candidate(track: $0, source: .playlistNeighbor, seed: current) }
     }
 
-    private func favoriteSeeds(maxCount: Int = 4, snapshot: Snapshot) async -> [Track] {
+    private func favoriteSeeds(maxCount: Int = 4, snapshot: Snapshot, priority: TaskPriority? = nil) async -> [Track] {
         guard let folder = snapshot.favoriteFolder else { return [] }
         let pageCount = max(1, Int(ceil(Double(folder.mediaCount) / 40.0)))
         var pageNums: Set<Int> = [Int.random(in: 1...pageCount)]
@@ -265,7 +347,7 @@ struct RecommendationEngine {
         var allItems: [Track] = []
         await withTaskGroup(of: [Track].self) { group in
             for pageNum in pageNums {
-                group.addTask {
+                group.addTask(priority: priority) {
                     guard let result = try? await self.client.favItems(folderId: folder.id, page: pageNum) else { return [] }
                     return (result.medias ?? [])
                         .filter { $0.attr == 0 }
