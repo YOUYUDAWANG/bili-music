@@ -1,10 +1,11 @@
 ---
 phase: 01
 slug: playback-critical-path-and-responsiveness
-status: draft
+status: approved
 shadcn_initialized: false
 preset: none
 created: 2026-06-26
+reviewed_at: 2026-06-26T10:53:03+09:00
 ---
 
 # Phase 01 — UI Design Contract
@@ -90,8 +91,7 @@ Additional fixed labels for Phase 1:
 | Search no music body | 当前只显示音乐内容，可以查看更多结果。 |
 | Search broaden action | 更多结果 |
 | Search retry action | 重试 |
-| Search pagination action | 加载更多 |
-| Search pagination complete | 没有更多结果 |
+| Search pagination | Existing pagination copy remains unchanged; Phase 1 introduces no pagination UX work. |
 | Home title | 推荐 |
 | Home manual refresh | 换一批 |
 | Home empty heading | 还没有音乐推荐 |
@@ -124,7 +124,11 @@ List thumbnails should keep stable dimensions so late image arrival does not shi
 
 Track taps must show immediate current-track feedback before lyrics, recommendations, MV probing, artwork, auto-cache, or history flush finishes. Current-track feedback is the existing row title accent plus waveform/speaker indicator. Source: `PLAY-01`, `PLAY-05`, `D-01` through `D-04`.
 
+Primary focal point: during tap-to-play, the tapped/current `TrackRow` becomes the visual focus through the accent-tinted title and waveform/speaker indicator while the rest of the list remains stable. Do not add a modal, toast, blocking spinner, or full-screen transition as the first response to a track tap.
+
 The mini-player must remain visually dense and single-hand friendly: 40-48pt height, one-line title, one-line artist, 28-32pt icon button frames, and no new blocking loading state for post-start enrichment. Loading indicators belong on search/recommendation rows, not over playback controls.
+
+Mini-player icon-only controls must expose accessibility labels and fallback text: play button `播放`, pause button `暂停`, previous button `上一首`, next button `下一首`, and open-player hit target `打开播放器`. If mini-player title or artist text is unavailable, accessibility fallback text is `未知歌曲` and `未知作者`; do not render fallback copy as visible row text unless the existing component already does so.
 
 ### Out-of-Scope Guardrail
 
@@ -143,11 +147,11 @@ Do not use Phase 1 to redesign the full Now Playing page, queue/recommendation p
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
+- [x] Dimension 1 Copywriting: PASS with non-blocking flag: consider `重试搜索` instead of `重试`.
+- [x] Dimension 2 Visuals: PASS
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: PASS
+- [x] Dimension 6 Registry Safety: PASS
 
-**Approval:** pending
+**Approval:** approved by `gsd-ui-checker` on 2026-06-26T10:53:03+09:00.
