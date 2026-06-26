@@ -5,16 +5,16 @@ milestone_name: milestone
 current_phase: 01
 current_phase_name: Playback Critical Path and Responsiveness
 status: executing
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-06-26T05:49:14.956Z"
+stopped_at: Completed 01-02-PLAN.md
+last_updated: "2026-06-26T06:09:48.000Z"
 last_activity: 2026-06-26
-last_activity_desc: Phase 01 execution started
+last_activity_desc: Completed 01-02 playback critical path and prepared stream retry
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 5
-  completed_plans: 1
-  percent: 20
+  completed_plans: 2
+  percent: 40
 ---
 
 # Project State
@@ -29,32 +29,32 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 ## Current Position
 
 Phase: 01 (Playback Critical Path and Responsiveness) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
-Last activity: 2026-06-26 — Phase 01 execution started
+Last activity: 2026-06-26 — Completed 01-02 playback critical path and prepared stream retry
 
-Progress: [##--------] 20%
+Progress: [####------] 40%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 1
-- Average duration: 8 min
-- Total execution time: 0.13 hours
+- Total plans completed: 2
+- Average duration: 12 min
+- Total execution time: 0.38 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1. Playback Critical Path and Responsiveness | TBD | - | - |
+| 1. Playback Critical Path and Responsiveness | 2 | 23 min | 12 min |
 | 2. Discovery Reliability and Music-Only Results | TBD | - | - |
 | 3. Player Interaction and Regression Coverage | TBD | - | - |
 
 **Recent Trend:**
 
-- Last 5 plans: 01-01
-- Trend: Initial execution complete
+- Last 5 plans: 01-01, 01-02
+- Trend: Playback foundation stabilizing
 
 *Updated after each plan completion*
 
@@ -68,6 +68,8 @@ Recent decisions affecting current work:
 - [v1]: Project mode is MVP; phases are vertical stabilization slices rather than broad subsystem rewrites.
 - [v1]: Phase 1 prioritizes first sound, first-play recommendation stability, search focus responsiveness, and memory/image guardrails.
 - [v1]: Broader API/auth/cache hardening stays in v2 unless a narrow change is required for v1 stability.
+- [01-02]: First playback now assigns current before awaited source resolution and reaches AVPlayer through cache, prepared audio, or one fresh stream only.
+- [01-02]: Prepared remote audio failure invalidates matching/fallback resolver entries and retries one fresh stream without a second user tap.
 
 ### Pending Todos
 
@@ -91,6 +93,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-26T05:49:14.951Z
-Stopped at: Completed 01-01-PLAN.md
-Resume file: .planning/phases/01-playback-critical-path-and-responsiveness/01-02-PLAN.md
+Last session: 2026-06-26T06:09:48.000Z
+Stopped at: Completed 01-02-PLAN.md
+Resume file: .planning/phases/01-playback-critical-path-and-responsiveness/01-03-PLAN.md
