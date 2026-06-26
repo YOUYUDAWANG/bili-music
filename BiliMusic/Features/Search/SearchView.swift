@@ -12,7 +12,6 @@ struct SearchView: View {
     @State private var query = ""
     @State private var store = SearchStore()
     @State private var preparingTrackKey: TrackKey?
-    @State private var debounceTask: Task<Void, Never>?
     @State private var searchResultTapTrigger = 0
     @AppStorage("searchHistory") private var searchHistoryData = "[]"
 
@@ -56,24 +55,11 @@ struct SearchView: View {
                 await cache.loadIfNeeded()
             }
         }
-        .onDisappear {
-            debounceTask?.cancel()
-        }
         .onChange(of: searchHistoryData) {
             store.reloadHistoryIfNeeded()
         }
         .onChange(of: query) { _, newValue in
             store.queryDidChange(newValue)
-            debounceTask?.cancel()
-
-            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return }
-            if store.restoreCachedResultsIfAvailable(for: trimmed) { return }
-            debounceTask = Task {
-                try? await Task.sleep(for: .milliseconds(450))
-                guard !Task.isCancelled else { return }
-                await MainActor.run { debouncedSearch() }
-            }
         }
     }
 
@@ -294,11 +280,4 @@ struct SearchView: View {
         }
     }
 
-    private func debouncedSearch() {
-        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        store.submitSearch(text) { tracks in
-            engine.preload(tracks: tracks, limit: 2, delay: .milliseconds(500))
-        }
-    }
 }
