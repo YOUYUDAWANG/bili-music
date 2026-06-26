@@ -13,7 +13,7 @@ v1 is a vertical MVP stabilization pass for the existing brownfield SwiftUI app.
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Playback Critical Path and Responsiveness** - First sound, first-play stability, search focus, and memory/image guardrails stop blocking the music path. Implementation complete; ready for verification.
+- [ ] **Phase 1: Playback Critical Path and Responsiveness** - First sound, first-play stability, search focus, and memory/image guardrails stop blocking the music path. Automated verification passed; human UAT pending.
 - [ ] **Phase 2: Discovery Reliability and Music-Only Results** - Search and recommendations stay scoped, stable, paginated, and music-only.
 - [ ] **Phase 3: Player Interaction and Regression Coverage** - Player gestures, layout density, and targeted regression checks protect the daily playback experience.
 
@@ -34,6 +34,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   5. User can scroll image-heavy search, recommendation, and player surfaces, then background the app, without unbounded image retention or memory cleanup interrupting playback state.
 
 **Plans**: 5/5 plans executed
+**Verification**: Automated simulator suite passed; `01-UAT.md` tracks two real-device/CDN checks.
 
 - [x] 01-01-PLAN.md
 - [x] 01-02-PLAN.md
@@ -90,6 +91,6 @@ Phases execute in numeric order: 1 -> 2 -> 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Playback Critical Path and Responsiveness | 5/5 | Ready for Verification |  |
+| 1. Playback Critical Path and Responsiveness | 5/5 | Human Verification Needed |  |
 | 2. Discovery Reliability and Music-Only Results | 0/TBD | Not started | - |
 | 3. Player Interaction and Regression Coverage | 0/TBD | Not started | - |

@@ -4,11 +4,11 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 01
 current_phase_name: Playback Critical Path and Responsiveness
-status: executing
-stopped_at: Completed 01-05-PLAN.md
-last_updated: "2026-06-26T07:17:36.000Z"
+status: verifying
+stopped_at: Phase 01 automated verification complete; human UAT pending
+last_updated: "2026-06-26T07:26:33.000Z"
 last_activity: 2026-06-26
-last_activity_desc: Completed 01-05 image memory guardrails and cleanup
+last_activity_desc: Completed Phase 01 automated verification and opened human UAT checks
 progress:
   total_phases: 3
   completed_phases: 0
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 
 ## Current Position
 
-Phase: 01 (Playback Critical Path and Responsiveness) — EXECUTING
+Phase: 01 (Playback Critical Path and Responsiveness) — VERIFYING
 Plan: 5 of 5
-Status: Phase 1 implementation complete; ready for verification
-Last activity: 2026-06-26 — Completed 01-05 image memory guardrails and cleanup
+Status: Automated verification passed; human UAT pending for real-device/CDN behavior
+Last activity: 2026-06-26 — Completed Phase 01 automated verification and opened human UAT checks
 
 Progress: [##########] 100%
 
@@ -79,13 +79,15 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-None yet.
+- [Phase 01 UAT] Confirm real iPhone first-audible playback feel after cold launch.
+- [Phase 01 UAT] Confirm real expired or unauthorized Bilibili prepared-stream retry if a reproducible CDN failure is available.
 
 ### Blockers/Concerns
 
 - Brownfield risk: PlayerEngine and NowPlayingView are large; phase planning should keep playback-path changes scoped and regression-backed.
 - Private Bilibili APIs and WBI behavior are fragile; avoid broad API restructuring during v1 unless required for a specific stability fix.
-- Image decoding and unbounded request fan-out are known performance risks for Phase 1 and Phase 2.
+- Image decoding and unbounded request fan-out were bounded in Phase 1; keep watching this risk in Phase 2 discovery surfaces as result volume grows.
+- Phase 01 automated verification passed, but two real-device/CDN checks remain in `01-UAT.md`.
 
 ## Deferred Items
 
@@ -99,6 +101,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-26T07:17:36.000Z
-Stopped at: Completed 01-05-PLAN.md
-Resume file: Run Phase 1 verification/closeout before Phase 2 planning
+Last session: 2026-06-26T07:26:33.000Z
+Stopped at: Phase 01 automated verification complete; human UAT pending
+Resume file: .planning/phases/01-playback-critical-path-and-responsiveness/01-UAT.md
