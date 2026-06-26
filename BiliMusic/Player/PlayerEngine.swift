@@ -133,6 +133,7 @@ final class PlayerEngine {
     private let client = BiliClient()
     private let lyricsClient = LyricsClient()
     private let streamResolver = StreamResolver()
+    private let playbackDiagnostics: PlaybackDiagnostics
     private var player: AVPlayer?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
@@ -153,6 +154,7 @@ final class PlayerEngine {
     private var preparedVideoStreams: [TrackKey: PreparedVideoStream] = [:]
     private var prefetchedRadio: (seed: TrackKey, track: Track)?
     private var playbackGeneration = UUID()
+    private var firstPlayingDiagnosticsGeneration: UUID?
     private var manualPlaybackModeOverride: PlaybackMode?
 
     private struct PreparedVideoStream {
@@ -161,7 +163,8 @@ final class PlayerEngine {
         let fetchedAt: Date
     }
 
-    init() {
+    init(playbackDiagnostics: PlaybackDiagnostics = PlaybackDiagnostics()) {
+        self.playbackDiagnostics = playbackDiagnostics
         Task(priority: .userInitiated) {
             try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
         }
@@ -179,6 +182,10 @@ final class PlayerEngine {
             return
         }
 #endif
+        if tracks.indices.contains(index) {
+            playbackDiagnostics.begin(track: tracks[index])
+            playbackDiagnostics.record(.tap, track: tracks[index])
+        }
         prefetchTask?.cancel()
         queuePrefetchTask?.cancel()
         autoMVTask?.cancel()
@@ -454,6 +461,8 @@ final class PlayerEngine {
         guard var track = current else { return }
         let generation = UUID()
         playbackGeneration = generation
+        firstPlayingDiagnosticsGeneration = nil
+        playbackDiagnostics.record(.currentAssigned, track: track)
         state = .loading
         currentTime = resumeAt
         lyrics = []
@@ -466,6 +475,7 @@ final class PlayerEngine {
         do {
             let url: URL
             let isLocal: Bool
+            let sourceKind: PlaybackDiagnosticEvent.SourceKind
             if playbackMode == .mv {
                 if track.cid == nil {
                     track = try await fillPlaybackPage(for: track)
@@ -479,6 +489,7 @@ final class PlayerEngine {
                         url: url, cid: track.cid!, fetchedAt: Date())
                 }
                 isLocal = false
+                sourceKind = .mvRemote
                 videoAvailable = true
             } else if let cached = CacheStore.shared.entry(for: track) {
                 // 缓存优先,顺便补全 cid,离线也能播
@@ -487,6 +498,7 @@ final class PlayerEngine {
                 queue[queueIndex] = track
                 url = CacheStore.audioDir.appendingPathComponent(cached.fileName)
                 isLocal = true
+                sourceKind = .localCache
                 currentAudioQuality = cached.quality
                 currentAudioBandwidth = nil
             } else if let prepared = streamResolver.cachedAudio(for: track) {
@@ -495,6 +507,7 @@ final class PlayerEngine {
                 queue[queueIndex] = track
                 url = prepared.url
                 isLocal = false
+                sourceKind = .preparedRemote
                 currentAudioQuality = prepared.quality
                 currentAudioBandwidth = prepared.bandwidth
             } else {
@@ -506,11 +519,18 @@ final class PlayerEngine {
                 queue[queueIndex] = track
                 url = prepared.url
                 isLocal = false
+                sourceKind = .freshRemote
                 currentAudioQuality = prepared.quality
                 currentAudioBandwidth = prepared.bandwidth
             }
             guard playbackGeneration == generation, current.map({ track.key.matches($0) }) ?? false else { return }
-            startPlayback(url: url, isLocal: isLocal, resumeAt: resumeAt)
+            playbackDiagnostics.record(
+                .sourceResolved,
+                track: track,
+                sourceKind: sourceKind,
+                quality: currentAudioQuality,
+                bandwidth: currentAudioBandwidth)
+            startPlayback(url: url, isLocal: isLocal, resumeAt: resumeAt, sourceKind: sourceKind, track: track)
             try? AVAudioSession.sharedInstance().setActive(true)
             state = .playing
             let shouldRecordHistory = resumeAt < 1 || !playedKeys.contains(track.key)
@@ -698,7 +718,13 @@ final class PlayerEngine {
         scheduleQueuePrefetch()
     }
 
-    private func startPlayback(url: URL, isLocal: Bool = false, resumeAt: Double = 0) {
+    private func startPlayback(
+        url: URL,
+        isLocal: Bool = false,
+        resumeAt: Double = 0,
+        sourceKind: PlaybackDiagnosticEvent.SourceKind,
+        track: Track
+    ) {
         let generation = playbackGeneration
         if let timeObserver, let player { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
@@ -718,6 +744,12 @@ final class PlayerEngine {
         // 本地文件不需要前向缓冲;在线流缓冲 30s,降低弱网下播一半停住的概率。
         item.preferredForwardBufferDuration = isLocal ? 0 : 30
         item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
+        playbackDiagnostics.record(
+            .playerItemCreated,
+            track: track,
+            sourceKind: sourceKind,
+            quality: currentAudioQuality,
+            bandwidth: currentAudioBandwidth)
         let player = AVPlayer(playerItem: item)
         // false = 数据一到就播,起播快;代价是断流后不会自己恢复,
         // 所以下面用 bufferObserver 手动续播,兼顾「快起播」和「不中途卡死」。
@@ -738,6 +770,16 @@ final class PlayerEngine {
                 switch player.timeControlStatus {
                 case .playing:
                     self.state = .playing
+                    if self.playbackGeneration == generation,
+                       self.firstPlayingDiagnosticsGeneration != generation {
+                        self.firstPlayingDiagnosticsGeneration = generation
+                        self.playbackDiagnostics.record(
+                            .firstPlaying,
+                            track: track,
+                            sourceKind: sourceKind,
+                            quality: self.currentAudioQuality,
+                            bandwidth: self.currentAudioBandwidth)
+                    }
                 case .paused:
                     // 关键:区分「用户主动暂停」与「缓冲断流」。用户想播却变 paused = 断流,
                     // 显示 loading 而非 paused,等 bufferObserver 在缓冲恢复后续播。
@@ -788,6 +830,12 @@ final class PlayerEngine {
         if resumeAt > 0 {
             player.seek(to: CMTime(seconds: resumeAt, preferredTimescale: 600))
         }
+        playbackDiagnostics.record(
+            .playRequested,
+            track: track,
+            sourceKind: sourceKind,
+            quality: currentAudioQuality,
+            bandwidth: currentAudioBandwidth)
         player.playImmediately(atRate: 1)
         updateNowPlayingInfo()
     }

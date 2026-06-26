@@ -4,7 +4,7 @@ import XCTest
 final class PlaybackDiagnosticsTests: XCTestCase {
     func testRecordsTapToFirstPlayingCheckpointsInOrder() {
         let sink = PlaybackDiagnostics.InMemorySink()
-        var ticks: [TimeInterval] = [100, 100.012, 100.034, 100.055, 100.069, 100.091]
+        var ticks: [TimeInterval] = [100, 100.012, 100.034, 100.055, 100.069, 100.091, 100.107]
         let diagnostics = PlaybackDiagnostics(sink: sink) {
             ticks.removeFirst()
         }
@@ -34,7 +34,7 @@ final class PlaybackDiagnosticsTests: XCTestCase {
         XCTAssertGreaterThan(sink.events.last?.elapsedMilliseconds ?? 0, 0)
     }
 
-    func testDiagnosticPayloadsAreSanitized() {
+    func testDiagnosticPayloadsAreSanitized() throws {
         let sink = PlaybackDiagnostics.InMemorySink()
         let diagnostics = PlaybackDiagnostics(sink: sink) { 42 }
         let track = Self.track()
