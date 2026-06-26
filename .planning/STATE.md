@@ -5,16 +5,16 @@ milestone_name: milestone
 current_phase: 3
 current_phase_name: Player Interaction and Regression Coverage
 status: executing
-stopped_at: Phase 3 planned
-last_updated: "2026-06-26T22:26:47.343Z"
+stopped_at: Completed 03-01-PLAN.md
+last_updated: "2026-06-26T22:28:05Z"
 last_activity: 2026-06-27
-last_activity_desc: Phase 03 execution started
+last_activity_desc: Completed 03-01-PLAN.md
 progress:
   total_phases: 3
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 9
-  completed_plans: 6
-  percent: 33
+  completed_plans: 7
+  percent: 78
 ---
 
 # Project State
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-06-27)
 ## Current Position
 
 Phase: 3 — Player Interaction and Regression Coverage
-Plan: 2 of 3 — 03-01
+Plan: 2 of 3 — 03-02
 Status: Ready to execute
-Last activity: 2026-06-27 — Phase 03 execution started
+Last activity: 2026-06-27 — Completed 03-01-PLAN.md
 
-Progress: [######----] 67%
+Progress: [########--] 78%
 
 ## Performance Metrics
 
@@ -58,6 +58,7 @@ Progress: [######----] 67%
 - Trend: Playback, search focus, Home recommendation stability, image memory guardrails, and discovery reliability complete
 
 *Updated after each plan completion*
+| Phase 03-player-interaction-and-regression-coverage P01 | 35min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -82,6 +83,9 @@ Recent decisions affecting current work:
 - [02-01]: Search pagination preserves existing results on later-page failure, keeps retry state available, rebuilds sections after append, and applies music-only filtering per page.
 - [02-01]: Now Playing recommendation taps keep the visible recommendation list stable, mark it stale, and defer refresh until the panel is reopened unless an external visible-track change requires immediate refresh.
 - [02-01]: Recommendation candidate pools apply music-only display filtering before scoring and final presentation.
+- [Phase 03-01]: Mini-player pull-up completion uses deterministic policy thresholds, including distance and projected velocity, rather than view-local ad hoc gesture checks.
+- [Phase 03-01]: The full-player overlay tracks rendered open progress for offset, opacity, and scale while Reduced Motion keeps scale disabled through existing guards.
+- [Phase 03-01]: The UI fixture uses mini-player-relative drag coordinates to avoid simulator-global coordinate drift while preserving deliberate-open and shallow-cancel coverage.
 
 ### Pending Todos
 
