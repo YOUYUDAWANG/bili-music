@@ -34,10 +34,21 @@ struct NowPlayingView: View {
     var onDismiss: (() -> Void)? = nil
     var namespace: Namespace.ID
     var safeAreaTop: CGFloat = 0
-    private enum PlayerPage: Int {
+    private enum PlayerPage: Int, CaseIterable {
         case queue = 0
         case nowPlaying = 1
         case recommendations = 2
+
+        var title: String {
+            switch self {
+            case .queue:
+                return "队列"
+            case .nowPlaying:
+                return "正在播放"
+            case .recommendations:
+                return "推荐"
+            }
+        }
     }
 
     @State private var selectedPage = PlayerPage.nowPlaying.rawValue
@@ -76,9 +87,10 @@ struct NowPlayingView: View {
     private var favorites: FavoriteManager { .shared }
 
     private enum Layout {
-        static let topSwitcherInset: CGFloat = 16
-        static let topSwitcherHeight: CGFloat = 32
+        static let topChromeBottomPadding: CGFloat = 6
+        static let topChromeControlSize: CGFloat = 44
         static let contentTopInset: CGFloat = 16
+        static let centerHorizontalPadding: CGFloat = 28
         static let contextPreviewLimit = 8
         static let compactRowHeight: CGFloat = 34
         static let dismissGrabZoneHeight: CGFloat = PlayerGesturePolicy.dismissGrabZoneHeight
@@ -176,17 +188,19 @@ struct NowPlayingView: View {
     }
 
     private func nowPlayingPage(coverSize: CGFloat) -> some View {
-        VStack(spacing: 15) {
+        VStack(spacing: 18) {
             mediaView(coverSize: coverSize)
-                .padding(.top, 6)
+                .padding(.top, 4)
+                .accessibilityIdentifier("nowPlayingCover")
 
             VStack(spacing: 5) {
                 Text(engine.current?.title ?? "")
-                    .font(.title2.weight(.semibold))
+                    .font(.system(size: 28, weight: .semibold))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(engine.current?.artist ?? "")
-                    .font(.subheadline)
+                    .font(.system(size: 17))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 if case .failed(let message) = engine.state {
@@ -197,11 +211,15 @@ struct NowPlayingView: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            .padding(.horizontal, 28)
+            .padding(.horizontal, Layout.centerHorizontalPadding)
+            .accessibilityIdentifier("nowPlayingMetadata")
 
             progressView
+                .accessibilityIdentifier("nowPlayingProgress")
             transportControls
+                .accessibilityIdentifier("playerTransportControls")
             actionRow
+                .accessibilityIdentifier("playerToolbar")
 
             if let favoriteError = favorites.lastError {
                 Text(favoriteError)
@@ -212,11 +230,9 @@ struct NowPlayingView: View {
                     .padding(.horizontal, 28)
             }
 
-            bottomContextPanel
-
-            Spacer(minLength: 0)
+            Spacer(minLength: 12)
         }
-        .padding(.bottom, 12)
+        .padding(.bottom, 28)
     }
 
     private func playerPages(coverSize: CGFloat, width: CGFloat, safeAreaTop: CGFloat) -> some View {
@@ -253,7 +269,7 @@ struct NowPlayingView: View {
         .contentShape(Rectangle())
         .simultaneousGesture(pageSwipeGesture(width: width), including: .gesture)
         .safeAreaInset(edge: .top, spacing: 0) {
-            playerTopModeSwitcher(safeAreaTop: safeAreaTop)
+            playerTopChrome(safeAreaTop: safeAreaTop)
         }
     }
 
@@ -263,7 +279,7 @@ struct NowPlayingView: View {
             .contentShape(Rectangle())
             .simultaneousGesture(pageSwipeGesture(width: width), including: .all)
             .safeAreaInset(edge: .top, spacing: 0) {
-                playerTopModeSwitcher(safeAreaTop: safeAreaTop)
+                playerTopChrome(safeAreaTop: safeAreaTop)
             }
     }
 
@@ -534,30 +550,64 @@ struct NowPlayingView: View {
         }
     }
 
-    private func playerTopModeSwitcher(safeAreaTop: CGFloat) -> some View {
-        VStack(spacing: 0) {
+    private func playerTopChrome(safeAreaTop: CGFloat) -> some View {
+        VStack(spacing: 8) {
             Color.clear
-                .frame(height: max(safeAreaTop, 44) + Layout.topSwitcherInset)
+                .frame(height: max(safeAreaTop, 12))
                 .accessibilityHidden(true)
 
-            HStack {
-                Spacer()
-                playbackModeSwitcher
-                    .padding(3)
-                    .background(.thinMaterial, in: Capsule())
-                    .overlay {
-                        Capsule()
-                            .stroke(Color.primary.opacity(0.07), lineWidth: 0.5)
+            ZStack {
+                playerPageHint
+
+                HStack {
+                    Button {
+                        closePlayer()
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 18, weight: .semibold))
+                            .frame(width: Layout.topChromeControlSize, height: Layout.topChromeControlSize)
+                            .contentShape(Circle())
                     }
-                Spacer()
+                    .buttonStyle(.plain)
+                    .foregroundStyle(AppTheme.label)
+                    .accessibilityLabel("收起播放器")
+
+                    Spacer()
+                }
             }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 6)
+            .padding(.horizontal, 20)
+            .padding(.bottom, Layout.topChromeBottomPadding)
         }
         .frame(maxWidth: .infinity)
-        .frame(minHeight: max(safeAreaTop, 44) + Layout.topSwitcherInset + Layout.topSwitcherHeight + 6)
         .contentShape(Rectangle())
         .highPriorityGesture(topChromeDismissDrag, including: .all)
+    }
+
+    private var playerPageHint: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 5) {
+                ForEach(PlayerPage.allCases, id: \.rawValue) { page in
+                    Circle()
+                        .fill(page.rawValue == selectedPage ? AppTheme.accent : Color.primary.opacity(0.24))
+                        .frame(
+                            width: page.rawValue == selectedPage ? 7 : 5,
+                            height: page.rawValue == selectedPage ? 7 : 5
+                        )
+                        .accessibilityHidden(true)
+                }
+            }
+
+            Text(PlayerPage(rawValue: selectedPage)?.title ?? PlayerPage.nowPlaying.title)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: Layout.topChromeControlSize)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("播放器页面")
+        .accessibilityValue(PlayerPage(rawValue: selectedPage)?.title ?? PlayerPage.nowPlaying.title)
+        .accessibilityIdentifier("playerPageHint")
     }
 
     private func setPlaybackMode(_ mode: PlayerEngine.PlaybackMode) {
