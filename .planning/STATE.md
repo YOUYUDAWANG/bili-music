@@ -5,16 +5,16 @@ milestone_name: milestone
 current_phase: 01
 current_phase_name: Playback Critical Path and Responsiveness
 status: executing
-stopped_at: Completed 01-04-PLAN.md
-last_updated: "2026-06-26T07:01:38.000Z"
+stopped_at: Completed 01-05-PLAN.md
+last_updated: "2026-06-26T07:17:36.000Z"
 last_activity: 2026-06-26
-last_activity_desc: Completed 01-04 Home recommendation stability and scheduling
+last_activity_desc: Completed 01-05 image memory guardrails and cleanup
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 5
-  completed_plans: 4
-  percent: 80
+  completed_plans: 5
+  percent: 100
 ---
 
 # Project State
@@ -30,31 +30,31 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 
 Phase: 01 (Playback Critical Path and Responsiveness) — EXECUTING
 Plan: 5 of 5
-Status: Ready to execute
-Last activity: 2026-06-26 — Completed 01-04 Home recommendation stability and scheduling
+Status: Phase 1 implementation complete; ready for verification
+Last activity: 2026-06-26 — Completed 01-05 image memory guardrails and cleanup
 
-Progress: [########--] 80%
+Progress: [##########] 100%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 4
-- Average duration: 14 min
-- Total execution time: 0.90 hours
+- Total plans completed: 5
+- Average duration: 13 min
+- Total execution time: 1.08 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1. Playback Critical Path and Responsiveness | 4 | 54 min | 14 min |
+| 1. Playback Critical Path and Responsiveness | 5 | 65 min | 13 min |
 | 2. Discovery Reliability and Music-Only Results | TBD | - | - |
 | 3. Player Interaction and Regression Coverage | TBD | - | - |
 
 **Recent Trend:**
 
-- Last 5 plans: 01-01, 01-02, 01-03, 01-04
-- Trend: Playback, search focus, and Home recommendation stability progressing
+- Last 5 plans: 01-01, 01-02, 01-03, 01-04, 01-05
+- Trend: Playback, search focus, Home recommendation stability, and image memory guardrails complete
 
 *Updated after each plan completion*
 
@@ -74,6 +74,8 @@ Recent decisions affecting current work:
 - [01-03]: Empty search can render local history suggestions, recent playback, and cached songs without remote work.
 - [01-04]: Home recommendation work now starts from explicit Home load/manual refresh triggers with bounded seed/request limits.
 - [01-04]: Home recommendation scoring and fan-out run at utility priority while radio and related-panel recommendations keep interactive priority.
+- [01-05]: Image cache and in-flight image loading are keyed by URL plus target pixel size and downsample remote bytes before decoded images enter memory.
+- [01-05]: Backgrounding and memory warnings release reloadable decoded images through AppResourceCleanup without clearing PlayerEngine current track or queue.
 
 ### Pending Todos
 
@@ -97,6 +99,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-26T07:01:38.000Z
-Stopped at: Completed 01-04-PLAN.md
-Resume file: .planning/phases/01-playback-critical-path-and-responsiveness/01-05-PLAN.md
+Last session: 2026-06-26T07:17:36.000Z
+Stopped at: Completed 01-05-PLAN.md
+Resume file: Run Phase 1 verification/closeout before Phase 2 planning

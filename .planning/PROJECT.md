@@ -30,6 +30,8 @@ Bilibili Music 是一个个人自用的 iPhone 音乐客户端，从 B 站内容
 - [x] 空搜索页可以只用本地数据展示搜索历史、最近播放和已缓存歌曲。
 - [x] 首页推荐在首次点歌时保持可见列表稳定，不会作为播放副作用清空、闪烁或重置。
 - [x] 首页推荐调度有显式初始加载/手动刷新触发、种子和请求上限，并低于直接播放启动优先级。
+- [x] 图片加载按 URL + 目标像素尺寸缓存和合并请求，列表、mini-player、播放页和锁屏封面不会无目标地保留完整大图解码。
+- [x] 后台和内存警告会释放可重载的解码图片，并通过测试确认不会清空当前播放歌曲、队列或队列位置。
 
 ### Active
 
@@ -110,4 +112,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state.
 
 ---
-*Last updated: 2026-06-26 after Phase 01 Plan 04*
+*Last updated: 2026-06-26 after Phase 01 Plan 05*

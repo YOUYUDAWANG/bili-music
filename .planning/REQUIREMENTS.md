@@ -33,9 +33,9 @@ v1 聚焦当前用户已经反复遇到的卡顿和稳定性问题。目标不�
 
 ### Memory and Images
 
-- [ ] **MEM-01**: User can scroll image-heavy search, recommendation, and player surfaces without full-size cover images being decoded and retained unnecessarily.
-- [ ] **MEM-02**: Image loading coalesces duplicate URL work and applies a bounded cache policy so repeated list scrolling does not continually grow memory.
-- [ ] **MEM-03**: App responds to memory pressure or backgrounding by releasing reloadable image/media data without losing playback state.
+- [x] **MEM-01**: User can scroll image-heavy search, recommendation, and player surfaces without full-size cover images being decoded and retained unnecessarily.
+- [x] **MEM-02**: Image loading coalesces duplicate URL work and applies a bounded cache policy so repeated list scrolling does not continually grow memory.
+- [x] **MEM-03**: App responds to memory pressure or backgrounding by releasing reloadable image/media data without losing playback state.
 
 ### Player Interaction
 
@@ -118,9 +118,9 @@ Roadmap mapping is filled during roadmap creation.
 | RECO-03 | Phase 2 | Pending |
 | RECO-04 | Phase 1 | Complete |
 | RECO-05 | Phase 2 | Pending |
-| MEM-01 | Phase 1 | Pending |
-| MEM-02 | Phase 1 | Pending |
-| MEM-03 | Phase 1 | Pending |
+| MEM-01 | Phase 1 | Complete |
+| MEM-02 | Phase 1 | Complete |
+| MEM-03 | Phase 1 | Complete |
 | PLYR-01 | Phase 3 | Pending |
 | PLYR-02 | Phase 3 | Pending |
 | PLYR-03 | Phase 3 | Pending |
@@ -140,4 +140,4 @@ Roadmap mapping is filled during roadmap creation.
 
 ---
 *Requirements defined: 2026-06-26*
-*Last updated: 2026-06-26 after roadmap creation*
+*Last updated: 2026-06-26 after Phase 01 Plan 05*
