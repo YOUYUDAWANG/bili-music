@@ -7,6 +7,7 @@ wave_0_complete: true
 automated_status: passed
 human_status: pending
 verified: 2026-06-26T07:38:02Z
+uat_instructions_updated: 2026-06-26T07:43:28Z
 ---
 
 # Phase 01 - Validation Strategy
@@ -67,8 +68,19 @@ Xcode printed known passcode-protected physical-device `notification_proxy` warn
 
 | Behavior | Requirement | Status | Why Manual | Test Instructions |
 |----------|-------------|--------|------------|-------------------|
-| Real Bilibili prepared-stream expiry or CDN 403 retry behavior | PLAY-04 | pending in `01-UAT.md` | Exact CDN/AVPlayer failure shape may differ from fake resolver tests and depends on short-lived remote URLs. | Use a real playable BVID, force or wait for an expired prepared stream if feasible, then verify one automatic fresh stream resolution occurs and no second tap is required. |
-| Real first-audible playback feel on device | PLAY-01, PLAY-02, PLAY-05 | pending in `01-UAT.md` | Simulator/unit tests prove ordering, but audible latency and AVAudioSession behavior should be felt on the target iPhone. | Install on the user's iPhone, cold-launch, tap first Home/Search track, and confirm current-track feedback is immediate and audio begins before lyrics/recommendations/MV/artwork enrichments complete. |
+| Real Bilibili prepared-stream expiry or CDN 403 retry behavior | PLAY-04 | pending in `01-UAT.md` | Exact CDN/AVPlayer failure shape may differ from fake resolver tests and depends on short-lived remote URLs. | Use a real playable BVID, force or wait for an expired prepared stream if feasible, then verify one automatic fresh stream resolution occurs and no second tap is required. Use `playback-diagnostics` logs to confirm failed prepared stream -> `source=freshRemote` -> `playRequested` -> `firstPlaying`. |
+| Real first-audible playback feel on device | PLAY-01, PLAY-02, PLAY-05 | pending in `01-UAT.md` | Simulator/unit tests prove ordering, but audible latency and AVAudioSession behavior should be felt on the target iPhone. | Install on the user's iPhone, cold-launch, tap first Home/Search track, and confirm current-track feedback is immediate and audio begins before lyrics/recommendations/MV/artwork enrichments complete. Capture `playback-diagnostics` and record `firstPlaying elapsedMs`; repeated fresh-remote starts over roughly 5 seconds on stable Wi-Fi should be investigated. |
+
+### Playback Diagnostics Procedure
+
+The app already emits sanitized unified logs from `PlaybackDiagnostics`:
+
+- subsystem: `com.fubuki.BiliMusic`
+- category: `playback-diagnostics`
+- checkpoints: `tap`, `currentAssigned`, `sourceResolved`, `playerItemCreated`, `playRequested`, `firstPlaying`
+- safe payload fields: `bvid`, `cid`, `source`, `quality`, `bandwidth`, `elapsedMs`
+
+For real-device UAT, run a DEBUG build on the iPhone and inspect logs through Xcode's device console or the macOS Console app. Optional DEBUG autoplay can be triggered by adding launch environment variable `AUTOPLAY_BV=<real playable BV id>`, then watching `AUTOPLAY state=` plus the diagnostic checkpoint sequence. `AUTOPLAY_BV` is only an auxiliary diagnostic because it resolves the BV into a track before the normal tap-to-track path begins.
 
 ## Security Notes
 

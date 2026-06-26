@@ -6,9 +6,9 @@ current_phase: 01
 current_phase_name: Playback Critical Path and Responsiveness
 status: verifying
 stopped_at: Phase 01 automated verification complete; human UAT pending
-last_updated: "2026-06-26T07:38:02.000Z"
+last_updated: "2026-06-26T07:43:28.000Z"
 last_activity: 2026-06-26
-last_activity_desc: Added player gesture guardrails and re-ran full Phase 01 automated verification
+last_activity_desc: Added concrete real-device playback diagnostics and AUTOPLAY_BV guidance to Phase 01 UAT
 progress:
   total_phases: 3
   completed_phases: 0
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 Phase: 01 (Playback Critical Path and Responsiveness) — VERIFYING
 Plan: 5 of 5
 Status: Automated verification passed, including player gesture guardrails; human UAT pending for real-device/CDN behavior
-Last activity: 2026-06-26 — Added player gesture guardrails and re-ran full Phase 01 automated verification
+Last activity: 2026-06-26 — Added concrete real-device playback diagnostics and AUTOPLAY_BV guidance to Phase 01 UAT
 
 Progress: [##########] 100%
 
@@ -102,6 +102,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-26T07:38:02.000Z
-Stopped at: Phase 01 automated verification complete with player gesture guardrails; human UAT pending
+Last session: 2026-06-26T07:43:28.000Z
+Stopped at: Phase 01 automated verification complete with concrete real-device diagnostic steps; human UAT pending
 Resume file: .planning/phases/01-playback-critical-path-and-responsiveness/01-UAT.md

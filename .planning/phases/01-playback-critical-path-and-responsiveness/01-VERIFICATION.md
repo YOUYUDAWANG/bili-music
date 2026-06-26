@@ -4,6 +4,7 @@ verified: 2026-06-26T07:38:02Z
 status: human_needed
 score: 12/12 must-haves verified
 behavior_unverified: 2
+uat_instructions_updated: 2026-06-26T07:43:28Z
 behavior_unverified_items:
   - truth: "Real first-audible playback feel on the target iPhone is acceptable after cold launch."
     test: "Install on the user's iPhone, cold-launch, tap a first Home/Search track, and listen for startup latency."
@@ -89,12 +90,14 @@ None found during this verification pass.
 **Test:** Install on the user's iPhone, cold-launch, tap a first Home/Search track, and observe the immediate current-track feedback plus audible startup.
 **Expected:** The selected track becomes current immediately and audio begins before lyrics, recommendations, MV, artwork, history, or cache enrichment visibly blocks the path.
 **Why human:** Simulator/unit tests prove ordering but cannot verify audible latency and AVAudioSession feel on the target iPhone.
+**Diagnostics:** Use Xcode's device console or the macOS Console app to filter subsystem `com.fubuki.BiliMusic`, category `playback-diagnostics`. For the tapped `bvid`, confirm the sequence reaches `checkpoint=firstPlaying` after `checkpoint=playRequested` and record `elapsedMs`. Repeated fresh-remote starts over roughly 5 seconds on stable Wi-Fi should be treated as a performance regression candidate.
 
 ### 2. Real Bilibili Expired Prepared Stream Retry
 
 **Test:** Use a real playable BVID with a prepared remote stream that has expired or returns a CDN/AVPlayer failure if feasible.
 **Expected:** The app invalidates the prepared stream, resolves one fresh stream, and requests playback without a second user tap.
 **Why human:** The exact CDN/AVPlayer failure shape depends on Bilibili short-lived media URLs and cannot be deterministically produced by the simulator unit suite.
+**Diagnostics:** If this real CDN failure can be reproduced, filter `playback-diagnostics` for the same `bvid` and confirm the prepared stream is discarded, the subsequent successful source resolution uses `source=freshRemote`, and playback reaches `playRequested` then `firstPlaying` without another tap. If no real expired/unauthorized CDN case can be produced, keep the item pending rather than inventing evidence.
 
 ## Gaps Summary
 
