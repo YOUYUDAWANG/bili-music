@@ -3,19 +3,19 @@ import XCTest
 @testable import BiliMusic
 
 final class ImageCacheTests: XCTestCase {
-    override func setUp() {
-        super.setUp()
-        Task { @MainActor in
+    override func setUp() async throws {
+        try await super.setUp()
+        await MainActor.run {
             ImageMemoryCache.shared.removeAll()
         }
     }
 
-    override func tearDown() {
-        Task { @MainActor in
+    override func tearDown() async throws {
+        await MainActor.run {
             ImageMemoryCache.shared.removeAll()
         }
         CountingImageURLProtocol.reset()
-        super.tearDown()
+        try await super.tearDown()
     }
 
     @MainActor
@@ -56,6 +56,7 @@ final class ImageCacheTests: XCTestCase {
         XCTAssertEqual(ImageMemoryCache.shared.image(for: url, targetPixelSize: largeTarget)?.pixelSize, largeTarget)
     }
 
+    @MainActor
     func testDownsampledImageDataUsesTargetPixelSizeBeforeCaching() throws {
         let sourceImage = makeImage(size: CGSize(width: 1200, height: 675), color: .purple)
         let sourceData = try XCTUnwrap(sourceImage.jpegData(compressionQuality: 0.9))

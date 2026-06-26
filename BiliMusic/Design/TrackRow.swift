@@ -10,7 +10,10 @@ struct TrackRow: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            CachedAsyncImage(url: thumbnailURL(track.coverURL, size: 160)) { image in
+            CachedAsyncImage(
+                url: thumbnailURL(track.coverURL, size: 160),
+                targetSize: CGSize(width: 64, height: 36)
+            ) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
                 ZStack {

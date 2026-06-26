@@ -1046,14 +1046,19 @@ final class PlayerEngine {
     private func loadCover(for track: Track, generation: UUID) async {
         coverImage = nil
         guard let coverURL = artworkURL(track.coverURL) else { return }
-        if let cached = ImageMemoryCache.shared.image(for: coverURL) {
+        let targetPixelSize = CGSize(width: 600, height: 600)
+        if let cached = ImageMemoryCache.shared.image(for: coverURL, targetPixelSize: targetPixelSize) {
             coverImage = cached.resized(maxDimension: 600)
             updateNowPlayingInfo()
             return
         }
-        guard let decoded = await ImageLoadCoordinator.shared.image(for: coverURL) else { return }
+        guard let decoded = await ImageLoadCoordinator.shared.image(
+            for: coverURL,
+            targetPixelSize: targetPixelSize,
+            scale: 1
+        ) else { return }
         guard playbackGeneration == generation, current.map({ track.key.matches($0) }) ?? false else { return }
-        ImageMemoryCache.shared.insert(decoded, for: coverURL)
+        ImageMemoryCache.shared.insert(decoded, for: coverURL, targetPixelSize: targetPixelSize)
         coverImage = decoded.resized(maxDimension: 600)
         updateNowPlayingInfo()
     }

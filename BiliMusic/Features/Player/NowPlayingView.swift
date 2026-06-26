@@ -295,7 +295,10 @@ struct NowPlayingView: View {
             let coverURL = thumbnailURL(engine.current?.coverURL, width: 960, height: 540)
             Group {
                 if let coverURL {
-                    CachedAsyncImage(url: coverURL) { image in
+                    CachedAsyncImage(
+                        url: coverURL,
+                        targetSize: CGSize(width: coverSize, height: coverSize * 9 / 16)
+                    ) { image in
                         image.resizable().aspectRatio(contentMode: .fill)
                     } placeholder: {
                         artworkPlaceholder(cornerRadius: AppTheme.playerCoverRadius)

@@ -401,12 +401,6 @@ private struct SystemMiniPlayer: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(.default, openFullPlayer)
         .onDisappear { miniOpenDragTranslation = nil }
-        .task(id: engine.current?.coverURL) {
-            guard let url = engine.current?.coverURL,
-                  let fullURL = thumbnailURL(url, width: 960, height: 540),
-                  ImageMemoryCache.shared.image(for: fullURL) == nil else { return }
-            _ = await ImageLoadCoordinator.shared.image(for: fullURL)
-        }
     }
 
     private var miniLayoutProgress: CGFloat {
@@ -421,7 +415,10 @@ private struct SystemMiniPlayer: View {
     private func artwork(layoutProgress: CGFloat) -> some View {
         Group {
             if let url = thumbnailURL(engine.current?.coverURL, width: 150, height: 85) {
-                CachedAsyncImage(url: url) { image in
+                CachedAsyncImage(
+                    url: url,
+                    targetSize: CGSize(width: 44, height: 25)
+                ) { image in
                     image.resizable().aspectRatio(contentMode: .fill)
                 } placeholder: {
                     artworkPlaceholder
