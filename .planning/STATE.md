@@ -6,9 +6,9 @@ current_phase: 2
 current_phase_name: Discovery Reliability and Music-Only Results
 status: planning
 stopped_at: Phase 2 context gathered; ready to plan discovery reliability and music-only results
-last_updated: "2026-06-26T08:18:30.297Z"
+last_updated: "2026-06-26T17:17:53.743Z"
 last_activity: 2026-06-26
-last_activity_desc: Phase 01 complete, transitioned to Phase 2
+last_activity_desc: "Completed quick task 260627-36w: 设置里支持音频 CDN 测速并选择默认线路"
 progress:
   total_phases: 3
   completed_phases: 1
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 Phase: 2 — Discovery Reliability and Music-Only Results
 Plan: Not started
 Status: Phase 2 context gathered; Phase 1 automated verification and real iPhone first-audible playback UAT passed, with the CDN expired prepared-stream retry case recorded as accepted residual risk.
-Last activity: 2026-06-26 — Phase 01 complete, transitioned to Phase 2
+Last activity: 2026-06-26 — Completed quick task 260627-36w: 设置里支持音频 CDN 测速并选择默认线路
 
 Progress: [##########] 100%
 
@@ -89,6 +89,12 @@ Recent decisions affecting current work:
 - Private Bilibili APIs and WBI behavior are fragile; avoid broad API restructuring during v1 unless required for a specific stability fix.
 - Image decoding and unbounded request fan-out were bounded in Phase 1; keep watching this risk in Phase 2 discovery surfaces as result volume grows.
 - Phase 01 automated verification passed and real iPhone first-audible playback UAT passed at approximately 1-2 seconds. The real expired/unauthorized Bilibili prepared-stream retry check is recorded in `01-UAT.md` as accepted residual risk because no reproducible live CDN failure was available. DEBUG builds mirror recent sanitized playback checkpoints into `AUTOPLAY_DIAGNOSTIC` console lines for easier real-device UAT.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260627-36w | 设置里支持音频 CDN 测速并选择默认线路 | 2026-06-26 | bff89cd | [260627-36w-cdn](./quick/260627-36w-cdn/) |
 
 ## Deferred Items
 
