@@ -22,8 +22,8 @@ final class PlayerChromeUITests: XCTestCase {
         let nowPlaying = element("nowPlayingView")
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Slow upward drag from the mini player should open the full player.")
 
-        let switcher = app.segmentedControls.firstMatch
-        XCTAssertTrue(switcher.waitForExistence(timeout: 2), "The music/MV switcher should be visible.")
+        let switcher = element("playerModeSwitchButton")
+        XCTAssertTrue(switcher.waitForExistence(timeout: 2), "The toolbar music/MV switcher should be visible.")
 
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.11))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72))
@@ -41,11 +41,9 @@ final class PlayerChromeUITests: XCTestCase {
         let nowPlaying = element("nowPlayingView")
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open for chrome layout verification.")
 
-        let switcher = app.buttons["音乐"].firstMatch.exists
-            ? app.buttons["音乐"].firstMatch
-            : app.staticTexts["音乐"].firstMatch
-        XCTAssertTrue(switcher.waitForExistence(timeout: 2), "The music/MV switcher should be visible.")
-        XCTAssertGreaterThan(switcher.frame.minY, 80, "The top switcher should stay below the status bar.")
+        let switcher = element("playerModeSwitchButton")
+        XCTAssertTrue(switcher.waitForExistence(timeout: 2), "The toolbar music/MV switcher should be visible.")
+        XCTAssertGreaterThan(switcher.frame.minY, 80, "The player toolbar should stay below the status bar.")
     }
 
     @MainActor

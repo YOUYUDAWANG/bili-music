@@ -220,7 +220,6 @@ struct NowPlayingView: View {
                 .accessibilityIdentifier("playerTransportControls")
             queueModeMenu
             playerToolbar
-                .accessibilityIdentifier("playerToolbar")
 
             if let favoriteError = favorites.lastError {
                 Text(favoriteError)
@@ -567,7 +566,8 @@ struct NowPlayingView: View {
             isEnabled: canSwitch,
             isBusy: switchingMode,
             accessibilityLabel: canSwitch ? (isMV ? "切回音乐" : "切换 MV") : "暂无 MV",
-            accessibilityValue: mvSwitchAccessibilityValue(canSwitch: canSwitch, isMV: isMV)
+            accessibilityValue: mvSwitchAccessibilityValue(canSwitch: canSwitch, isMV: isMV),
+            accessibilityIdentifier: "playerModeSwitchButton"
         ) {
             selectedMode = targetMode
         }

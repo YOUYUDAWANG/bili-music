@@ -60,6 +60,7 @@ struct PlayerToolbarActionButton: View {
     var isBusy = false
     var accessibilityLabel: String? = nil
     var accessibilityValue: String? = nil
+    var accessibilityIdentifier: String? = nil
     let action: () -> Void
 
     var body: some View {
@@ -80,6 +81,18 @@ struct PlayerToolbarActionButton: View {
         .accessibilityLabel(accessibilityLabel ?? title)
         .accessibilityValue(accessibilityValue ?? (isActive ? "已开启" : ""))
         .accessibilityAddTraits(isActive ? .isSelected : [])
+        .accessibilityIdentifierIfPresent(accessibilityIdentifier)
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func accessibilityIdentifierIfPresent(_ identifier: String?) -> some View {
+        if let identifier {
+            accessibilityIdentifier(identifier)
+        } else {
+            self
+        }
     }
 }
 
