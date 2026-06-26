@@ -63,6 +63,20 @@ final class PlayerChromeUITests: XCTestCase {
     }
 
     @MainActor
+    func testShallowMiniPlayerDragCancelsAndKeepsMiniPlayerVisible() throws {
+        let miniPlayer = element("miniPlayer")
+        XCTAssertTrue(miniPlayer.waitForExistence(timeout: 5), "Fixture mini player should be visible.")
+
+        let start = miniPlayer.coordinate(withNormalizedOffset: CGVector(dx: 0.24, dy: 0.5))
+        let end = start.withOffset(CGVector(dx: 0, dy: -48))
+        start.press(forDuration: 0.30, thenDragTo: end)
+
+        let nowPlaying = element("nowPlayingView")
+        XCTAssertTrue(nowPlaying.waitForNonExistence(timeout: 1), "A shallow upward drag should cancel instead of opening the full player.")
+        XCTAssertTrue(miniPlayer.waitForExistence(timeout: 2), "The mini player should remain visible after a shallow canceled drag.")
+    }
+
+    @MainActor
     func testDraggingPlayerContentDoesNotDismissFullPlayer() throws {
         try openFullPlayerFromMini()
 

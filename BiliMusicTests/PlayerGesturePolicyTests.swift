@@ -14,6 +14,13 @@ final class PlayerGesturePolicyTests: XCTestCase {
         XCTAssertEqual(full, 1)
     }
 
+    func testMiniPlayerOpenProgressClampsAtBothEnds() {
+        XCTAssertEqual(PlayerGesturePolicy.miniOpenProgress(for: 24), 0)
+        XCTAssertEqual(PlayerGesturePolicy.miniOpenProgress(for: 0), 0)
+        XCTAssertEqual(PlayerGesturePolicy.miniOpenProgress(for: -PlayerGesturePolicy.miniOpeningDragRange), 1)
+        XCTAssertEqual(PlayerGesturePolicy.miniOpenProgress(for: -PlayerGesturePolicy.miniOpeningDragRange * 1.5), 1)
+    }
+
     func testMiniPlayerOpenRequiresIntentionalVerticalUpwardDrag() {
         XCTAssertFalse(PlayerGesturePolicy.shouldBeginMiniOpenDrag(
             translation: CGSize(width: 0, height: -16)))
@@ -26,14 +33,25 @@ final class PlayerGesturePolicyTests: XCTestCase {
             translation: CGSize(width: 8, height: -24)))
     }
 
+    func testMiniPlayerShortUpwardDragCancelsBelowCompletionThreshold() {
+        XCTAssertFalse(PlayerGesturePolicy.shouldFinishMiniOpenDrag(
+            translationY: -48,
+            velocityY: 0))
+        XCTAssertFalse(PlayerGesturePolicy.shouldOpenMiniPlayerLive(
+            translationY: -48,
+            velocityY: 0))
+    }
+
     func testMiniPlayerOpenCanUseProjectedVelocityWithoutWaitingForLongDrag() {
         XCTAssertFalse(PlayerGesturePolicy.shouldFinishMiniOpenDrag(
-            translationY: -18,
-            velocityY: 0))
-
-        XCTAssertTrue(PlayerGesturePolicy.shouldFinishMiniOpenDrag(
             translationY: -22,
             velocityY: -260))
+        XCTAssertTrue(PlayerGesturePolicy.shouldFinishMiniOpenDrag(
+            translationY: -42,
+            velocityY: -220))
+        XCTAssertTrue(PlayerGesturePolicy.shouldFinishMiniOpenDrag(
+            translationY: -86,
+            velocityY: 0))
     }
 
     func testFullPlayerDismissIgnoresListAreaAndHorizontalDrags() {
