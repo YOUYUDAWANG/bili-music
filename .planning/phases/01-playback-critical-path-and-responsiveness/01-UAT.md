@@ -3,22 +3,24 @@ status: testing
 phase: 01-playback-critical-path-and-responsiveness
 source: [01-VERIFICATION.md]
 started: 2026-06-26T07:26:33Z
-updated: 2026-06-26T07:49:21Z
+updated: 2026-06-26T08:06:40Z
 ---
 
 ## Current Test
 
-number: 1
-name: Real iPhone First-Audible Playback
+number: 2
+name: Real Bilibili Expired Prepared Stream Retry
 expected: |
-  Install on the user's iPhone, cold-launch, tap a first Home/Search track, and confirm the selected track becomes current immediately and audio begins before lyrics, recommendations, MV, artwork, history, or cache enrichment visibly blocks the path.
+  Use a real playable BVID with a prepared remote stream that has expired or returns a CDN/AVPlayer failure if feasible; the app invalidates the prepared stream, resolves one fresh stream, and requests playback without a second user tap.
 awaiting: user response
 
 ## Tests
 
 ### 1. Real iPhone First-Audible Playback
 expected: Install on the user's iPhone, cold-launch, tap a first Home/Search track, and confirm the selected track becomes current immediately and audio begins before lyrics, recommendations, MV, artwork, history, or cache enrichment visibly blocks the path.
-result: [pending]
+result: [passed]
+evidence: User reported on 2026-06-26 that the app can run on the target iPhone and tapping a song produces audio in approximately 1-2 seconds.
+notes: This satisfies the UAT threshold because repeated fresh-remote starts should not consistently exceed roughly 5 seconds on stable Wi-Fi.
 
 diagnostic_steps:
 
@@ -76,9 +78,9 @@ skip_condition:
 ## Summary
 
 total: 2
-passed: 0
+passed: 1
 issues: 0
-pending: 2
+pending: 1
 skipped: 0
 blocked: 0
 
