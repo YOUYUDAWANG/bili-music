@@ -6,9 +6,9 @@ current_phase: 01
 current_phase_name: Playback Critical Path and Responsiveness
 status: verifying
 stopped_at: Phase 01 automated verification complete; human UAT pending
-last_updated: "2026-06-26T07:49:21.000Z"
+last_updated: "2026-06-26T08:06:40.000Z"
 last_activity: 2026-06-26
-last_activity_desc: Added DEBUG recent playback diagnostics and AUTOPLAY_DIAGNOSTIC console output for Phase 01 UAT
+last_activity_desc: Recorded real iPhone first-audible playback UAT pass at approximately 1-2 seconds
 progress:
   total_phases: 3
   completed_phases: 0
@@ -30,8 +30,8 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 
 Phase: 01 (Playback Critical Path and Responsiveness) — VERIFYING
 Plan: 5 of 5
-Status: Automated verification passed, including player gesture guardrails; human UAT pending for real-device/CDN behavior
-Last activity: 2026-06-26 — Added DEBUG recent playback diagnostics and AUTOPLAY_DIAGNOSTIC console output for Phase 01 UAT
+Status: Automated verification passed; real iPhone first-audible playback UAT passed; CDN expired prepared-stream retry UAT pending
+Last activity: 2026-06-26 — Recorded real iPhone first-audible playback UAT pass at approximately 1-2 seconds
 
 Progress: [##########] 100%
 
@@ -80,7 +80,6 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-- [Phase 01 UAT] Confirm real iPhone first-audible playback feel after cold launch.
 - [Phase 01 UAT] Confirm real expired or unauthorized Bilibili prepared-stream retry if a reproducible CDN failure is available.
 
 ### Blockers/Concerns
@@ -88,7 +87,7 @@ Recent decisions affecting current work:
 - Brownfield risk: PlayerEngine and NowPlayingView are large; phase planning should keep playback-path changes scoped and regression-backed.
 - Private Bilibili APIs and WBI behavior are fragile; avoid broad API restructuring during v1 unless required for a specific stability fix.
 - Image decoding and unbounded request fan-out were bounded in Phase 1; keep watching this risk in Phase 2 discovery surfaces as result volume grows.
-- Phase 01 automated verification passed, but two real-device/CDN checks remain in `01-UAT.md`. DEBUG builds now mirror recent sanitized playback checkpoints into `AUTOPLAY_DIAGNOSTIC` console lines for easier real-device UAT.
+- Phase 01 automated verification passed and real iPhone first-audible playback UAT passed at approximately 1-2 seconds. The real expired/unauthorized Bilibili prepared-stream retry check remains in `01-UAT.md`. DEBUG builds mirror recent sanitized playback checkpoints into `AUTOPLAY_DIAGNOSTIC` console lines for easier real-device UAT.
 
 ## Deferred Items
 
@@ -102,6 +101,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-26T07:49:21.000Z
-Stopped at: Phase 01 automated verification complete with DEBUG console diagnostics for real-device UAT; human UAT pending
+Last session: 2026-06-26T08:06:40.000Z
+Stopped at: Phase 01 automated verification complete and first-audible UAT passed; CDN prepared-stream retry UAT pending
 Resume file: .planning/phases/01-playback-critical-path-and-responsiveness/01-UAT.md

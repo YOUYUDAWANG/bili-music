@@ -9,6 +9,7 @@ human_status: pending
 verified: 2026-06-26T07:38:02Z
 uat_instructions_updated: 2026-06-26T07:43:28Z
 debug_autoplay_console_updated: 2026-06-26T07:49:21Z
+first_audible_uat_passed: 2026-06-26T08:06:40Z
 ---
 
 # Phase 01 - Validation Strategy
@@ -73,7 +74,7 @@ Xcode printed known passcode-protected physical-device `notification_proxy` warn
 | Behavior | Requirement | Status | Why Manual | Test Instructions |
 |----------|-------------|--------|------------|-------------------|
 | Real Bilibili prepared-stream expiry or CDN 403 retry behavior | PLAY-04 | pending in `01-UAT.md` | Exact CDN/AVPlayer failure shape may differ from fake resolver tests and depends on short-lived remote URLs. | Use a real playable BVID, force or wait for an expired prepared stream if feasible, then verify one automatic fresh stream resolution occurs and no second tap is required. Use `playback-diagnostics` logs to confirm failed prepared stream -> `source=freshRemote` -> `playRequested` -> `firstPlaying`. |
-| Real first-audible playback feel on device | PLAY-01, PLAY-02, PLAY-05 | pending in `01-UAT.md` | Simulator/unit tests prove ordering, but audible latency and AVAudioSession behavior should be felt on the target iPhone. | Install on the user's iPhone, cold-launch, tap first Home/Search track, and confirm current-track feedback is immediate and audio begins before lyrics/recommendations/MV/artwork enrichments complete. Capture `playback-diagnostics` and record `firstPlaying elapsedMs`; repeated fresh-remote starts over roughly 5 seconds on stable Wi-Fi should be investigated. |
+| Real first-audible playback feel on device | PLAY-01, PLAY-02, PLAY-05 | passed in `01-UAT.md` | Simulator/unit tests prove ordering, but audible latency and AVAudioSession behavior should be felt on the target iPhone. | User reported on 2026-06-26 that the app runs on the target iPhone and tapping a song produces audio in approximately 1-2 seconds. |
 
 ### Playback Diagnostics Procedure
 
@@ -103,4 +104,4 @@ For real-device UAT, run a DEBUG build on the iPhone and inspect logs through Xc
 - [x] Final full-suite feedback latency was under 8 minutes.
 - [x] `nyquist_compliant: true` set after Wave 0 and final full-suite run.
 
-**Approval:** Automated checks passed. Manual iPhone/CDN checks are carried in `01-UAT.md` and keep the phase in human verification state.
+**Approval:** Automated checks passed and real-device first-audible UAT passed. The real Bilibili CDN expired prepared-stream retry check remains carried in `01-UAT.md` and keeps the phase in human verification state.

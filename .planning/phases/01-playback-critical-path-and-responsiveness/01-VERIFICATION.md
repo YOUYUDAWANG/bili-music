@@ -3,14 +3,11 @@ phase: 01-playback-critical-path-and-responsiveness
 verified: 2026-06-26T07:38:02Z
 status: human_needed
 score: 12/12 must-haves verified
-behavior_unverified: 2
+behavior_unverified: 1
 uat_instructions_updated: 2026-06-26T07:43:28Z
 debug_autoplay_console_updated: 2026-06-26T07:49:21Z
+first_audible_uat_passed: 2026-06-26T08:06:40Z
 behavior_unverified_items:
-  - truth: "Real first-audible playback feel on the target iPhone is acceptable after cold launch."
-    test: "Install on the user's iPhone, cold-launch, tap a first Home/Search track, and listen for startup latency."
-    expected: "The selected track becomes current immediately and audio starts before lyrics, recommendations, MV, artwork, history, or cache enrichment visibly blocks the path."
-    why_human: "Simulator/unit tests prove ordering but cannot verify audible latency and AVAudioSession feel on the user's device."
   - truth: "A real expired or unauthorized Bilibili prepared stream retries once without requiring another tap."
     test: "Use a real playable BVID with a prepared remote stream that has expired or returns a CDN/AVPlayer failure if feasible."
     expected: "The app invalidates the prepared stream, resolves one fresh stream, and requests playback without a second user tap."
@@ -64,11 +61,11 @@ behavior_unverified_items:
 
 | Requirement | Status | Blocking Issue |
 |-------------|--------|----------------|
-| PLAY-01 | SATISFIED | None for code ordering; real-device audible feel pending UAT. |
-| PLAY-02 | SATISFIED | None for source-resolution path; real-device audible feel pending UAT. |
+| PLAY-01 | SATISFIED | Real-device audible feel passed UAT: target iPhone starts audio in approximately 1-2 seconds after tapping a song. |
+| PLAY-02 | SATISFIED | Real-device first-audible playback passed UAT; no blocking source-resolution issue observed. |
 | PLAY-03 | SATISFIED | None. |
 | PLAY-04 | SATISFIED | None for deterministic retry path; real CDN/expired-url behavior pending UAT. |
-| PLAY-05 | SATISFIED | None for post-start ordering; real-device audible feel pending UAT. |
+| PLAY-05 | SATISFIED | Real-device first-audible playback passed UAT; enrichment work did not visibly block first sound. |
 | SRCH-01 | SATISFIED | None. |
 | SRCH-02 | SATISFIED | None. |
 | RECO-01 | SATISFIED | None. |
@@ -78,7 +75,7 @@ behavior_unverified_items:
 | MEM-03 | SATISFIED | None. |
 | TEST-04 | SATISFIED | None. |
 
-**Coverage:** 13/13 Phase 01 mapped requirements satisfied by automated evidence, with two human integration confirmations still pending.
+**Coverage:** 13/13 Phase 01 mapped requirements satisfied by automated evidence; real-device first-audible playback passed UAT, with one real CDN retry confirmation still pending.
 
 ## Anti-Patterns Found
 
@@ -90,6 +87,7 @@ None found during this verification pass.
 
 **Test:** Install on the user's iPhone, cold-launch, tap a first Home/Search track, and observe the immediate current-track feedback plus audible startup.
 **Expected:** The selected track becomes current immediately and audio begins before lyrics, recommendations, MV, artwork, history, or cache enrichment visibly blocks the path.
+**Result:** PASSED on 2026-06-26. User reported the app runs on the target iPhone and tapping a song produces audio in approximately 1-2 seconds.
 **Why human:** Simulator/unit tests prove ordering but cannot verify audible latency and AVAudioSession feel on the target iPhone.
 **Diagnostics:** Use Xcode's device console or the macOS Console app to filter subsystem `com.fubuki.BiliMusic`, category `playback-diagnostics`. For the tapped `bvid`, confirm the sequence reaches `checkpoint=firstPlaying` after `checkpoint=playRequested` and record `elapsedMs`. Optional `AUTOPLAY_BV` DEBUG runs also print `AUTOPLAY_DIAGNOSTIC checkpoint=...` lines directly to the Xcode console. Repeated fresh-remote starts over roughly 5 seconds on stable Wi-Fi should be treated as a performance regression candidate.
 
@@ -102,7 +100,7 @@ None found during this verification pass.
 
 ## Gaps Summary
 
-No implementation gaps found. Phase 01 remains in `human_needed` status only because two real-device/CDN integration checks cannot be proven by the automated simulator suite.
+No implementation gaps found. Phase 01 remains in `human_needed` status only because the real expired/unauthorized Bilibili prepared-stream retry case cannot be proven by the automated simulator suite.
 
 ## Automated Checks
 
@@ -124,7 +122,7 @@ Result:
 **Verification approach:** Goal-backward from ROADMAP Phase 01 success criteria plus SUMMARY evidence.
 **Must-haves source:** `.planning/ROADMAP.md`, `.planning/REQUIREMENTS.md`, and `01-01` through `01-05` summaries.
 **Automated checks:** 47 passed, 0 failed.
-**Human checks required:** 2.
+**Human checks required:** 1 remaining; 1 passed.
 **Total verification time:** 71 seconds for final automated full-suite command.
 
 ---
