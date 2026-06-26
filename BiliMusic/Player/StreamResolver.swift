@@ -108,3 +108,13 @@ final class StreamResolver {
         return (cid ?? page.cid, duration > 0 ? duration : page.duration)
     }
 }
+
+@MainActor
+protocol AudioStreamResolving: AnyObject {
+    func cachedAudio(for track: Track) -> StreamResolver.PreparedAudioStream?
+    func isPreparing(_ track: Track) -> Bool
+    func invalidateAudio(for track: Track)
+    func prepareAudio(for track: Track, preferredQuality: Int) async throws -> StreamResolver.PreparedAudioStream
+}
+
+extension StreamResolver: AudioStreamResolving {}

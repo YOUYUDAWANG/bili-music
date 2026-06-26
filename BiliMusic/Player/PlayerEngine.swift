@@ -67,6 +67,15 @@ struct Track: Identifiable, Equatable, Codable {
     }
 }
 
+struct PlaybackSource {
+    let track: Track
+    let url: URL
+    let isLocal: Bool
+    let kind: PlaybackDiagnosticEvent.SourceKind
+    let quality: Int?
+    let bandwidth: Int?
+}
+
 @Observable
 @MainActor
 final class PlayerEngine {
@@ -96,6 +105,50 @@ final class PlayerEngine {
             case .repeatOne: "repeat.1"
             case .radio: "dot.radiowaves.left.and.right"
             }
+        }
+    }
+
+    enum PlaybackStartupTestEvent: Equatable {
+        case currentAssigned
+        case sourceResolutionStarted
+        case sourceResolved(PlaybackDiagnosticEvent.SourceKind)
+        case playerItemCreated(PlaybackDiagnosticEvent.SourceKind)
+        case playRequested(PlaybackDiagnosticEvent.SourceKind)
+        case firstPlaying(PlaybackDiagnosticEvent.SourceKind)
+        case historyScheduled
+        case artworkScheduled
+        case lyricsScheduled
+        case mvPreparationScheduled
+        case queuePrefetchScheduled
+        case autoCacheScheduled
+        case preparedStreamInvalidated
+        case preparedStreamRetryRequested
+        case failureSurfaced
+    }
+
+    struct PlaybackStartupTestHooks {
+        private var recorder: (@MainActor (PlaybackStartupTestEvent) -> Void)?
+        var startPlaybackOverride: (@MainActor (PlaybackSource, Double, UUID) -> Void)?
+        var reportFirstPlayingImmediately: Bool
+
+        init(
+            record: (@MainActor (PlaybackStartupTestEvent) -> Void)? = nil,
+            startPlaybackOverride: (@MainActor (PlaybackSource, Double, UUID) -> Void)? = nil,
+            reportFirstPlayingImmediately: Bool = false
+        ) {
+            self.recorder = record
+            self.startPlaybackOverride = startPlaybackOverride
+            self.reportFirstPlayingImmediately = reportFirstPlayingImmediately
+        }
+
+        static let none = PlaybackStartupTestHooks()
+        var isActive: Bool {
+            recorder != nil || startPlaybackOverride != nil || reportFirstPlayingImmediately
+        }
+
+        @MainActor
+        func record(_ event: PlaybackStartupTestEvent) {
+            recorder?(event)
         }
     }
 
@@ -132,12 +185,15 @@ final class PlayerEngine {
 
     private let client = BiliClient()
     private let lyricsClient = LyricsClient()
-    private let streamResolver = StreamResolver()
+    private let streamResolver: any AudioStreamResolving
     private let playbackDiagnostics: PlaybackDiagnostics
+    private let startupTestHooks: PlaybackStartupTestHooks
     private var player: AVPlayer?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var statusObserver: NSKeyValueObservation?
+    private var itemStatusObserver: NSKeyValueObservation?
+    private var itemFailureObserver: NSObjectProtocol?
     private var bufferObserver: NSKeyValueObservation?
     /// 用户意图:是否希望在播放。用来区分「用户主动暂停」与「缓冲断流导致的暂停」——
     /// 后者不该停住,缓冲恢复后要自动续播。
@@ -155,6 +211,9 @@ final class PlayerEngine {
     private var prefetchedRadio: (seed: TrackKey, track: Track)?
     private var playbackGeneration = UUID()
     private var firstPlayingDiagnosticsGeneration: UUID?
+    private var retriedPreparedStreamGenerations: Set<UUID> = []
+    private var activePlaybackSource: PlaybackSource?
+    private var activePlaybackGeneration: UUID?
     private var manualPlaybackModeOverride: PlaybackMode?
 
     private struct PreparedVideoStream {
@@ -163,8 +222,14 @@ final class PlayerEngine {
         let fetchedAt: Date
     }
 
-    init(playbackDiagnostics: PlaybackDiagnostics = PlaybackDiagnostics()) {
+    init(
+        playbackDiagnostics: PlaybackDiagnostics = PlaybackDiagnostics(),
+        streamResolver: (any AudioStreamResolving)? = nil,
+        startupTestHooks: PlaybackStartupTestHooks = .none
+    ) {
         self.playbackDiagnostics = playbackDiagnostics
+        self.streamResolver = streamResolver ?? StreamResolver()
+        self.startupTestHooks = startupTestHooks
         Task(priority: .userInitiated) {
             try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
         }
@@ -177,7 +242,7 @@ final class PlayerEngine {
     /// 用一组曲目替换队列并从指定位置开播(搜索页点击)
     func play(tracks: [Track], startAt index: Int, queueMode: QueueMode? = nil) async {
 #if DEBUG
-        if UITestFixtures.enabled {
+        if UITestFixtures.enabled && !startupTestHooks.isActive {
             installUITestFixture(tracks: tracks, startAt: index)
             return
         }
@@ -202,7 +267,7 @@ final class PlayerEngine {
 
     func playRadio(seed track: Track) async {
 #if DEBUG
-        if UITestFixtures.enabled {
+        if UITestFixtures.enabled && !startupTestHooks.isActive {
             installUITestFixture(tracks: [track], startAt: 0)
             queueMode = .radio
             return
@@ -334,7 +399,7 @@ final class PlayerEngine {
     func jump(to index: Int) async {
         guard queue.indices.contains(index) else { return }
 #if DEBUG
-        if UITestFixtures.enabled {
+        if UITestFixtures.enabled && !startupTestHooks.isActive {
             installUITestFixture(tracks: queue, startAt: index)
             return
         }
@@ -462,7 +527,9 @@ final class PlayerEngine {
         let generation = UUID()
         playbackGeneration = generation
         firstPlayingDiagnosticsGeneration = nil
+        retriedPreparedStreamGenerations.removeAll()
         playbackDiagnostics.record(.currentAssigned, track: track)
+        startupTestHooks.record(.currentAssigned)
         state = .loading
         currentTime = resumeAt
         lyrics = []
@@ -473,72 +540,20 @@ final class PlayerEngine {
         postPlaybackTask?.cancel()
         queuePrefetchTask?.cancel()
         do {
-            let url: URL
-            let isLocal: Bool
-            let sourceKind: PlaybackDiagnosticEvent.SourceKind
-            if playbackMode == .mv {
-                if track.cid == nil {
-                    track = try await fillPlaybackPage(for: track)
-                    queue[queueIndex] = track
-                }
-                if let prepared = preparedVideoStream(for: track), prepared.cid == track.cid {
-                    url = prepared.url
-                } else {
-                    url = try await client.videoStream(bvid: track.bvid, cid: track.cid!)
-                    preparedVideoStreams[track.key] = PreparedVideoStream(
-                        url: url, cid: track.cid!, fetchedAt: Date())
-                }
-                isLocal = false
-                sourceKind = .mvRemote
-                videoAvailable = true
-            } else if let cached = CacheStore.shared.entry(for: track) {
-                // 缓存优先,顺便补全 cid,离线也能播
-                track.cid = cached.cid
-                track.duration = cached.duration
-                queue[queueIndex] = track
-                url = CacheStore.audioDir.appendingPathComponent(cached.fileName)
-                isLocal = true
-                sourceKind = .localCache
-                currentAudioQuality = cached.quality
-                currentAudioBandwidth = nil
-            } else if let prepared = streamResolver.cachedAudio(for: track) {
-                track.cid = prepared.cid
-                track.duration = prepared.duration
-                queue[queueIndex] = track
-                url = prepared.url
-                isLocal = false
-                sourceKind = .preparedRemote
-                currentAudioQuality = prepared.quality
-                currentAudioBandwidth = prepared.bandwidth
-            } else {
-                let prepared = try await streamResolver.prepareAudio(
-                    for: track,
-                    preferredQuality: Self.playbackQuality)
-                track.cid = prepared.cid
-                track.duration = prepared.duration
-                queue[queueIndex] = track
-                url = prepared.url
-                isLocal = false
-                sourceKind = .freshRemote
-                currentAudioQuality = prepared.quality
-                currentAudioBandwidth = prepared.bandwidth
-            }
+            let source = try await resolvePlaybackSource(for: track)
+            track = source.track
             guard playbackGeneration == generation, current.map({ track.key.matches($0) }) ?? false else { return }
+            currentAudioQuality = source.quality
+            currentAudioBandwidth = source.bandwidth
             playbackDiagnostics.record(
                 .sourceResolved,
                 track: track,
-                sourceKind: sourceKind,
+                sourceKind: source.kind,
                 quality: currentAudioQuality,
                 bandwidth: currentAudioBandwidth)
-            startPlayback(url: url, isLocal: isLocal, resumeAt: resumeAt, sourceKind: sourceKind, track: track)
+            startupTestHooks.record(.sourceResolved(source.kind))
+            startPlayback(source: source, resumeAt: resumeAt, generation: generation)
             try? AVAudioSession.sharedInstance().setActive(true)
-            state = .playing
-            let shouldRecordHistory = resumeAt < 1 || !playedKeys.contains(track.key)
-            playedKeys.insert(track.key)
-            if shouldRecordHistory {
-                PlaybackHistoryStore.shared.record(track)
-            }
-            schedulePostPlaybackWork(for: track, generation: generation, isLocal: isLocal)
         } catch {
             guard playbackGeneration == generation else { return }
             if playbackMode == .mv {
@@ -558,6 +573,8 @@ final class PlayerEngine {
         queuePrefetchTask?.cancel()
         autoMVTask?.cancel()
         postPlaybackTask?.cancel()
+        itemStatusObserver?.invalidate()
+        if let itemFailureObserver { NotificationCenter.default.removeObserver(itemFailureObserver) }
         player?.pause()
         player = nil
         queue = tracks
@@ -572,6 +589,8 @@ final class PlayerEngine {
         videoAvailable = !tracks.isEmpty
         currentAudioQuality = nil
         currentAudioBandwidth = nil
+        activePlaybackSource = nil
+        activePlaybackGeneration = nil
         isMiniPlayerHidden = false
     }
 #endif
@@ -603,6 +622,73 @@ final class PlayerEngine {
         // 新点击歌曲先出声。MV 流尤其是高画质会明显慢于音频流;Wi-Fi 优先 MV
         // 只作为切换/预取策略,不阻塞新歌首播。
         .music
+    }
+
+    private func resolvePlaybackSource(for initialTrack: Track) async throws -> PlaybackSource {
+        startupTestHooks.record(.sourceResolutionStarted)
+        var track = initialTrack
+        if playbackMode == .mv {
+            if track.cid == nil {
+                track = try await fillPlaybackPage(for: track)
+                queue[queueIndex] = track
+            }
+            let url: URL
+            if let prepared = preparedVideoStream(for: track), prepared.cid == track.cid {
+                url = prepared.url
+            } else {
+                url = try await client.videoStream(bvid: track.bvid, cid: track.cid!)
+                preparedVideoStreams[track.key] = PreparedVideoStream(
+                    url: url, cid: track.cid!, fetchedAt: Date())
+            }
+            videoAvailable = true
+            return PlaybackSource(
+                track: track,
+                url: url,
+                isLocal: false,
+                kind: .mvRemote,
+                quality: nil,
+                bandwidth: nil)
+        }
+
+        if let cached = CacheStore.shared.entry(for: track) {
+            track.cid = cached.cid
+            track.duration = cached.duration
+            queue[queueIndex] = track
+            return PlaybackSource(
+                track: track,
+                url: CacheStore.audioDir.appendingPathComponent(cached.fileName),
+                isLocal: true,
+                kind: .localCache,
+                quality: cached.quality,
+                bandwidth: nil)
+        }
+
+        if let prepared = streamResolver.cachedAudio(for: track) {
+            track.cid = prepared.cid
+            track.duration = prepared.duration
+            queue[queueIndex] = track
+            return PlaybackSource(
+                track: track,
+                url: prepared.url,
+                isLocal: false,
+                kind: .preparedRemote,
+                quality: prepared.quality,
+                bandwidth: prepared.bandwidth)
+        }
+
+        let prepared = try await streamResolver.prepareAudio(
+            for: track,
+            preferredQuality: Self.playbackQuality)
+        track.cid = prepared.cid
+        track.duration = prepared.duration
+        queue[queueIndex] = track
+        return PlaybackSource(
+            track: track,
+            url: prepared.url,
+            isLocal: false,
+            kind: .freshRemote,
+            quality: prepared.quality,
+            bandwidth: prepared.bandwidth)
     }
 
     /// 电台选歌:用统一推荐引擎打分,避免 related 第一条把队列带偏。
@@ -680,10 +766,21 @@ final class PlayerEngine {
         }
     }
 
-    private func schedulePostPlaybackWork(for track: Track, generation: UUID, isLocal: Bool) {
+    private func schedulePostPlaybackWork(for track: Track, generation: UUID, resumeAt: Double) {
         postPlaybackTask?.cancel()
-        postPlaybackTask = Task(priority: .utility) { [weak self, track, generation, isLocal] in
+        let shouldRecordHistory = resumeAt < 1 || !playedKeys.contains(track.key)
+        playedKeys.insert(track.key)
+        if shouldRecordHistory {
+            startupTestHooks.record(.historyScheduled)
+        }
+        startupTestHooks.record(.artworkScheduled)
+        startupTestHooks.record(.lyricsScheduled)
+        postPlaybackTask = Task(priority: .utility) { [weak self, track, generation, shouldRecordHistory] in
             guard let self else { return }
+
+            if shouldRecordHistory {
+                PlaybackHistoryStore.shared.record(track)
+            }
 
             try? await Task.sleep(for: .milliseconds(900))
             guard self.isCurrent(track, generation: generation) else { return }
@@ -692,20 +789,6 @@ final class PlayerEngine {
             try? await Task.sleep(for: .milliseconds(900))
             guard self.isCurrent(track, generation: generation) else { return }
             await self.loadLyrics(for: track, generation: generation)
-
-            try? await Task.sleep(for: .milliseconds(900))
-            guard self.isCurrent(track, generation: generation) else { return }
-            await self.prepareVideoIfUseful(for: track, generation: generation)
-
-            try? await Task.sleep(for: .milliseconds(600))
-            guard self.isCurrent(track, generation: generation) else { return }
-            await self.prefetchUpcomingTracks()
-
-            if !isLocal, UserDefaults.standard.bool(forKey: "autoCache") {
-                try? await Task.sleep(for: .seconds(8))
-                guard self.isCurrent(track, generation: generation) else { return }
-                await DownloadManager.shared.download(track: track)
-            }
         }
     }
 
@@ -718,38 +801,43 @@ final class PlayerEngine {
         scheduleQueuePrefetch()
     }
 
-    private func startPlayback(
-        url: URL,
-        isLocal: Bool = false,
-        resumeAt: Double = 0,
-        sourceKind: PlaybackDiagnosticEvent.SourceKind,
-        track: Track
-    ) {
-        let generation = playbackGeneration
+    private func startPlayback(source: PlaybackSource, resumeAt: Double = 0, generation: UUID) {
         if let timeObserver, let player { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        if let itemFailureObserver { NotificationCenter.default.removeObserver(itemFailureObserver) }
         statusObserver?.invalidate()
+        itemStatusObserver?.invalidate()
         bufferObserver?.invalidate()
         player?.pause()
         player?.replaceCurrentItem(with: nil)
         timeObserver = nil
         endObserver = nil
         statusObserver = nil
+        itemStatusObserver = nil
+        itemFailureObserver = nil
         bufferObserver = nil
+        activePlaybackSource = source
+        activePlaybackGeneration = generation
         wantsPlayback = true   // startPlayback 一定是「要播」的语境
-        let asset = isLocal
-            ? AVURLAsset(url: url)
-            : AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": BiliClient.headers])
+
+        if let startPlaybackOverride = startupTestHooks.startPlaybackOverride {
+            recordPlayerItemCreated(for: source)
+            startPlaybackOverride(source, resumeAt, generation)
+            recordPlayRequested(for: source)
+            if startupTestHooks.reportFirstPlayingImmediately {
+                handleFirstObservedPlaying(source: source, generation: generation, resumeAt: resumeAt)
+            }
+            return
+        }
+
+        let asset = source.isLocal
+            ? AVURLAsset(url: source.url)
+            : AVURLAsset(url: source.url, options: ["AVURLAssetHTTPHeaderFieldsKey": BiliClient.headers])
         let item = AVPlayerItem(asset: asset)
         // 本地文件不需要前向缓冲;在线流缓冲 30s,降低弱网下播一半停住的概率。
-        item.preferredForwardBufferDuration = isLocal ? 0 : 30
+        item.preferredForwardBufferDuration = source.isLocal ? 0 : 30
         item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
-        playbackDiagnostics.record(
-            .playerItemCreated,
-            track: track,
-            sourceKind: sourceKind,
-            quality: currentAudioQuality,
-            bandwidth: currentAudioBandwidth)
+        recordPlayerItemCreated(for: source)
         let player = AVPlayer(playerItem: item)
         // false = 数据一到就播,起播快;代价是断流后不会自己恢复,
         // 所以下面用 bufferObserver 手动续播,兼顾「快起播」和「不中途卡死」。
@@ -769,17 +857,7 @@ final class PlayerEngine {
                 guard let self else { return }
                 switch player.timeControlStatus {
                 case .playing:
-                    self.state = .playing
-                    if self.playbackGeneration == generation,
-                       self.firstPlayingDiagnosticsGeneration != generation {
-                        self.firstPlayingDiagnosticsGeneration = generation
-                        self.playbackDiagnostics.record(
-                            .firstPlaying,
-                            track: track,
-                            sourceKind: sourceKind,
-                            quality: self.currentAudioQuality,
-                            bandwidth: self.currentAudioBandwidth)
-                    }
+                    self.handleFirstObservedPlaying(source: source, generation: generation, resumeAt: resumeAt)
                 case .paused:
                     // 关键:区分「用户主动暂停」与「缓冲断流」。用户想播却变 paused = 断流,
                     // 显示 loading 而非 paused,等 bufferObserver 在缓冲恢复后续播。
@@ -789,6 +867,34 @@ final class PlayerEngine {
                 @unknown default:
                     break
                 }
+            }
+        }
+        itemStatusObserver = item.observe(\.status, options: [.new]) { [weak self] item, _ in
+            Task { @MainActor in
+                guard let self,
+                      self.playbackGeneration == generation,
+                      self.player?.currentItem === item,
+                      item.status == .failed else { return }
+                await self.handlePlaybackItemFailure(
+                    source: source,
+                    generation: generation,
+                    resumeAt: item.currentTime().seconds,
+                    errorDescription: item.error?.localizedDescription)
+            }
+        }
+        itemFailureObserver = NotificationCenter.default.addObserver(
+            forName: AVPlayerItem.failedToPlayToEndTimeNotification, object: item, queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor in
+                guard let self,
+                      self.playbackGeneration == generation,
+                      self.player?.currentItem === item else { return }
+                let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
+                await self.handlePlaybackItemFailure(
+                    source: source,
+                    generation: generation,
+                    resumeAt: item.currentTime().seconds,
+                    errorDescription: error?.localizedDescription)
             }
         }
         // 缓冲恢复后自动续播。automaticallyWaitsToMinimizeStalling=false 时 AVPlayer
@@ -830,14 +936,111 @@ final class PlayerEngine {
         if resumeAt > 0 {
             player.seek(to: CMTime(seconds: resumeAt, preferredTimescale: 600))
         }
-        playbackDiagnostics.record(
-            .playRequested,
-            track: track,
-            sourceKind: sourceKind,
-            quality: currentAudioQuality,
-            bandwidth: currentAudioBandwidth)
+        recordPlayRequested(for: source)
         player.playImmediately(atRate: 1)
         updateNowPlayingInfo()
+    }
+
+    private func recordPlayerItemCreated(for source: PlaybackSource) {
+        playbackDiagnostics.record(
+            .playerItemCreated,
+            track: source.track,
+            sourceKind: source.kind,
+            quality: source.quality,
+            bandwidth: source.bandwidth)
+        startupTestHooks.record(.playerItemCreated(source.kind))
+    }
+
+    private func recordPlayRequested(for source: PlaybackSource) {
+        playbackDiagnostics.record(
+            .playRequested,
+            track: source.track,
+            sourceKind: source.kind,
+            quality: source.quality,
+            bandwidth: source.bandwidth)
+        startupTestHooks.record(.playRequested(source.kind))
+    }
+
+    private func handleFirstObservedPlaying(source: PlaybackSource, generation: UUID, resumeAt: Double) {
+        guard playbackGeneration == generation,
+              current.map({ source.track.key.matches($0) }) ?? false else { return }
+        state = .playing
+        guard firstPlayingDiagnosticsGeneration != generation else { return }
+        firstPlayingDiagnosticsGeneration = generation
+        playbackDiagnostics.record(
+            .firstPlaying,
+            track: source.track,
+            sourceKind: source.kind,
+            quality: source.quality,
+            bandwidth: source.bandwidth)
+        startupTestHooks.record(.firstPlaying(source.kind))
+        schedulePostPlaybackWork(for: source.track, generation: generation, resumeAt: resumeAt)
+    }
+
+    private func handlePlaybackItemFailure(
+        source: PlaybackSource,
+        generation: UUID,
+        resumeAt: Double,
+        errorDescription: String?
+    ) async {
+        guard playbackGeneration == generation,
+              current.map({ source.track.key.matches($0) }) ?? false else { return }
+
+        guard source.kind == .preparedRemote,
+              !retriedPreparedStreamGenerations.contains(generation) else {
+            startupTestHooks.record(.failureSurfaced)
+            state = .failed(errorDescription ?? "播放失败")
+            return
+        }
+
+        retriedPreparedStreamGenerations.insert(generation)
+        startupTestHooks.record(.preparedStreamInvalidated)
+        streamResolver.invalidateAudio(for: source.track)
+
+        do {
+            let prepared = try await streamResolver.prepareAudio(
+                for: source.track,
+                preferredQuality: Self.playbackQuality)
+            var retryTrack = source.track
+            retryTrack.cid = prepared.cid
+            retryTrack.duration = prepared.duration
+            guard playbackGeneration == generation,
+                  current.map({ retryTrack.key.matches($0) }) ?? false else { return }
+            queue[queueIndex] = retryTrack
+            let retrySource = PlaybackSource(
+                track: retryTrack,
+                url: prepared.url,
+                isLocal: false,
+                kind: .freshRemote,
+                quality: prepared.quality,
+                bandwidth: prepared.bandwidth)
+            currentAudioQuality = retrySource.quality
+            currentAudioBandwidth = retrySource.bandwidth
+            playbackDiagnostics.record(
+                .sourceResolved,
+                track: retryTrack,
+                sourceKind: retrySource.kind,
+                quality: retrySource.quality,
+                bandwidth: retrySource.bandwidth)
+            startupTestHooks.record(.sourceResolved(retrySource.kind))
+            startupTestHooks.record(.preparedStreamRetryRequested)
+            startPlayback(source: retrySource, resumeAt: resumeAt.isFinite ? resumeAt : currentTime, generation: generation)
+            try? AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            guard playbackGeneration == generation else { return }
+            startupTestHooks.record(.failureSurfaced)
+            state = .failed(error.localizedDescription)
+        }
+    }
+
+    func simulateCurrentPlaybackItemFailureForTesting(message: String = "播放失败") async {
+        guard let source = activePlaybackSource,
+              let generation = activePlaybackGeneration else { return }
+        await handlePlaybackItemFailure(
+            source: source,
+            generation: generation,
+            resumeAt: currentTime,
+            errorDescription: message)
     }
 
     private func loadCover(for track: Track, generation: UUID) async {

@@ -6,14 +6,14 @@ final class PlaybackCriticalPathTests: XCTestCase {
     func testPlayAssignsCurrentBeforeAwaitedSourceResolutionCompletes() async {
         let track = Self.track()
         let resolver = CriticalPathAudioResolver(
-            prepared: .init(
+            prepared: Self.stream(
                 url: URL(string: "https://example.invalid/prepared.m4a")!,
                 cid: 1001,
                 duration: 211,
                 quality: 30280,
                 bandwidth: 192_000))
         var currentDuringResolution: Track?
-        resolver.onPrepare = { engine in
+        resolver.onPrepare = { (engine: PlayerEngine) in
             currentDuringResolution = engine.current
         }
         let engine = PlayerEngine(
@@ -21,7 +21,7 @@ final class PlaybackCriticalPathTests: XCTestCase {
             startupTestHooks: .init(
                 startPlaybackOverride: { _, _, _ in },
                 reportFirstPlayingImmediately: false))
-        resolver.engineProvider = { engine }
+        resolver.engineProvider = { return engine }
 
         await engine.play(tracks: [track], startAt: 0)
 
@@ -32,7 +32,7 @@ final class PlaybackCriticalPathTests: XCTestCase {
     func testPlaybackRequestUsesOnlyOneFreshAudioResolutionBeforePlay() async {
         let track = Self.track(cid: nil)
         let resolver = CriticalPathAudioResolver(
-            prepared: .init(
+            prepared: Self.stream(
                 url: URL(string: "https://example.invalid/fresh.m4a")!,
                 cid: 1001,
                 duration: 211,
@@ -60,13 +60,15 @@ final class PlaybackCriticalPathTests: XCTestCase {
 
     func testFirstObservedPlayingSchedulesOnlyAllowedPostSoundWork() async {
         let track = Self.track()
+        let cached = Self.stream(
+            url: URL(fileURLWithPath: "/tmp/critical-path.m4a"),
+            cid: 1001,
+            duration: 211,
+            quality: 30280,
+            bandwidth: 0)
         let resolver = CriticalPathAudioResolver(
-            cached: .init(
-                url: URL(fileURLWithPath: "/tmp/critical-path.m4a"),
-                cid: 1001,
-                duration: 211,
-                quality: 30280,
-                bandwidth: 0))
+            cached: cached,
+            prepared: cached)
         var events: [PlayerEngine.PlaybackStartupTestEvent] = []
         let engine = PlayerEngine(
             streamResolver: resolver,
@@ -94,6 +96,22 @@ final class PlaybackCriticalPathTests: XCTestCase {
             artist: "Fixture Artist",
             coverURL: nil,
             duration: cid == nil ? 0 : 211)
+    }
+
+    private static func stream(
+        url: URL,
+        cid: Int,
+        duration: Int,
+        quality: Int,
+        bandwidth: Int
+    ) -> StreamResolver.PreparedAudioStream {
+        .init(
+            url: url,
+            cid: cid,
+            duration: duration,
+            quality: quality,
+            bandwidth: bandwidth,
+            fetchedAt: Date())
     }
 }
 
