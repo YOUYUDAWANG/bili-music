@@ -25,10 +25,10 @@ v1 聚焦当前用户已经反复遇到的卡顿和稳定性问题。目标不�
 
 ### Recommendation Stability
 
-- [ ] **RECO-01**: User can start the first song after app launch without causing the Home recommendation list to flash, reset, or auto-refresh.
+- [x] **RECO-01**: User can start the first song after app launch without causing the Home recommendation list to flash, reset, or auto-refresh.
 - [ ] **RECO-02**: User can tap a track from the player recommendation list without immediately refreshing or scrambling that visible recommendation list.
 - [ ] **RECO-03**: Home recommendations and Now Playing related recommendations maintain separate refresh state and do not cancel, clear, or reset each other.
-- [ ] **RECO-04**: Recommendation refresh work is bounded and lower priority than direct playback startup.
+- [x] **RECO-04**: Recommendation refresh work is bounded and lower priority than direct playback startup.
 - [ ] **RECO-05**: Recommendation sources apply the same music-only filtering principles as Search.
 
 ### Memory and Images
@@ -113,10 +113,10 @@ Roadmap mapping is filled during roadmap creation.
 | SRCH-03 | Phase 2 | Pending |
 | SRCH-04 | Phase 2 | Pending |
 | SRCH-05 | Phase 2 | Pending |
-| RECO-01 | Phase 1 | Pending |
+| RECO-01 | Phase 1 | Complete |
 | RECO-02 | Phase 2 | Pending |
 | RECO-03 | Phase 2 | Pending |
-| RECO-04 | Phase 1 | Pending |
+| RECO-04 | Phase 1 | Complete |
 | RECO-05 | Phase 2 | Pending |
 | MEM-01 | Phase 1 | Pending |
 | MEM-02 | Phase 1 | Pending |

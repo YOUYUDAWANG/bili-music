@@ -33,12 +33,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. User can enter Search and focus an empty search field with local history and suggestions appearing without network work or a keyboard freeze.
   5. User can scroll image-heavy search, recommendation, and player surfaces, then background the app, without unbounded image retention or memory cleanup interrupting playback state.
 
-**Plans**: 3/5 plans executed
+**Plans**: 4/5 plans executed
 
 - [x] 01-01-PLAN.md
 - [x] 01-02-PLAN.md
 - [x] 01-03-PLAN.md
-- [ ] 01-04-PLAN.md
+- [x] 01-04-PLAN.md
 - [ ] 01-05-PLAN.md
 
 **UI hint**: yes
@@ -90,6 +90,6 @@ Phases execute in numeric order: 1 -> 2 -> 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Playback Critical Path and Responsiveness | 3/5 | In Progress|  |
+| 1. Playback Critical Path and Responsiveness | 4/5 | In Progress|  |
 | 2. Discovery Reliability and Music-Only Results | 0/TBD | Not started | - |
 | 3. Player Interaction and Regression Coverage | 0/TBD | Not started | - |

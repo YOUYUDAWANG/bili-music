@@ -5,16 +5,16 @@ milestone_name: milestone
 current_phase: 01
 current_phase_name: Playback Critical Path and Responsiveness
 status: executing
-stopped_at: Completed 01-03-PLAN.md
-last_updated: "2026-06-26T06:32:49.000Z"
+stopped_at: Completed 01-04-PLAN.md
+last_updated: "2026-06-26T07:01:38.000Z"
 last_activity: 2026-06-26
-last_activity_desc: Completed 01-03 search focus local-only behavior
+last_activity_desc: Completed 01-04 Home recommendation stability and scheduling
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 5
-  completed_plans: 3
-  percent: 60
+  completed_plans: 4
+  percent: 80
 ---
 
 # Project State
@@ -29,32 +29,32 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 ## Current Position
 
 Phase: 01 (Playback Critical Path and Responsiveness) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
-Last activity: 2026-06-26 — Completed 01-03 search focus local-only behavior
+Last activity: 2026-06-26 — Completed 01-04 Home recommendation stability and scheduling
 
-Progress: [######----] 60%
+Progress: [########--] 80%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 3
-- Average duration: 15 min
-- Total execution time: 0.77 hours
+- Total plans completed: 4
+- Average duration: 14 min
+- Total execution time: 0.90 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1. Playback Critical Path and Responsiveness | 3 | 46 min | 15 min |
+| 1. Playback Critical Path and Responsiveness | 4 | 54 min | 14 min |
 | 2. Discovery Reliability and Music-Only Results | TBD | - | - |
 | 3. Player Interaction and Regression Coverage | TBD | - | - |
 
 **Recent Trend:**
 
-- Last 5 plans: 01-01, 01-02, 01-03
-- Trend: Playback and search focus stabilization progressing
+- Last 5 plans: 01-01, 01-02, 01-03, 01-04
+- Trend: Playback, search focus, and Home recommendation stability progressing
 
 *Updated after each plan completion*
 
@@ -72,6 +72,8 @@ Recent decisions affecting current work:
 - [01-02]: Prepared remote audio failure invalidates matching/fallback resolver entries and retries one fresh stream without a second user tap.
 - [01-03]: Search focus and typing stay local; Bilibili search starts from explicit submit, retry, broaden, or pagination only.
 - [01-03]: Empty search can render local history suggestions, recent playback, and cached songs without remote work.
+- [01-04]: Home recommendation work now starts from explicit Home load/manual refresh triggers with bounded seed/request limits.
+- [01-04]: Home recommendation scoring and fan-out run at utility priority while radio and related-panel recommendations keep interactive priority.
 
 ### Pending Todos
 
@@ -95,6 +97,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-26T06:32:49.000Z
-Stopped at: Completed 01-03-PLAN.md
-Resume file: .planning/phases/01-playback-critical-path-and-responsiveness/01-04-PLAN.md
+Last session: 2026-06-26T07:01:38.000Z
+Stopped at: Completed 01-04-PLAN.md
+Resume file: .planning/phases/01-playback-critical-path-and-responsiveness/01-05-PLAN.md
