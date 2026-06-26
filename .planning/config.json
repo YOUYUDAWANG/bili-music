@@ -19,7 +19,8 @@
     "research_before_questions": false,
     "discuss_mode": "discuss",
     "skip_discuss": false,
-    "use_worktrees": true
+    "use_worktrees": false,
+    "_auto_chain_active": false
   },
   "plan_review": {
     "source_grounding": true
