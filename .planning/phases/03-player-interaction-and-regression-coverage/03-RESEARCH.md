@@ -392,22 +392,18 @@ All claims in this research were verified from local project artifacts, CodeGrap
 |---|-------|---------|---------------|
 | — | — | — | — |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Which simulator/device sizes should gate PLYR-05?**
-   - What we know: UI-SPEC requires compact 375pt-wide class and a modern iPhone size. [VERIFIED: 03-UI-SPEC.md]
-   - What's unclear: The local simulator list has iPhone 17 booted and no iPhone 16 shown in the first available-device page. [VERIFIED: local `xcrun simctl list devices available`]
-   - Recommendation: Plan responsive layout tests on the available modern iPhone simulator plus one compact destination if installed; include real-device UAT for final gesture feel. [VERIFIED: .planning/codebase/TESTING.md]
+1. **RESOLVED - Which simulator/device sizes should gate PLYR-05?**
+   - Answer: Automated PLYR-05 layout gates use `iPhone SE (3rd generation)` for the compact 375pt-wide class and `iPhone 16` for the modern iPhone target. The available device-type check confirms `com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation` and `com.apple.CoreSimulator.SimDeviceType.iPhone-16` are available under iOS 26.3, even if simulator devices are not pre-created. [VERIFIED: local `xcrun simctl list devicetypes`] [VERIFIED: 03-UI-SPEC.md]
+   - Execution requirement: Before running PLYR-05 UI tests, preflight `xcrun simctl list devices available`; if either named simulator is missing, create it with `xcrun simctl create` using the iOS 26.3 runtime. Keep real-device UAT for subjective drag feel and visual density on the user's iPhone. [VERIFIED: .planning/codebase/TESTING.md]
 
-2. **How much of layout density should be automated?**
-   - What we know: Existing UI tests use accessibility identifiers and coordinate checks. [VERIFIED: CodeGraph]
-   - What's unclear: Pixel-perfect Apple Music parity is out of scope, so exact void measurements need a pragmatic threshold. [VERIFIED: 03-CONTEXT.md]
-   - Recommendation: Add stable identifiers for cover/progress/toolbar/page hints and assert existence/non-overlap plus coarse vertical placement; rely on UAT for subjective density. [VERIFIED: 03-UI-SPEC.md]
+2. **RESOLVED - How much of layout density should be automated?**
+   - Answer: Automate objective layout properties only: required identifiers exist, frames do not overlap, page hint is above cover, cover/metadata/progress/transport controls/toolbar are ordered top-to-bottom, the toolbar sits above the bottom safe area, and the remaining bottom gap below the toolbar stays within a coarse threshold. Use `<= 96pt` on compact `iPhone SE (3rd generation)` and `<= 128pt` on modern `iPhone 16`. [VERIFIED: CodeGraph] [VERIFIED: 03-UI-SPEC.md]
+   - Execution requirement: Leave subjective Apple Music-like feel, drag tactility, and final density taste to manual real-device UAT because pixel-level Apple Music reproduction remains out of scope. [VERIFIED: 03-CONTEXT.md]
 
-3. **Should Phase 3 update outdated module CLAUDE test docs?**
-   - What we know: `BiliMusicTests/CLAUDE.md` says only one test file exists, but CodeGraph found many current test files. [VERIFIED: BiliMusicTests/CLAUDE.md] [VERIFIED: CodeGraph]
-   - What's unclear: The phase output request is research-only and source/docs updates beyond RESEARCH are not requested. [VERIFIED: user request]
-   - Recommendation: Planner may add a small docs cleanup task only if it helps execution; it is not required for Phase 3 behavior. [VERIFIED: user request]
+3. **RESOLVED - Should Phase 3 update outdated module CLAUDE test docs?**
+   - Answer: No Phase 3 behavior depends on `BiliMusicTests/CLAUDE.md` cleanup. Do not add a Phase 3 task for CLAUDE/test-doc cleanup; record it only as an optional follow-up outside the behavior gate. [VERIFIED: user request]
 
 ## Environment Availability
 
@@ -415,7 +411,7 @@ All claims in this research were verified from local project artifacts, CodeGrap
 |------------|-------------|-----------|---------|----------|
 | Xcode / xcodebuild | Build and XCTest/XCUITest | yes | Xcode 26.3, build 17C529 | None for simulator tests. [VERIFIED: local `xcodebuild -version`] |
 | XcodeGen | Project regeneration after new Swift files | yes | 2.45.4 | Avoid adding files or install via Homebrew if missing. [VERIFIED: local `xcodegen --version`] |
-| iOS Simulator | UI regression tests | yes | iOS 26.3 devices available; iPhone 17 booted | Use any available iPhone destination if named iPhone 16 is absent. [VERIFIED: local `xcrun simctl list devices available`] |
+| iOS Simulator | UI regression tests | yes | iOS 26.3 runtime; PLYR-05 gate device types available for `iPhone SE (3rd generation)` and `iPhone 16` | Create missing `iPhone SE (3rd generation)` and `iPhone 16` simulator devices with `xcrun simctl create` before running layout gates. [VERIFIED: local `xcrun simctl list devicetypes`] |
 | CodeGraph | Source seam discovery | yes | 1.0.1 | Shell `codegraph` or MCP tool; no fallback needed in this repo. [VERIFIED: local `codegraph --version`] |
 | Python 3 | Optional existing API scripts | yes | 3.12.7 | Not needed for Phase 3 UI/test plan unless scripts are invoked. [VERIFIED: local `python3 --version`] |
 | Network/Bilibili APIs | Not required for automated Phase 3 tests | not required | — | Use `BILIMUSIC_UITEST_FIXTURE` for UI tests. [VERIFIED: .planning/codebase/TESTING.md] |
@@ -424,7 +420,7 @@ All claims in this research were verified from local project artifacts, CodeGrap
 - None found for research/planning. [VERIFIED: local command]
 
 **Missing dependencies with fallback:**
-- Exact `iPhone 16` simulator destination was not shown in the sampled available-device output; use an available iPhone simulator or install that runtime/device before execution if the plan hardcodes it. [VERIFIED: local `xcrun simctl list devices available`]
+- Pre-created `iPhone SE (3rd generation)` and `iPhone 16` simulator devices may be absent from `xcrun simctl list devices available`. The device types are available, so the execution fallback is to create the missing devices under `com.apple.CoreSimulator.SimRuntime.iOS-26-3` before running PLYR-05 layout tests. [VERIFIED: local `xcrun simctl list devicetypes`]
 
 ## Validation Architecture
 
@@ -445,7 +441,7 @@ All claims in this research were verified from local project artifacts, CodeGrap
 | PLYR-02 | Deliberate full-player downward minimize from allowed center regions | unit + UI | Unit target plus PlayerChrome UI test extension | Exists; add center-body allowed-region cases. [VERIFIED: CodeGraph] |
 | PLYR-03 | Queue/recommendation list scroll does not minimize | unit + UI | PlayerChrome UI test dragging inside queue/recommendation list pages | Partial; existing content-drag test exists, page-specific cases needed. [VERIFIED: CodeGraph] |
 | PLYR-04 | Scrub, page swipe, and vertical minimize do not fight | unit + UI | Add policy tests and UI tests using progress/accessibility identifiers | Gap; `PlayerProgressBar` seam exists but direct conflict tests need adding. [VERIFIED: CodeGraph] |
-| PLYR-05 | Dense layout has no excessive bottom void | UI + manual UAT | UI test with identifiers/coarse frame assertions; manual real-device check | Gap; no current layout-density test. [VERIFIED: CodeGraph] |
+| PLYR-05 | Dense layout has no excessive bottom void | UI + manual UAT | UI tests on `iPhone SE (3rd generation)` and `iPhone 16` with identifier, frame-order, non-overlap, safe-area, and bottom-gap assertions; manual real-device check for subjective density | Gap; no current layout-density test. [VERIFIED: CodeGraph] |
 | TEST-01 | Search query/mode/pagination/stale/filtering guardrails | unit | Unit target, `SearchModelsTests` | Exists. [VERIFIED: CodeGraph] |
 | TEST-02 | Playback request before post-start enrichment | unit | Unit target, `PlaybackCriticalPathTests` | Exists; keep in phase gate. [VERIFIED: CodeGraph] |
 | TEST-03 | Recommendation list stability | unit + UI | Unit target, `RecommendationSchedulingTests`; UI `testTappingRecommendationKeepsHomeListStable` | Exists. [VERIFIED: CodeGraph] |
