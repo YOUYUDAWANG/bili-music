@@ -90,6 +90,49 @@ final class ImageCacheTests: XCTestCase {
         XCTAssertEqual(CountingImageURLProtocol.requestCount, 1)
     }
 
+    @MainActor
+    func testReleaseReloadableImagesClearsCachedImages() {
+        let url = URL(string: "https://example.com/reloadable-cover.jpg")!
+        let image = makeImage(size: CGSize(width: 64, height: 36), color: .red)
+
+        ImageMemoryCache.shared.insert(image, for: url, targetPixelSize: image.pixelSize)
+        XCTAssertNotNil(ImageMemoryCache.shared.image(for: url, targetPixelSize: image.pixelSize))
+
+        ImageMemoryCache.shared.releaseReloadableImages()
+
+        XCTAssertNil(ImageMemoryCache.shared.image(for: url, targetPixelSize: image.pixelSize))
+    }
+
+    @MainActor
+    func testBackgroundCleanupReleasesImagesWithoutClearingPlaybackState() async {
+        let url = URL(string: "https://example.com/background-cover.jpg")!
+        let image = makeImage(size: CGSize(width: 64, height: 36), color: .cyan)
+        let tracks = [makeTrack("BVBG00000001"), makeTrack("BVBG00000002")]
+        let engine = PlayerEngine()
+        engine.installUITestFixture(tracks: tracks, startAt: 1)
+
+        ImageMemoryCache.shared.insert(image, for: url, targetPixelSize: image.pixelSize)
+
+        await AppResourceCleanup.handleBackgrounding(engine: engine)
+
+        XCTAssertNil(ImageMemoryCache.shared.image(for: url, targetPixelSize: image.pixelSize))
+        XCTAssertEqual(engine.current?.bvid, tracks[1].bvid)
+        XCTAssertEqual(engine.queue.map(\.bvid), tracks.map(\.bvid))
+        XCTAssertEqual(engine.queueIndex, 1)
+    }
+
+    @MainActor
+    func testMemoryWarningHandlerReleasesReloadableImages() {
+        let url = URL(string: "https://example.com/memory-warning-cover.jpg")!
+        let image = makeImage(size: CGSize(width: 64, height: 36), color: .magenta)
+
+        ImageMemoryCache.shared.insert(image, for: url, targetPixelSize: image.pixelSize)
+        AppResourceCleanup.handleMemoryWarning(
+            Notification(name: UIApplication.didReceiveMemoryWarningNotification))
+
+        XCTAssertNil(ImageMemoryCache.shared.image(for: url, targetPixelSize: image.pixelSize))
+    }
+
     private func makeImage(size: CGSize, color: UIColor) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
@@ -97,6 +140,18 @@ final class ImageCacheTests: XCTestCase {
             color.setFill()
             context.fill(CGRect(origin: .zero, size: size))
         }
+    }
+
+    private func makeTrack(_ bvid: String) -> Track {
+        Track(
+            aid: nil,
+            ownerMid: nil,
+            bvid: bvid,
+            cid: 1,
+            title: "Test Track \(bvid)",
+            artist: "Tester",
+            coverURL: nil,
+            duration: 180)
     }
 }
 
