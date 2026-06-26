@@ -11,7 +11,7 @@ v1 聚焦当前用户已经反复遇到的卡顿和稳定性问题。目标不�
 
 - [ ] **PLAY-01**: User can tap a track and see the selected track become current immediately, before lyrics, recommendations, MV probing, artwork loading, auto-cache, or history flush finishes.
 - [ ] **PLAY-02**: User can start playback through a protected critical path that resolves only cached audio, a prepared stream, or one fresh audio stream before calling AVPlayer playback.
-- [ ] **PLAY-03**: Playback startup records timing checkpoints for tap, source resolution, AVPlayer item creation, play request, and first observed playback state so regressions are measurable.
+- [x] **PLAY-03**: Playback startup records timing checkpoints for tap, source resolution, AVPlayer item creation, play request, and first observed playback state so regressions are measurable.
 - [ ] **PLAY-04**: Prepared remote audio streams are invalidated and retried once when they appear expired or unauthorized instead of making the user manually tap again.
 - [ ] **PLAY-05**: Post-start enrichment work such as lyrics, artwork, MV availability, related recommendations, queue/radio prefetch, history persistence, and auto-cache cannot block first audible playback.
 
@@ -105,7 +105,7 @@ Roadmap mapping is filled during roadmap creation.
 |-------------|-------|--------|
 | PLAY-01 | Phase 1 | Pending |
 | PLAY-02 | Phase 1 | Pending |
-| PLAY-03 | Phase 1 | Pending |
+| PLAY-03 | Phase 1 | Complete |
 | PLAY-04 | Phase 1 | Pending |
 | PLAY-05 | Phase 1 | Pending |
 | SRCH-01 | Phase 1 | Pending |
@@ -133,6 +133,7 @@ Roadmap mapping is filled during roadmap creation.
 | TEST-05 | Phase 3 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 28 total
 - Mapped to phases: 28
 - Unmapped: 0
