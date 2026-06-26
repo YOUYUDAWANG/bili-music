@@ -6,9 +6,9 @@ current_phase: 01
 current_phase_name: Playback Critical Path and Responsiveness
 status: verifying
 stopped_at: Phase 01 automated verification complete; human UAT pending
-last_updated: "2026-06-26T07:26:33.000Z"
+last_updated: "2026-06-26T07:38:02.000Z"
 last_activity: 2026-06-26
-last_activity_desc: Completed Phase 01 automated verification and opened human UAT checks
+last_activity_desc: Added player gesture guardrails and re-ran full Phase 01 automated verification
 progress:
   total_phases: 3
   completed_phases: 0
@@ -30,8 +30,8 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 
 Phase: 01 (Playback Critical Path and Responsiveness) — VERIFYING
 Plan: 5 of 5
-Status: Automated verification passed; human UAT pending for real-device/CDN behavior
-Last activity: 2026-06-26 — Completed Phase 01 automated verification and opened human UAT checks
+Status: Automated verification passed, including player gesture guardrails; human UAT pending for real-device/CDN behavior
+Last activity: 2026-06-26 — Added player gesture guardrails and re-ran full Phase 01 automated verification
 
 Progress: [##########] 100%
 
@@ -76,6 +76,7 @@ Recent decisions affecting current work:
 - [01-04]: Home recommendation scoring and fan-out run at utility priority while radio and related-panel recommendations keep interactive priority.
 - [01-05]: Image cache and in-flight image loading are keyed by URL plus target pixel size and downsample remote bytes before decoded images enter memory.
 - [01-05]: Backgrounding and memory warnings release reloadable decoded images through AppResourceCleanup without clearing PlayerEngine current track or queue.
+- [01-06]: Player gesture threshold logic is extracted into `PlayerGesturePolicy` and covered by unit tests plus existing player chrome UI tests.
 
 ### Pending Todos
 
@@ -101,6 +102,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-26T07:26:33.000Z
-Stopped at: Phase 01 automated verification complete; human UAT pending
+Last session: 2026-06-26T07:38:02.000Z
+Stopped at: Phase 01 automated verification complete with player gesture guardrails; human UAT pending
 Resume file: .planning/phases/01-playback-critical-path-and-responsiveness/01-UAT.md

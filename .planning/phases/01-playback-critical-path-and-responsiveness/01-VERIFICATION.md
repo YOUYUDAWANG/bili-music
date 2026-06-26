@@ -1,8 +1,8 @@
 ---
 phase: 01-playback-critical-path-and-responsiveness
-verified: 2026-06-26T07:26:33Z
+verified: 2026-06-26T07:38:02Z
 status: human_needed
-score: 11/11 must-haves verified
+score: 12/12 must-haves verified
 behavior_unverified: 2
 behavior_unverified_items:
   - truth: "Real first-audible playback feel on the target iPhone is acceptable after cold launch."
@@ -18,7 +18,7 @@ behavior_unverified_items:
 # Phase 01: Playback Critical Path and Responsiveness Verification Report
 
 **Phase Goal:** Users can tap a track and get responsive first playback without recommendation refreshes, search-focus freezes, or image memory work interfering with the music path.
-**Verified:** 2026-06-26T07:26:33Z
+**Verified:** 2026-06-26T07:38:02Z
 **Status:** human_needed
 
 ## Goal Achievement
@@ -38,8 +38,9 @@ behavior_unverified_items:
 | 9 | First playback from Home does not flash, reset, or clear the Home recommendation row. | VERIFIED | `PlayerChromeUITests/testTappingRecommendationKeepsHomeListStable` passed. |
 | 10 | Home recommendation scheduling is explicit, bounded, and lower priority than direct playback startup. | VERIFIED | `RecommendationSchedulingTests` passed. |
 | 11 | Image-heavy surfaces downsample, coalesce, and release reloadable decoded images without clearing playback state. | VERIFIED | `ImageCacheTests` passed, including background and memory-warning cleanup. |
+| 12 | Player chrome gestures have guardrails for mini-player expansion, full-player minimization, and list-area drags that should not dismiss. | VERIFIED | `PlayerGesturePolicyTests` and `PlayerChromeUITests` passed. |
 
-**Score:** 11/11 truths verified by automated tests.
+**Score:** 12/12 truths verified by automated tests.
 
 ### Required Artifacts
 
@@ -52,9 +53,10 @@ behavior_unverified_items:
 | `BiliMusic/Player/RecommendationEngine.swift` | Home recommendation scheduling policy | EXISTS + SUBSTANTIVE | Covered by `RecommendationSchedulingTests`. |
 | `BiliMusic/Design/CachedAsyncImage.swift` | Target-size image loading/cache cleanup | EXISTS + SUBSTANTIVE | Covered by `ImageCacheTests`. |
 | `BiliMusic/Features/RootView.swift` | App lifecycle image cleanup hook | EXISTS + SUBSTANTIVE | Covered by memory/background cleanup tests. |
+| `BiliMusic/Features/Player/PlayerGesturePolicy.swift` | Player gesture thresholds and false-positive policy | EXISTS + SUBSTANTIVE | Covered by `PlayerGesturePolicyTests`. |
 | `BiliMusicUITests/PlayerChromeUITests.swift` | UI fixture checks for Home and player chrome | EXISTS + SUBSTANTIVE | Full UI suite passed. |
 
-**Artifacts:** 8/8 verified.
+**Artifacts:** 9/9 verified.
 
 ## Requirements Coverage
 
@@ -72,8 +74,9 @@ behavior_unverified_items:
 | MEM-01 | SATISFIED | None. |
 | MEM-02 | SATISFIED | None. |
 | MEM-03 | SATISFIED | None. |
+| TEST-04 | SATISFIED | None. |
 
-**Coverage:** 12/12 Phase 01 mapped requirements satisfied by automated evidence, with two human integration confirmations still pending.
+**Coverage:** 13/13 Phase 01 mapped requirements satisfied by automated evidence, with two human integration confirmations still pending.
 
 ## Anti-Patterns Found
 
@@ -107,7 +110,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test -projec
 
 Result:
 
-- PASS: `BiliMusicTests` - 33 tests, 0 failures.
+- PASS: `BiliMusicTests` - 39 tests, 0 failures.
 - PASS: `BiliMusicUITests` - 6 tests, 0 failures.
 - PASS: Full test session exited with `TEST SUCCEEDED`.
 
@@ -115,10 +118,10 @@ Result:
 
 **Verification approach:** Goal-backward from ROADMAP Phase 01 success criteria plus SUMMARY evidence.
 **Must-haves source:** `.planning/ROADMAP.md`, `.planning/REQUIREMENTS.md`, and `01-01` through `01-05` summaries.
-**Automated checks:** 39 passed, 0 failed.
+**Automated checks:** 45 passed, 0 failed.
 **Human checks required:** 2.
 **Total verification time:** 71 seconds for final automated full-suite command.
 
 ---
-*Verified: 2026-06-26T07:26:33Z*
+*Verified: 2026-06-26T07:38:02Z*
 *Verifier: Codex*

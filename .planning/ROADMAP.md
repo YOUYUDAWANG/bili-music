@@ -24,7 +24,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Goal**: Users can tap a track and get responsive first playback without recommendation refreshes, search-focus freezes, or image memory work interfering with the music path.
 **Mode:** mvp
 **Depends on**: Nothing (first phase)
-**Requirements**: PLAY-01, PLAY-02, PLAY-03, PLAY-04, PLAY-05, SRCH-01, SRCH-02, RECO-01, RECO-04, MEM-01, MEM-02, MEM-03
+**Requirements**: PLAY-01, PLAY-02, PLAY-03, PLAY-04, PLAY-05, SRCH-01, SRCH-02, RECO-01, RECO-04, MEM-01, MEM-02, MEM-03, TEST-04
 **Success Criteria** (what must be TRUE):
 
   1. User can tap a track after app launch and see it become current immediately, with playback requested after only cache, prepared stream, or one fresh audio stream is resolved.
@@ -32,9 +32,10 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. User can start the first song after launch without Home recommendations flashing, resetting, or blocking first audible playback.
   4. User can enter Search and focus an empty search field with local history and suggestions appearing without network work or a keyboard freeze.
   5. User can scroll image-heavy search, recommendation, and player surfaces, then background the app, without unbounded image retention or memory cleanup interrupting playback state.
+  6. Developer can run checks covering mini-player expansion, full-player minimization, and list-area drags that should not dismiss the player.
 
 **Plans**: 5/5 plans executed
-**Verification**: Automated simulator suite passed; `01-UAT.md` tracks two real-device/CDN checks.
+**Verification**: Automated simulator suite passed with player gesture guardrails; `01-UAT.md` tracks two real-device/CDN checks.
 
 - [x] 01-01-PLAN.md
 - [x] 01-02-PLAN.md
@@ -65,7 +66,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Goal**: Users can interact with a denser Apple Music-like player confidently, while regression checks cover the critical playback, search, recommendation, gesture, and image-memory behavior added in v1.
 **Mode:** mvp
 **Depends on**: Phase 2
-**Requirements**: PLYR-01, PLYR-02, PLYR-03, PLYR-04, PLYR-05, TEST-01, TEST-02, TEST-03, TEST-04, TEST-05
+**Requirements**: PLYR-01, PLYR-02, PLYR-03, PLYR-04, PLYR-05, TEST-01, TEST-02, TEST-03, TEST-05
 **Success Criteria** (what must be TRUE):
 
   1. User can expand the mini-player with an upward drag that tracks the finger and minimize the full player only with a deliberate downward gesture outside scrollable lists.

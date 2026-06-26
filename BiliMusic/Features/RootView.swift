@@ -14,14 +14,6 @@ struct RootView: View {
     @State private var selectedTab = 0
     @Namespace private var playerTransition
 
-    private enum Metrics {
-        static let openingDragRange: CGFloat = 190
-        static let openingActivationProgress: CGFloat = 0.10
-        static let liveOpeningActivationProgress: CGFloat = 0.07
-        static let predictedOpeningMinimumProgress: CGFloat = 0.10
-        static let openingPredictedActivationProgress: CGFloat = 0.38
-    }
-
     private enum Motion {
         static let open = Animation.smooth(duration: 0.52, extraBounce: 0.055)
         static let close = Animation.smooth(duration: 0.38, extraBounce: 0.015)
@@ -174,17 +166,16 @@ struct RootView: View {
 
     private var playerOpenProgress: CGFloat {
         if let miniOpenDragTranslation {
-            return min(1, max(0, -miniOpenDragTranslation / Metrics.openingDragRange))
+            return PlayerGesturePolicy.miniOpenProgress(for: miniOpenDragTranslation)
         }
         return min(1, max(0, fullPlayerOpenProgress))
     }
 
     private var renderedPlayerOpenProgress: CGFloat {
-        let clamped = min(1, max(0, playerOpenProgress))
-        if isMiniOpening && !showFullPlayer {
-            return 1 - CGFloat(pow(Double(1 - clamped), 1.08))
-        }
-        return clamped
+        PlayerGesturePolicy.renderedMiniOpenProgress(
+            rawProgress: playerOpenProgress,
+            isMiniOpening: isMiniOpening,
+            isFullPlayerPresented: showFullPlayer)
     }
 
     private var fullPlayerOpacity: Double {
@@ -253,17 +244,16 @@ struct RootView: View {
     private func finishMiniOpenDrag(_ sample: MiniOpenDragSample) {
         defer { miniOpenDragTranslation = nil }
         guard engine.current != nil, !showFullPlayer else { return }
-        let predictedTranslationY = sample.translation.height + sample.velocity.height * 0.22
-        let progress = miniOpenProgress(for: sample.translation.height)
-        let predictedProgress = miniOpenProgress(for: predictedTranslationY)
-        guard progress > Metrics.openingActivationProgress ||
-            (progress > Metrics.predictedOpeningMinimumProgress &&
-             predictedProgress > Metrics.openingPredictedActivationProgress) else {
+        guard PlayerGesturePolicy.shouldFinishMiniOpenDrag(
+            translationY: sample.translation.height,
+            velocityY: sample.velocity.height
+        ) else {
             cancelFullPlayerDrag()
             return
         }
 
-        openFullPlayer(startProgress: max(progress, Metrics.openingActivationProgress))
+        openFullPlayer(startProgress: PlayerGesturePolicy.initialMiniOpenProgress(
+            for: sample.translation.height))
     }
 
     private func handleMiniOpenDragChanged(_ sample: MiniOpenDragSample) {
@@ -281,15 +271,14 @@ struct RootView: View {
         }
 
         miniOpenDragTranslation = sample.translation.height
-        let predictedTranslationY = sample.translation.height + sample.velocity.height * 0.22
-        let progress = miniOpenProgress(for: sample.translation.height)
-        let predictedProgress = miniOpenProgress(for: predictedTranslationY)
-        if progress >= Metrics.liveOpeningActivationProgress ||
-            (progress >= Metrics.predictedOpeningMinimumProgress &&
-             predictedProgress >= Metrics.openingPredictedActivationProgress) {
+        if PlayerGesturePolicy.shouldOpenMiniPlayerLive(
+            translationY: sample.translation.height,
+            velocityY: sample.velocity.height
+        ) {
             isTrackingMiniOpenDrag = false
             miniOpenDragTranslation = nil
-            openFullPlayer(startProgress: max(progress, Metrics.openingActivationProgress))
+            openFullPlayer(startProgress: PlayerGesturePolicy.initialMiniOpenProgress(
+                for: sample.translation.height))
             return
         }
 
@@ -308,13 +297,11 @@ struct RootView: View {
     }
 
     private func shouldBeginMiniOpenDrag(_ sample: MiniOpenDragSample) -> Bool {
-        let translation = sample.translation
-        let isVertical = abs(translation.height) > abs(translation.width) * 1.2
-        return translation.height < -18 && isVertical
+        PlayerGesturePolicy.shouldBeginMiniOpenDrag(translation: sample.translation)
     }
 
     private func miniOpenProgress(for translationY: CGFloat) -> CGFloat {
-        min(1, max(0, -translationY / Metrics.openingDragRange))
+        PlayerGesturePolicy.miniOpenProgress(for: translationY)
     }
 }
 
@@ -506,8 +493,8 @@ private struct SystemMiniPlayer: View {
 
     private func miniOpenDragSample(from value: DragGesture.Value) -> MiniOpenDragSample {
         let predictedVelocity = CGSize(
-            width: (value.predictedEndTranslation.width - value.translation.width) / 0.22,
-            height: (value.predictedEndTranslation.height - value.translation.height) / 0.22
+            width: (value.predictedEndTranslation.width - value.translation.width) / PlayerGesturePolicy.velocityProjectionTime,
+            height: (value.predictedEndTranslation.height - value.translation.height) / PlayerGesturePolicy.velocityProjectionTime
         )
         return MiniOpenDragSample(
             startLocation: value.startLocation,

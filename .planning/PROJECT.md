@@ -32,6 +32,7 @@ Bilibili Music 是一个个人自用的 iPhone 音乐客户端，从 B 站内容
 - [x] 首页推荐调度有显式初始加载/手动刷新触发、种子和请求上限，并低于直接播放启动优先级。
 - [x] 图片加载按 URL + 目标像素尺寸缓存和合并请求，列表、mini-player、播放页和锁屏封面不会无目标地保留完整大图解码。
 - [x] 后台和内存警告会释放可重载的解码图片，并通过测试确认不会清空当前播放歌曲、队列或队列位置。
+- [x] 播放器基础手势阈值已有纯逻辑和 UI 回归保护：mini-player 上滑打开、微小拖动不误开、顶部下拉收起、列表区域拖动不误收起。
 
 ### Active
 
@@ -88,7 +89,7 @@ Bilibili Music 是一个个人自用的 iPhone 音乐客户端，从 B 站内容
 |----------|-----------|---------|
 | 个人自用 iPhone app，而不是公开第三方客户端 | 降低审核、合规、后端和跨平台成本，聚焦真实使用体验 | Good so far |
 | UI 方向从 YouTube Music 转向 Apple Music | Apple Music 的结构更适合个人开发者复刻，也更贴近 iOS 原生音乐使用习惯 | Pending polish |
-| 播放启动优先于所有增强体验 | 用户明确要求“让音乐响起来是第一优先级” | Active |
+| 播放启动优先于所有增强体验 | 用户明确要求“让音乐响起来是第一优先级” | Good so far |
 | 复用 B 站收藏夹和合集，而不是先做自建歌单系统 | 减少数据模型复杂度，利用已有内容组织方式 | Pending stabilization |
 | 歌词优先用在线歌词 API，B 站字幕不作为可靠歌词源 | B 站自动字幕容易出现错误内容和非歌词标记 | Good so far |
 | 音频质量和下载质量分开 | 在线播放和缓存占用的用户需求不同 | Implemented, needs UI/verification |
@@ -112,4 +113,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state.
 
 ---
-*Last updated: 2026-06-26 after Phase 01 Plan 05*
+*Last updated: 2026-06-26 after Phase 01 gesture guardrails*

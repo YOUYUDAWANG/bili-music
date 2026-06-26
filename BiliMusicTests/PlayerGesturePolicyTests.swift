@@ -1,0 +1,81 @@
+import CoreGraphics
+import XCTest
+@testable import BiliMusic
+
+final class PlayerGesturePolicyTests: XCTestCase {
+    func testMiniPlayerOpenProgressTracksUpwardDragMonotonically() {
+        let small = PlayerGesturePolicy.miniOpenProgress(for: -24)
+        let medium = PlayerGesturePolicy.miniOpenProgress(for: -72)
+        let full = PlayerGesturePolicy.miniOpenProgress(for: -260)
+
+        XCTAssertGreaterThan(small, 0)
+        XCTAssertLessThan(small, medium)
+        XCTAssertLessThan(medium, full)
+        XCTAssertEqual(full, 1)
+    }
+
+    func testMiniPlayerOpenRequiresIntentionalVerticalUpwardDrag() {
+        XCTAssertFalse(PlayerGesturePolicy.shouldBeginMiniOpenDrag(
+            translation: CGSize(width: 0, height: -16)))
+        XCTAssertFalse(PlayerGesturePolicy.shouldBeginMiniOpenDrag(
+            translation: CGSize(width: 30, height: -24)))
+        XCTAssertFalse(PlayerGesturePolicy.shouldBeginMiniOpenDrag(
+            translation: CGSize(width: 0, height: 40)))
+
+        XCTAssertTrue(PlayerGesturePolicy.shouldBeginMiniOpenDrag(
+            translation: CGSize(width: 8, height: -24)))
+    }
+
+    func testMiniPlayerOpenCanUseProjectedVelocityWithoutWaitingForLongDrag() {
+        XCTAssertFalse(PlayerGesturePolicy.shouldFinishMiniOpenDrag(
+            translationY: -18,
+            velocityY: 0))
+
+        XCTAssertTrue(PlayerGesturePolicy.shouldFinishMiniOpenDrag(
+            translationY: -22,
+            velocityY: -260))
+    }
+
+    func testFullPlayerDismissIgnoresListAreaAndHorizontalDrags() {
+        XCTAssertFalse(PlayerGesturePolicy.shouldDismissFullPlayer(
+            translation: CGSize(width: 0, height: 180),
+            predictedEndTranslation: CGSize(width: 0, height: 220),
+            startY: 260))
+
+        XCTAssertFalse(PlayerGesturePolicy.shouldDismissFullPlayer(
+            translation: CGSize(width: 220, height: 150),
+            predictedEndTranslation: CGSize(width: 260, height: 180),
+            startY: 80))
+    }
+
+    func testFullPlayerDismissRequiresDeliberateTopDownDragOrPrediction() {
+        XCTAssertEqual(PlayerGesturePolicy.dismissDragOffset(
+            translation: CGSize(width: 0, height: 96),
+            startY: 80), 96)
+        XCTAssertFalse(PlayerGesturePolicy.shouldDismissFullPlayer(
+            translation: CGSize(width: 0, height: 96),
+            predictedEndTranslation: CGSize(width: 0, height: 120),
+            startY: 80))
+
+        XCTAssertEqual(PlayerGesturePolicy.dismissDragOffset(
+            translation: CGSize(width: 0, height: 160),
+            startY: 80), 160)
+        XCTAssertTrue(PlayerGesturePolicy.shouldDismissFullPlayer(
+            translation: CGSize(width: 0, height: 160),
+            predictedEndTranslation: CGSize(width: 0, height: 170),
+            startY: 80))
+        XCTAssertTrue(PlayerGesturePolicy.shouldDismissFullPlayer(
+            translation: CGSize(width: 0, height: 80),
+            predictedEndTranslation: CGSize(width: 0, height: 280),
+            startY: 80))
+    }
+
+    func testTopChromeDismissUsesLowerThresholdThanContentDrag() {
+        XCTAssertTrue(PlayerGesturePolicy.shouldDismissFromTopChrome(
+            translation: CGSize(width: 0, height: 95),
+            predictedEndTranslation: CGSize(width: 0, height: 120)))
+        XCTAssertFalse(PlayerGesturePolicy.shouldDismissFromTopChrome(
+            translation: CGSize(width: 80, height: 70),
+            predictedEndTranslation: CGSize(width: 90, height: 90)))
+    }
+}

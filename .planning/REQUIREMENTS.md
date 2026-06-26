@@ -50,7 +50,7 @@ v1 聚焦当前用户已经反复遇到的卡顿和稳定性问题。目标不�
 - [ ] **TEST-01**: Search store tests cover query identity, mode identity, pagination, stale-result rejection, and music-only filtering.
 - [ ] **TEST-02**: Playback tests or instrumentation verify post-start enrichment is not awaited before the playback request.
 - [ ] **TEST-03**: Recommendation tests or UI tests verify first playback does not reset Home recommendations and tapping a related track does not immediately refresh the related list.
-- [ ] **TEST-04**: Player chrome UI tests cover mini-player expansion, full-player minimization, and list scrolling without accidental dismissal.
+- [x] **TEST-04**: Player chrome UI tests cover mini-player expansion, full-player minimization, and list scrolling without accidental dismissal.
 - [ ] **TEST-05**: Image/cache behavior has at least one regression check for bounded image work or memory-pressure cleanup.
 
 ## v2 Requirements
@@ -129,7 +129,7 @@ Roadmap mapping is filled during roadmap creation.
 | TEST-01 | Phase 3 | Pending |
 | TEST-02 | Phase 3 | Pending |
 | TEST-03 | Phase 3 | Pending |
-| TEST-04 | Phase 3 | Pending |
+| TEST-04 | Phase 1 | Complete |
 | TEST-05 | Phase 3 | Pending |
 
 **Coverage:**
@@ -140,4 +140,4 @@ Roadmap mapping is filled during roadmap creation.
 
 ---
 *Requirements defined: 2026-06-26*
-*Last updated: 2026-06-26 after Phase 01 Plan 05*
+*Last updated: 2026-06-26 after Phase 01 gesture guardrails*

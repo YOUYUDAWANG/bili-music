@@ -63,7 +63,7 @@ struct NowPlayingView: View {
         static let contentTopInset: CGFloat = 16
         static let contextPreviewLimit = 8
         static let compactRowHeight: CGFloat = 34
-        static let dismissGrabZoneHeight: CGFloat = 150
+        static let dismissGrabZoneHeight: CGFloat = PlayerGesturePolicy.dismissGrabZoneHeight
     }
 
     private struct PlaylistLookupResult {
@@ -986,22 +986,23 @@ struct NowPlayingView: View {
     private var dismissDrag: some Gesture {
         DragGesture(minimumDistance: 18, coordinateSpace: .global)
             .updating($dismissDragOffset) { value, state, _ in
-                guard shouldTrackDismissDrag(value) else { return }
-                state = min(340, max(0, value.translation.height))
+                guard let offset = PlayerGesturePolicy.dismissDragOffset(
+                    translation: value.translation,
+                    startY: value.startLocation.y,
+                    dismissGrabZoneHeight: Layout.dismissGrabZoneHeight
+                ) else { return }
+                state = offset
             }
             .onEnded { value in
-                guard shouldTrackDismissDrag(value) else { return }
-                if value.translation.height > 130 || value.predictedEndTranslation.height > 260 {
+                if PlayerGesturePolicy.shouldDismissFullPlayer(
+                    translation: value.translation,
+                    predictedEndTranslation: value.predictedEndTranslation,
+                    startY: value.startLocation.y,
+                    dismissGrabZoneHeight: Layout.dismissGrabZoneHeight
+                ) {
                     closePlayer()
                 }
             }
-    }
-
-    private func shouldTrackDismissDrag(_ value: DragGesture.Value) -> Bool {
-        let isDownward = value.translation.height > 0
-        let isVertical = abs(value.translation.height) > abs(value.translation.width) * 1.08
-        let startsInDismissZone = value.startLocation.y < Layout.dismissGrabZoneHeight
-        return isDownward && isVertical && startsInDismissZone
     }
 
     private func format(_ seconds: Double) -> String {
@@ -1065,14 +1066,16 @@ struct NowPlayingView: View {
     private var topChromeDismissDrag: some Gesture {
         DragGesture(minimumDistance: 12, coordinateSpace: .global)
             .updating($dismissDragOffset) { value, state, _ in
-                guard value.translation.height > 0,
-                      abs(value.translation.height) > abs(value.translation.width) * 1.08 else { return }
-                state = min(340, max(0, value.translation.height))
+                guard let offset = PlayerGesturePolicy.topChromeDismissDragOffset(
+                    translation: value.translation
+                ) else { return }
+                state = offset
             }
             .onEnded { value in
-                guard value.translation.height > 0,
-                      abs(value.translation.height) > abs(value.translation.width) * 1.08 else { return }
-                if value.translation.height > 90 || value.predictedEndTranslation.height > 180 {
+                if PlayerGesturePolicy.shouldDismissFromTopChrome(
+                    translation: value.translation,
+                    predictedEndTranslation: value.predictedEndTranslation
+                ) {
                     closePlayer()
                 }
             }

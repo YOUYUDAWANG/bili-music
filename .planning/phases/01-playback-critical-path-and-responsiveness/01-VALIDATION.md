@@ -6,7 +6,7 @@ nyquist_compliant: true
 wave_0_complete: true
 automated_status: passed
 human_status: pending
-verified: 2026-06-26T07:26:33Z
+verified: 2026-06-26T07:38:02Z
 ---
 
 # Phase 01 - Validation Strategy
@@ -21,13 +21,13 @@ Per-phase validation contract and execution record for Phase 01.
 | Config file | `project.yml`; generated `BiliMusic.xcodeproj` |
 | Focused unit command | `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test -project BiliMusic.xcodeproj -scheme BiliMusic -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17' -only-testing:BiliMusicTests CODE_SIGNING_ALLOWED=NO` |
 | Full suite command | `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test -project BiliMusic.xcodeproj -scheme BiliMusic -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17' CODE_SIGNING_ALLOWED=NO` |
-| Final automated run | 2026-06-26T07:24:20Z to 2026-06-26T07:25:31Z |
+| Final automated run | 2026-06-26T07:36:12Z to 2026-06-26T07:37:25Z |
 
 ## Final Automated Result
 
 | Suite | Result |
 |-------|--------|
-| `BiliMusicTests` | PASS - 33 tests, 0 failures |
+| `BiliMusicTests` | PASS - 39 tests, 0 failures |
 | `BiliMusicUITests` | PASS - 6 tests, 0 failures |
 | Full command exit | PASS - `TEST SUCCEEDED` |
 
@@ -49,6 +49,7 @@ Xcode printed known passcode-protected physical-device `notification_proxy` warn
 | 01-04-01 | 05 | MEM-01 | unit | `ImageCacheTests` verifies target-size downsampling | green |
 | 01-04-02 | 05 | MEM-02 | unit | `ImageCacheTests` verifies target-size cache separation and in-flight coalescing | green |
 | 01-04-03 | 05 | MEM-03 | unit + app-shell helper | `ImageCacheTests` verifies memory/background cleanup preserves playback state | green |
+| 01-05-01 | gesture guardrail | TEST-04 | unit + XCUITest | `PlayerGesturePolicyTests` and `PlayerChromeUITests` cover mini open, full close, and list drag non-dismissal | green |
 
 ## Wave 0 Requirements
 
@@ -60,6 +61,7 @@ Xcode printed known passcode-protected physical-device `notification_proxy` warn
 - [x] `BiliMusicTests/ImageCacheTests.swift` covers MEM-01, MEM-02, and MEM-03.
 - [x] `BiliMusicUITests/PlayerChromeUITests.swift` covers RECO-01 Home list stability and player chrome fixture behavior.
 - [x] Test seams exist for `PlayerEngine` source resolution, diagnostics sink, post-start enrichment ordering, prepared stream retry, and image cache cleanup.
+- [x] `BiliMusicTests/PlayerGesturePolicyTests.swift` covers player gesture thresholds and false-positive guards for mini-player open and full-player dismiss.
 
 ## Manual-Only Verifications
 
