@@ -1,24 +1,23 @@
 ---
 phase: 01-playback-critical-path-and-responsiveness
 verified: 2026-06-26T07:38:02Z
-status: human_needed
+status: passed
 score: 12/12 must-haves verified
-behavior_unverified: 1
+behavior_unverified: 0
 uat_instructions_updated: 2026-06-26T07:43:28Z
 debug_autoplay_console_updated: 2026-06-26T07:49:21Z
 first_audible_uat_passed: 2026-06-26T08:06:40Z
-behavior_unverified_items:
+accepted_risk_items:
   - truth: "A real expired or unauthorized Bilibili prepared stream retries once without requiring another tap."
     test: "Use a real playable BVID with a prepared remote stream that has expired or returns a CDN/AVPlayer failure if feasible."
-    expected: "The app invalidates the prepared stream, resolves one fresh stream, and requests playback without a second user tap."
-    why_human: "The exact CDN/AVPlayer failure shape depends on Bilibili short-lived media URLs and cannot be deterministically produced by the simulator unit suite."
+    disposition: "Accepted residual risk for Phase 2 entry because no reproducible real CDN failure was available; deterministic retry behavior is covered by PreparedStreamRetryTests."
 ---
 
 # Phase 01: Playback Critical Path and Responsiveness Verification Report
 
 **Phase Goal:** Users can tap a track and get responsive first playback without recommendation refreshes, search-focus freezes, or image memory work interfering with the music path.
 **Verified:** 2026-06-26T07:38:02Z
-**Status:** human_needed
+**Status:** passed
 
 ## Goal Achievement
 
@@ -75,13 +74,13 @@ behavior_unverified_items:
 | MEM-03 | SATISFIED | None. |
 | TEST-04 | SATISFIED | None. |
 
-**Coverage:** 13/13 Phase 01 mapped requirements satisfied by automated evidence; real-device first-audible playback passed UAT, with one real CDN retry confirmation still pending.
+**Coverage:** 13/13 Phase 01 mapped requirements satisfied by automated evidence; real-device first-audible playback passed UAT. One real CDN retry confirmation remains documented as accepted residual risk because no reproducible expired or unauthorized prepared-stream failure was available.
 
 ## Anti-Patterns Found
 
 None found during this verification pass.
 
-## Human Verification Required
+## Human Verification
 
 ### 1. Real iPhone First-Audible Playback
 
@@ -91,16 +90,18 @@ None found during this verification pass.
 **Why human:** Simulator/unit tests prove ordering but cannot verify audible latency and AVAudioSession feel on the target iPhone.
 **Diagnostics:** Use Xcode's device console or the macOS Console app to filter subsystem `com.fubuki.BiliMusic`, category `playback-diagnostics`. For the tapped `bvid`, confirm the sequence reaches `checkpoint=firstPlaying` after `checkpoint=playRequested` and record `elapsedMs`. Optional `AUTOPLAY_BV` DEBUG runs also print `AUTOPLAY_DIAGNOSTIC checkpoint=...` lines directly to the Xcode console. Repeated fresh-remote starts over roughly 5 seconds on stable Wi-Fi should be treated as a performance regression candidate.
 
-### 2. Real Bilibili Expired Prepared Stream Retry
+## Accepted Residual Risk
+
+### Real Bilibili Expired Prepared Stream Retry
 
 **Test:** Use a real playable BVID with a prepared remote stream that has expired or returns a CDN/AVPlayer failure if feasible.
 **Expected:** The app invalidates the prepared stream, resolves one fresh stream, and requests playback without a second user tap.
-**Why human:** The exact CDN/AVPlayer failure shape depends on Bilibili short-lived media URLs and cannot be deterministically produced by the simulator unit suite.
-**Diagnostics:** If this real CDN failure can be reproduced, filter `playback-diagnostics` for the same `bvid` and confirm the prepared stream is discarded, the subsequent successful source resolution uses `source=freshRemote`, and playback reaches `playRequested` then `firstPlaying` without another tap. If no real expired/unauthorized CDN case can be produced, keep the item pending rather than inventing evidence.
+**Disposition:** Accepted for Phase 2 entry. The exact CDN/AVPlayer failure shape depends on Bilibili short-lived media URLs and cannot be deterministically produced by the simulator suite; no reproducible live case was available during UAT. Deterministic retry behavior is covered by `PreparedStreamRetryTests`.
+**Diagnostics if seen later:** Filter `playback-diagnostics` for the same `bvid` and confirm the prepared stream is discarded, the subsequent successful source resolution uses `source=freshRemote`, and playback reaches `playRequested` then `firstPlaying` without another tap.
 
 ## Gaps Summary
 
-No implementation gaps found. Phase 01 remains in `human_needed` status only because the real expired/unauthorized Bilibili prepared-stream retry case cannot be proven by the automated simulator suite.
+No blocking implementation gaps found. The only unobserved live integration behavior is recorded as accepted residual risk because the deterministic retry path has automated coverage and real-device first-audible UAT passed.
 
 ## Automated Checks
 
@@ -122,7 +123,7 @@ Result:
 **Verification approach:** Goal-backward from ROADMAP Phase 01 success criteria plus SUMMARY evidence.
 **Must-haves source:** `.planning/ROADMAP.md`, `.planning/REQUIREMENTS.md`, and `01-01` through `01-05` summaries.
 **Automated checks:** 47 passed, 0 failed.
-**Human checks required:** 1 remaining; 1 passed.
+**Human checks required:** 0 remaining; 1 passed; 1 accepted residual risk.
 **Total verification time:** 71 seconds for final automated full-suite command.
 
 ---

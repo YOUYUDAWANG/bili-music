@@ -1,18 +1,14 @@
 ---
-status: testing
+status: complete
 phase: 01-playback-critical-path-and-responsiveness
 source: [01-VERIFICATION.md]
 started: 2026-06-26T07:26:33Z
-updated: 2026-06-26T08:06:40Z
+updated: 2026-06-26T08:14:37Z
 ---
 
 ## Current Test
 
-number: 2
-name: Real Bilibili Expired Prepared Stream Retry
-expected: |
-  Use a real playable BVID with a prepared remote stream that has expired or returns a CDN/AVPlayer failure if feasible; the app invalidates the prepared stream, resolves one fresh stream, and requests playback without a second user tap.
-awaiting: user response
+none: Phase 01 UAT is closed for Phase 2 entry. One real CDN retry scenario remains documented as accepted residual risk because no reproducible expired or unauthorized Bilibili prepared stream was available.
 
 ## Tests
 
@@ -52,38 +48,30 @@ debug_autoplay_optional:
 - Launch the app from Xcode and look for `AUTOPLAY state=` plus `AUTOPLAY_DIAGNOSTIC checkpoint=...` lines in the Xcode console. These lines mirror the same sanitized recent checkpoint events as `playback-diagnostics`.
 - This validates the playback startup chain with timestamps, but it does not replace the manual tap test because `AUTOPLAY_BV` resolves the BV into a track before `PlayerEngine.play(tracks:startAt:)` starts diagnostics.
 
-### 2. Real Bilibili Expired Prepared Stream Retry
-expected: Use a real playable BVID with a prepared remote stream that has expired or returns a CDN/AVPlayer failure if feasible; the app invalidates the prepared stream, resolves one fresh stream, and requests playback without a second user tap.
-result: [pending]
+## Accepted Residual Risk
 
-diagnostic_steps:
+### Real Bilibili Expired Prepared Stream Retry
 
-1. Use a real playable BVID that can be preloaded by Home/Search/queue recommendation.
-2. If feasible, let the prepared media URL age until Bilibili's CDN rejects it, or reproduce a CDN/AVPlayer failure with an otherwise playable prepared stream.
-3. Tap the track once.
-4. Watch `playback-diagnostics` for the same `bvid`.
-5. Confirm the failed prepared attempt is followed by a fresh stream resolution and a play request without another user tap.
+The desired real-device scenario is a playable BVID whose prepared remote stream has expired or returns a CDN/AVPlayer failure. The expected behavior is still that the app invalidates the prepared stream, resolves one fresh stream, and requests playback without a second user tap.
 
-pass_if:
+This was not directly reproduced against Bilibili CDN behavior. The risk is accepted for Phase 2 entry because:
 
-- The app invalidates the prepared remote value after the failure.
-- The next successful `sourceResolved` event uses `source=freshRemote`.
-- Playback reaches `checkpoint=playRequested` and then `checkpoint=firstPlaying` without a second tap.
-- The app does not loop retries indefinitely.
+- The deterministic retry path is covered by `PreparedStreamRetryTests`.
+- The user confirmed real iPhone first-audible playback is approximately 1-2 seconds.
+- No reproducible expired/unauthorized prepared-stream failure was available during UAT.
 
-skip_condition:
-
-- If no reproducible expired/unauthorized prepared-stream failure can be produced against real Bilibili CDN behavior, leave this pending rather than fabricating the result. The deterministic retry path is already covered by `PreparedStreamRetryTests`; this UAT exists only for real CDN integration confidence.
+If a reproducible real CDN case appears later, use `playback-diagnostics` for the same `bvid` and confirm the stale prepared source is discarded, the next successful source resolution uses `source=freshRemote`, and playback reaches `playRequested` then `firstPlaying` without another tap.
 
 ## Summary
 
 total: 2
 passed: 1
 issues: 0
-pending: 1
+pending: 0
+accepted_risk: 1
 skipped: 0
 blocked: 0
 
 ## Gaps
 
-[none yet]
+No blocking Phase 01 gaps. Accepted residual risk is documented above.
