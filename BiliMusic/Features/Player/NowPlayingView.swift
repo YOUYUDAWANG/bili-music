@@ -129,7 +129,6 @@ struct NowPlayingView: View {
             .background(playerBackground.ignoresSafeArea())
             .offset(y: dismissDragOffset)
             .accessibilityIdentifier("nowPlayingView")
-            .simultaneousGesture(dismissDrag, including: .gesture)
             .animation(dismissDragAnimation, value: dismissDragOffset)
         }
         .sheet(isPresented: $showUPPlaylists) {
@@ -192,6 +191,8 @@ struct NowPlayingView: View {
             mediaView(coverSize: coverSize)
                 .padding(.top, 4)
                 .accessibilityIdentifier("nowPlayingCover")
+                .contentShape(Rectangle())
+                .highPriorityGesture(pageSwipeGesture(width: coverSize), including: .all)
 
             VStack(spacing: 5) {
                 Text(engine.current?.title ?? "")
@@ -256,6 +257,7 @@ struct NowPlayingView: View {
             .onPreferenceChange(ScrollOffsetKey.self) { offset in
                 scrollOffset = offset
             }
+            .simultaneousGesture(centerBodyDismissDrag, including: .gesture)
             .tag(PlayerPage.nowPlaying.rawValue)
 
             horizontalListPage(accessibilityIdentifier: "playerRecommendationsPage") {
@@ -268,6 +270,7 @@ struct NowPlayingView: View {
         .scrollDisabled(suppressPageSwipeForScrub)
         .contentShape(Rectangle())
         .simultaneousGesture(pageSwipeGesture(width: width), including: .gesture)
+        .animation(reduceMotion ? .easeOut(duration: 0.12) : .snappy(duration: 0.28, extraBounce: 0.02), value: selectedPage)
         .safeAreaInset(edge: .top, spacing: 0) {
             playerTopChrome(safeAreaTop: safeAreaTop)
         }
@@ -1209,29 +1212,6 @@ struct NowPlayingView: View {
         }
     }
 
-    /// 垂直下拉关闭播放页;拖动时整页跟手,超过阈值松手即收起。
-    private var dismissDrag: some Gesture {
-        DragGesture(minimumDistance: 18, coordinateSpace: .global)
-            .updating($dismissDragOffset) { value, state, _ in
-                guard let offset = PlayerGesturePolicy.dismissDragOffset(
-                    translation: value.translation,
-                    startY: value.startLocation.y,
-                    dismissGrabZoneHeight: Layout.dismissGrabZoneHeight
-                ) else { return }
-                state = offset
-            }
-            .onEnded { value in
-                if PlayerGesturePolicy.shouldDismissFullPlayer(
-                    translation: value.translation,
-                    predictedEndTranslation: value.predictedEndTranslation,
-                    startY: value.startLocation.y,
-                    dismissGrabZoneHeight: Layout.dismissGrabZoneHeight
-                ) {
-                    closePlayer()
-                }
-            }
-    }
-
     private func format(_ seconds: Double) -> String {
         let s = Int(seconds.isFinite ? max(seconds, 0) : 0)
         return String(format: "%d:%02d", s / 60, s % 60)
@@ -1253,18 +1233,14 @@ struct NowPlayingView: View {
     }
 
     private func pageSwipeGesture(width: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 12, coordinateSpace: .local)
+        DragGesture(minimumDistance: 12, coordinateSpace: .global)
             .onEnded { value in
                 guard !suppressPageSwipeForScrub else { return }
-                let horizontalIntent = abs(value.predictedEndTranslation.width) > abs(value.translation.width)
-                    ? value.predictedEndTranslation.width
-                    : value.translation.width
-                let verticalIntent = abs(value.predictedEndTranslation.height) > abs(value.translation.height)
-                    ? value.predictedEndTranslation.height
-                    : value.translation.height
-                let horizontalThreshold = max(28, width * 0.07)
-                guard abs(horizontalIntent) > horizontalThreshold,
-                      abs(horizontalIntent) > abs(verticalIntent) * 0.82 else { return }
+                guard let horizontalIntent = PlayerGesturePolicy.horizontalPageSwipeIntent(
+                    translation: value.translation,
+                    predictedEndTranslation: value.predictedEndTranslation,
+                    width: width
+                ) else { return }
 
                 animate(.snappy(duration: 0.28, extraBounce: 0.02)) {
                     if horizontalIntent < 0 {
@@ -1290,18 +1266,54 @@ struct NowPlayingView: View {
         }
     }
 
-    private var topChromeDismissDrag: some Gesture {
+    private var centerBodyDismissDrag: some Gesture {
         DragGesture(minimumDistance: 12, coordinateSpace: .global)
             .updating($dismissDragOffset) { value, state, _ in
-                guard let offset = PlayerGesturePolicy.topChromeDismissDragOffset(
-                    translation: value.translation
+                guard selectedPage == PlayerPage.nowPlaying.rawValue else { return }
+                guard let offset = PlayerGesturePolicy.dismissDragOffset(
+                    translation: value.translation,
+                    startY: value.startLocation.y,
+                    dismissGrabZoneHeight: Layout.dismissGrabZoneHeight,
+                    region: .centerBody,
+                    isProgressScrubbing: isProgressScrubbing
                 ) else { return }
                 state = offset
             }
             .onEnded { value in
-                if PlayerGesturePolicy.shouldDismissFromTopChrome(
+                guard selectedPage == PlayerPage.nowPlaying.rawValue else { return }
+                if PlayerGesturePolicy.shouldDismissFullPlayer(
                     translation: value.translation,
-                    predictedEndTranslation: value.predictedEndTranslation
+                    predictedEndTranslation: value.predictedEndTranslation,
+                    startY: value.startLocation.y,
+                    dismissGrabZoneHeight: Layout.dismissGrabZoneHeight,
+                    region: .centerBody,
+                    isProgressScrubbing: isProgressScrubbing
+                ) {
+                    closePlayer()
+                }
+            }
+    }
+
+    private var topChromeDismissDrag: some Gesture {
+        DragGesture(minimumDistance: 12, coordinateSpace: .global)
+            .updating($dismissDragOffset) { value, state, _ in
+                guard let offset = PlayerGesturePolicy.dismissDragOffset(
+                    translation: value.translation,
+                    startY: value.startLocation.y,
+                    dismissGrabZoneHeight: Layout.dismissGrabZoneHeight,
+                    region: .topChrome,
+                    isProgressScrubbing: isProgressScrubbing
+                ) else { return }
+                state = offset
+            }
+            .onEnded { value in
+                if PlayerGesturePolicy.shouldDismissFullPlayer(
+                    translation: value.translation,
+                    predictedEndTranslation: value.predictedEndTranslation,
+                    startY: value.startLocation.y,
+                    dismissGrabZoneHeight: Layout.dismissGrabZoneHeight,
+                    region: .topChrome,
+                    isProgressScrubbing: isProgressScrubbing
                 ) {
                     closePlayer()
                 }

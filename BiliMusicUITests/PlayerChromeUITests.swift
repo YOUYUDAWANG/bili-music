@@ -75,17 +75,48 @@ final class PlayerChromeUITests: XCTestCase {
     }
 
     @MainActor
-    func testDraggingPlayerContentDoesNotDismissFullPlayer() throws {
+    func testDraggingCenterPlayerBodyDismissesFullPlayer() throws {
         try openFullPlayerFromMini()
 
         let nowPlaying = element("nowPlayingView")
-        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before testing internal drags.")
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before testing center-page dismiss.")
 
         let dragStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.32))
         let dragEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.70))
         dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
 
-        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 1), "Dragging inside player content should not dismiss the full player.")
+        XCTAssertTrue(nowPlaying.waitForNonExistence(timeout: 3), "Dragging down on the center player body should minimize the full player.")
+        XCTAssertTrue(element("miniPlayer").waitForExistence(timeout: 3), "The mini player should reappear after center-page minimize.")
+    }
+
+    @MainActor
+    func testDraggingQueueListBodyDoesNotDismissFullPlayer() throws {
+        try openFullPlayerFromMini()
+        try swipeToPlayerPage(direction: .right)
+
+        let nowPlaying = element("nowPlayingView")
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should stay open before testing queue-list drag.")
+
+        let dragStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.38))
+        let dragEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.76))
+        dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
+
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 1), "Dragging inside the queue list body should not minimize the full player.")
+    }
+
+    @MainActor
+    func testDraggingRecommendationListBodyDoesNotDismissFullPlayer() throws {
+        try openFullPlayerFromMini()
+        try swipeToPlayerPage(direction: .left)
+
+        let nowPlaying = element("nowPlayingView")
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should stay open before testing recommendation-list drag.")
+
+        let dragStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.38))
+        let dragEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.76))
+        dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
+
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 1), "Dragging inside the recommendation list body should not minimize the full player.")
     }
 
     @MainActor
@@ -113,7 +144,7 @@ final class PlayerChromeUITests: XCTestCase {
     }
 
     private func element(_ identifier: String) -> XCUIElement {
-        app.descendants(matching: .any)[identifier]
+        app.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
 
     @MainActor
@@ -138,5 +169,48 @@ final class PlayerChromeUITests: XCTestCase {
         let openStart = miniPlayer.coordinate(withNormalizedOffset: CGVector(dx: 0.24, dy: 0.5))
         let openEnd = openStart.withOffset(CGVector(dx: 0, dy: -160))
         openStart.press(forDuration: 0.35, thenDragTo: openEnd)
+    }
+
+    private enum PlayerPageSwipeDirection {
+        case left
+        case right
+    }
+
+    @MainActor
+    private func swipeToPlayerPage(direction: PlayerPageSwipeDirection) throws {
+        let nowPlaying = element("nowPlayingView")
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before swiping pages.")
+        let cover = element("nowPlayingCover")
+        XCTAssertTrue(cover.waitForExistence(timeout: 2), "The center player cover should be visible before swiping pages.")
+
+        let expectedPage = direction == .left ? "推荐" : "队列"
+        if direction == .left {
+            cover.swipeLeft()
+        } else {
+            cover.swipeRight()
+        }
+
+        XCTAssertTrue(waitForPlayerPage(expectedPage), "Horizontal swipe should switch the player page to \(expectedPage).")
+    }
+
+    @MainActor
+    private func waitForPlayerPage(_ title: String, timeout: TimeInterval = 2) -> Bool {
+        let expectedPageIdentifier = title == "队列" ? "playerQueuePage" : "playerRecommendationsPage"
+        let expectedPage = element(expectedPageIdentifier)
+        if expectedPage.waitForExistence(timeout: timeout), expectedPage.isHittable {
+            return true
+        }
+
+        let hint = element("playerPageHint")
+        guard hint.waitForExistence(timeout: timeout) else { return false }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if hint.value as? String == title {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        return hint.value as? String == title
     }
 }
