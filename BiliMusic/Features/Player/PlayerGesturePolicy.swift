@@ -2,10 +2,10 @@ import CoreGraphics
 
 enum PlayerGesturePolicy {
     static let miniOpeningDragRange: CGFloat = 190
-    static let miniOpeningActivationProgress: CGFloat = 0.10
-    static let miniLiveOpeningActivationProgress: CGFloat = 0.07
+    static let miniOpeningActivationProgress: CGFloat = 0.38
+    static let miniLiveOpeningActivationProgress: CGFloat = 0.38
     static let miniPredictedOpeningMinimumProgress: CGFloat = 0.10
-    static let miniOpeningPredictedActivationProgress: CGFloat = 0.38
+    static let miniOpeningPredictedActivationProgress: CGFloat = 0.44
     static let velocityProjectionTime: CGFloat = 0.22
     static let dismissGrabZoneHeight: CGFloat = 150
     static let dismissTranslationThreshold: CGFloat = 130
@@ -31,7 +31,7 @@ enum PlayerGesturePolicy {
 
     static func shouldBeginMiniOpenDrag(translation: CGSize) -> Bool {
         let isVertical = abs(translation.height) > abs(translation.width) * 1.2
-        return translation.height < -18 && isVertical
+        return translation.height < -22 && isVertical
     }
 
     static func shouldOpenMiniPlayerLive(translationY: CGFloat, velocityY: CGFloat) -> Bool {

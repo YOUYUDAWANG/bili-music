@@ -68,7 +68,7 @@ final class PlayerChromeUITests: XCTestCase {
         XCTAssertTrue(miniPlayer.waitForExistence(timeout: 5), "Fixture mini player should be visible.")
 
         let start = miniPlayer.coordinate(withNormalizedOffset: CGVector(dx: 0.24, dy: 0.5))
-        let end = start.withOffset(CGVector(dx: 0, dy: -48))
+        let end = start.withOffset(CGVector(dx: 0, dy: -20))
         start.press(forDuration: 0.30, thenDragTo: end)
 
         let nowPlaying = element("nowPlayingView")
@@ -138,7 +138,7 @@ final class PlayerChromeUITests: XCTestCase {
         XCTAssertTrue(miniPlayer.waitForExistence(timeout: 5), "Fixture mini player should be visible.")
 
         let openStart = miniPlayer.coordinate(withNormalizedOffset: CGVector(dx: 0.24, dy: 0.5))
-        let openEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.24, dy: 0.42))
+        let openEnd = openStart.withOffset(CGVector(dx: 0, dy: -160))
         openStart.press(forDuration: 0.35, thenDragTo: openEnd)
     }
 }

@@ -188,18 +188,17 @@ struct RootView: View {
 
     private var fullPlayerOpacity: Double {
         let progress = Double(renderedPlayerOpenProgress)
-        guard !reduceMotion else { return progress }
-        return min(1, 0.72 + progress * 0.28)
+        return min(1, max(0, progress))
     }
 
     private var fullPlayerScaleX: CGFloat {
         guard !reduceMotion else { return 1 }
-        return 0.985 + renderedPlayerOpenProgress * 0.015
+        return 0.96 + renderedPlayerOpenProgress * 0.04
     }
 
     private var fullPlayerScaleY: CGFloat {
         guard !reduceMotion else { return 1 }
-        return 0.992 + renderedPlayerOpenProgress * 0.008
+        return 0.98 + renderedPlayerOpenProgress * 0.02
     }
 
     private func openFullPlayer(startProgress explicitStartProgress: CGFloat? = nil) {
@@ -490,7 +489,7 @@ private struct SystemMiniPlayer: View {
     }
 
     private var miniOpenDragGesture: some Gesture {
-        DragGesture(minimumDistance: 8, coordinateSpace: .local)
+        DragGesture(minimumDistance: 8, coordinateSpace: .global)
             .onChanged { value in
                 onOpenDragChanged(miniOpenDragSample(from: value))
             }
