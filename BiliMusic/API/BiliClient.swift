@@ -167,7 +167,31 @@ struct BiliClient {
     /// DASH 播放信息（音频流列表 + flac）。
     struct PlayInfo: Decodable {
         struct Dash: Decodable {
-            struct Audio: Decodable { let id: Int; let baseUrl: String; let bandwidth: Int }
+            struct Audio: Decodable {
+                let id: Int
+                let baseUrl: String
+                let backupUrl: [String]?
+                let bandwidth: Int
+
+                private enum CodingKeys: String, CodingKey {
+                    case id
+                    case baseUrl
+                    case base_url
+                    case backupUrl
+                    case backup_url
+                    case bandwidth
+                }
+
+                init(from decoder: Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+                    id = try container.decode(Int.self, forKey: .id)
+                    baseUrl = try container.decodeIfPresent(String.self, forKey: .baseUrl)
+                        ?? container.decode(String.self, forKey: .base_url)
+                    backupUrl = try container.decodeIfPresent([String].self, forKey: .backupUrl)
+                        ?? container.decodeIfPresent([String].self, forKey: .backup_url)
+                    bandwidth = try container.decode(Int.self, forKey: .bandwidth)
+                }
+            }
             struct Flac: Decodable { let audio: Audio? }
             let audio: [Audio]?
             let flac: Flac?
@@ -185,7 +209,7 @@ struct BiliClient {
     /// 按设置里的音质偏好取音频流。返回 URL(约 2 小时过期,不可持久化)和实际选中的音质 id。
     /// 偏好 0 = 最高(含 Hi-Res);否则选不超过偏好的最高一档。
     /// preferredQuality:0 = 最高(含 Hi-Res),否则选不超过该 id 的最高一档。播放/下载各传各的偏好。
-    func audioStream(bvid: String, cid: Int, preferredQuality pref: Int) async throws -> (url: URL, quality: Int, bandwidth: Int) {
+    func audioStream(bvid: String, cid: Int, preferredQuality pref: Int) async throws -> (url: URL, candidateURLs: [URL], quality: Int, bandwidth: Int) {
         let info: PlayInfo = try await get(
             "https://api.bilibili.com/x/player/playurl?bvid=\(bvid)&cid=\(cid)&fnval=16&fourk=1")
         guard let dash = info.dash, let audios = dash.audio, !audios.isEmpty else {
@@ -203,7 +227,9 @@ struct BiliClient {
         guard let url = URL(string: chosen.baseUrl) else {
             throw APIError(code: -1, message: "音频 URL 非法")
         }
-        return (url, chosen.id, chosen.bandwidth)
+        let backups = (chosen.backupUrl ?? []).compactMap(URL.init(string:))
+        let candidates = AudioCDNSelector.deduped([url] + backups)
+        return (url, candidates, chosen.id, chosen.bandwidth)
     }
 
     /// MV 取流场景：内嵌优先稳定快速，全屏优先高清并自动降级。

@@ -70,10 +70,29 @@ struct Track: Identifiable, Equatable, Codable {
 struct PlaybackSource {
     let track: Track
     let url: URL
+    let candidateURLs: [URL]
     let isLocal: Bool
     let kind: PlaybackDiagnosticEvent.SourceKind
     let quality: Int?
     let bandwidth: Int?
+
+    init(
+        track: Track,
+        url: URL,
+        candidateURLs: [URL] = [],
+        isLocal: Bool,
+        kind: PlaybackDiagnosticEvent.SourceKind,
+        quality: Int?,
+        bandwidth: Int?
+    ) {
+        self.track = track
+        self.url = url
+        self.candidateURLs = AudioCDNSelector.deduped([url] + candidateURLs)
+        self.isLocal = isLocal
+        self.kind = kind
+        self.quality = quality
+        self.bandwidth = bandwidth
+    }
 }
 
 @Observable
@@ -205,6 +224,7 @@ final class PlayerEngine {
     private var preloadTask: Task<Void, Never>?
     private var autoMVTask: Task<Void, Never>?
     private var postPlaybackTask: Task<Void, Never>?
+    private var remoteStartupFallbackTask: Task<Void, Never>?
     private var schedulePreloadInflight = 0   // 限制滚动触发的预加载并发,避免一次划过几十行齐发请求被限流
     private static let maxSchedulePreloadInflight = 3
     private var preparedVideoStreams: [TrackKey: PreparedVideoStream] = [:]
@@ -212,6 +232,7 @@ final class PlayerEngine {
     private var playbackGeneration = UUID()
     private var firstPlayingDiagnosticsGeneration: UUID?
     private var retriedPreparedStreamGenerations: Set<UUID> = []
+    private var remoteStartupFallbackGenerations: Set<UUID> = []
     private var activePlaybackSource: PlaybackSource?
     private var activePlaybackGeneration: UUID?
     private var manualPlaybackModeOverride: PlaybackMode?
@@ -254,6 +275,7 @@ final class PlayerEngine {
         prefetchTask?.cancel()
         queuePrefetchTask?.cancel()
         autoMVTask?.cancel()
+        remoteStartupFallbackTask?.cancel()
         queue = tracks
         queueIndex = index
         playedKeys = []
@@ -276,6 +298,7 @@ final class PlayerEngine {
         prefetchTask?.cancel()
         queuePrefetchTask?.cancel()
         autoMVTask?.cancel()
+        remoteStartupFallbackTask?.cancel()
         queue = [track]
         queueIndex = 0
         playedKeys = []
@@ -332,6 +355,7 @@ final class PlayerEngine {
         prefetchTask?.cancel()
         queuePrefetchTask?.cancel()
         autoMVTask?.cancel()
+        remoteStartupFallbackTask?.cancel()
         state = .loading
         do {
             let track = try await resolve(bvid: bvid)
@@ -408,6 +432,7 @@ final class PlayerEngine {
         prefetchTask?.cancel()
         queuePrefetchTask?.cancel()
         autoMVTask?.cancel()
+        remoteStartupFallbackTask?.cancel()
         queueIndex = index
         manualPlaybackModeOverride = nil
         playbackMode = preferredModeForNewTrack()
@@ -445,6 +470,7 @@ final class PlayerEngine {
     func pause() {
         guard let player else { return }
         wantsPlayback = false
+        remoteStartupFallbackTask?.cancel()
         player.pause()
         state = .paused
         updateNowPlayingInfo()
@@ -528,6 +554,7 @@ final class PlayerEngine {
         playbackGeneration = generation
         firstPlayingDiagnosticsGeneration = nil
         retriedPreparedStreamGenerations.removeAll()
+        remoteStartupFallbackGenerations.removeAll()
         playbackDiagnostics.record(.currentAssigned, track: track)
         startupTestHooks.record(.currentAssigned)
         state = .loading
@@ -539,6 +566,7 @@ final class PlayerEngine {
         autoMVTask?.cancel()
         postPlaybackTask?.cancel()
         queuePrefetchTask?.cancel()
+        remoteStartupFallbackTask?.cancel()
         do {
             let source = try await resolvePlaybackSource(for: track)
             track = source.track
@@ -573,6 +601,7 @@ final class PlayerEngine {
         queuePrefetchTask?.cancel()
         autoMVTask?.cancel()
         postPlaybackTask?.cancel()
+        remoteStartupFallbackTask?.cancel()
         itemStatusObserver?.invalidate()
         if let itemFailureObserver { NotificationCenter.default.removeObserver(itemFailureObserver) }
         player?.pause()
@@ -644,6 +673,7 @@ final class PlayerEngine {
             return PlaybackSource(
                 track: track,
                 url: url,
+                candidateURLs: [url],
                 isLocal: false,
                 kind: .mvRemote,
                 quality: nil,
@@ -657,6 +687,7 @@ final class PlayerEngine {
             return PlaybackSource(
                 track: track,
                 url: CacheStore.audioDir.appendingPathComponent(cached.fileName),
+                candidateURLs: [],
                 isLocal: true,
                 kind: .localCache,
                 quality: cached.quality,
@@ -670,6 +701,7 @@ final class PlayerEngine {
             return PlaybackSource(
                 track: track,
                 url: prepared.url,
+                candidateURLs: prepared.candidateURLs,
                 isLocal: false,
                 kind: .preparedRemote,
                 quality: prepared.quality,
@@ -685,6 +717,7 @@ final class PlayerEngine {
         return PlaybackSource(
             track: track,
             url: prepared.url,
+            candidateURLs: prepared.candidateURLs,
             isLocal: false,
             kind: .freshRemote,
             quality: prepared.quality,
@@ -938,7 +971,48 @@ final class PlayerEngine {
         }
         recordPlayRequested(for: source)
         player.playImmediately(atRate: 1)
+        scheduleRemoteStartupFallback(for: source, generation: generation, resumeAt: resumeAt)
         updateNowPlayingInfo()
+    }
+
+    private func scheduleRemoteStartupFallback(for source: PlaybackSource, generation: UUID, resumeAt: Double) {
+        let candidates = AudioCDNSelector.fallbackCandidates(from: source.candidateURLs, excluding: source.url)
+        guard !source.isLocal,
+              source.kind != .mvRemote,
+              !candidates.isEmpty,
+              !remoteStartupFallbackGenerations.contains(generation) else { return }
+
+        remoteStartupFallbackTask?.cancel()
+        remoteStartupFallbackTask = Task { [weak self, source, generation, candidates, resumeAt] in
+            try? await Task.sleep(for: .milliseconds(1200))
+            guard !Task.isCancelled else { return }
+            let fallbackURL = await AudioCDNSelector.fastestReachableURL(from: candidates)
+            guard !Task.isCancelled, let fallbackURL else { return }
+
+            await MainActor.run {
+                guard let self,
+                      self.playbackGeneration == generation,
+                      self.firstPlayingDiagnosticsGeneration != generation,
+                      self.wantsPlayback,
+                      self.current.map({ source.track.key.matches($0) }) ?? false,
+                      !self.remoteStartupFallbackGenerations.contains(generation) else { return }
+
+                self.remoteStartupFallbackGenerations.insert(generation)
+                log.debug("remote startup fallback host=\(fallbackURL.host() ?? "nil", privacy: .public)")
+                let retrySource = PlaybackSource(
+                    track: source.track,
+                    url: fallbackURL,
+                    candidateURLs: [fallbackURL],
+                    isLocal: false,
+                    kind: source.kind,
+                    quality: source.quality,
+                    bandwidth: source.bandwidth)
+                self.startPlayback(
+                    source: retrySource,
+                    resumeAt: self.currentTime.isFinite ? self.currentTime : resumeAt,
+                    generation: generation)
+            }
+        }
     }
 
     private func recordPlayerItemCreated(for source: PlaybackSource) {
@@ -965,6 +1039,7 @@ final class PlayerEngine {
         guard playbackGeneration == generation,
               current.map({ source.track.key.matches($0) }) ?? false else { return }
         state = .playing
+        remoteStartupFallbackTask?.cancel()
         guard firstPlayingDiagnosticsGeneration != generation else { return }
         firstPlayingDiagnosticsGeneration = generation
         playbackDiagnostics.record(
@@ -985,6 +1060,14 @@ final class PlayerEngine {
     ) async {
         guard playbackGeneration == generation,
               current.map({ source.track.key.matches($0) }) ?? false else { return }
+
+        if let fallbackSource = await remoteFallbackSource(for: source, generation: generation) {
+            startPlayback(
+                source: fallbackSource,
+                resumeAt: resumeAt.isFinite ? resumeAt : currentTime,
+                generation: generation)
+            return
+        }
 
         guard source.kind == .preparedRemote,
               !retriedPreparedStreamGenerations.contains(generation) else {
@@ -1010,6 +1093,7 @@ final class PlayerEngine {
             let retrySource = PlaybackSource(
                 track: retryTrack,
                 url: prepared.url,
+                candidateURLs: prepared.candidateURLs,
                 isLocal: false,
                 kind: .freshRemote,
                 quality: prepared.quality,
@@ -1031,6 +1115,30 @@ final class PlayerEngine {
             startupTestHooks.record(.failureSurfaced)
             state = .failed(error.localizedDescription)
         }
+    }
+
+    private func remoteFallbackSource(for source: PlaybackSource, generation: UUID) async -> PlaybackSource? {
+        let candidates = AudioCDNSelector.fallbackCandidates(from: source.candidateURLs, excluding: source.url)
+        guard !source.isLocal,
+              source.kind != .mvRemote,
+              !candidates.isEmpty,
+              !remoteStartupFallbackGenerations.contains(generation) else { return nil }
+        guard let fallbackURL = await AudioCDNSelector.fastestReachableURL(
+            from: candidates,
+            timeout: .milliseconds(700)) else { return nil }
+        guard playbackGeneration == generation,
+              current.map({ source.track.key.matches($0) }) ?? false else { return nil }
+
+        remoteStartupFallbackGenerations.insert(generation)
+        log.debug("remote failure fallback host=\(fallbackURL.host() ?? "nil", privacy: .public)")
+        return PlaybackSource(
+            track: source.track,
+            url: fallbackURL,
+            candidateURLs: [fallbackURL],
+            isLocal: false,
+            kind: source.kind,
+            quality: source.quality,
+            bandwidth: source.bandwidth)
     }
 
     func simulateCurrentPlaybackItemFailureForTesting(message: String = "播放失败") async {

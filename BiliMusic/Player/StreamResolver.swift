@@ -9,11 +9,30 @@ private let streamLog = Logger(subsystem: "com.fubuki.BiliMusic", category: "str
 final class StreamResolver {
     struct PreparedAudioStream {
         let url: URL
+        let candidateURLs: [URL]
         let cid: Int
         let duration: Int
         let quality: Int
         let bandwidth: Int
         let fetchedAt: Date
+
+        init(
+            url: URL,
+            candidateURLs: [URL] = [],
+            cid: Int,
+            duration: Int,
+            quality: Int,
+            bandwidth: Int,
+            fetchedAt: Date
+        ) {
+            self.url = url
+            self.candidateURLs = AudioCDNSelector.deduped([url] + candidateURLs)
+            self.cid = cid
+            self.duration = duration
+            self.quality = quality
+            self.bandwidth = bandwidth
+            self.fetchedAt = fetchedAt
+        }
     }
 
     private let client: BiliClient
@@ -75,6 +94,7 @@ final class StreamResolver {
             streamLog.debug("prepare audio(bvid:\(track.bvid)) \(elapsed, format: .fixed(precision: 1))ms")
             return PreparedAudioStream(
                 url: stream.url,
+                candidateURLs: stream.candidateURLs,
                 cid: meta.cid,
                 duration: meta.duration,
                 quality: stream.quality,
