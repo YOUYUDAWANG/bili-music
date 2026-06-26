@@ -218,6 +218,28 @@ struct SearchView: View {
             if store.loadingMore {
                 ProgressView()
                     .frame(maxWidth: .infinity, minHeight: 48)
+            } else if let message = store.loadMoreErrorMessage {
+                VStack(spacing: 8) {
+                    Text("加载更多失败")
+                        .font(.caption.weight(.semibold))
+                    Text(message)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    Button {
+                        Task {
+                            await store.loadMore { tracks in
+                                engine.preload(tracks: tracks, limit: 1, delay: .milliseconds(700))
+                            }
+                        }
+                    } label: {
+                        Text("重试加载")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: 36)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .frame(maxWidth: .infinity, minHeight: 76)
             } else if store.hasMoreResults {
                 Button {
                     Task {

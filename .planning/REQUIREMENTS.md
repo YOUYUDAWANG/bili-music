@@ -19,17 +19,17 @@ v1 聚焦当前用户已经反复遇到的卡顿和稳定性问题。目标不�
 
 - [x] **SRCH-01**: User can enter the Search screen and focus the search field without triggering Bilibili network requests or expensive local work on the focus path.
 - [x] **SRCH-02**: User sees local search history and suggestions when the search field is focused with an empty query.
-- [ ] **SRCH-03**: User can submit a search and results are scoped to the active query and search mode; stale results from older queries cannot appear in the current result list.
-- [ ] **SRCH-04**: User can load more search results through pagination without losing existing results when a later page fails.
-- [ ] **SRCH-05**: Search results apply music-only filtering on every page and do not mix general Bilibili videos into the default song result surface.
+- [x] **SRCH-03**: User can submit a search and results are scoped to the active query and search mode; stale results from older queries cannot appear in the current result list.
+- [x] **SRCH-04**: User can load more search results through pagination without losing existing results when a later page fails.
+- [x] **SRCH-05**: Search results apply music-only filtering on every page and do not mix general Bilibili videos into the default song result surface.
 
 ### Recommendation Stability
 
 - [x] **RECO-01**: User can start the first song after app launch without causing the Home recommendation list to flash, reset, or auto-refresh.
-- [ ] **RECO-02**: User can tap a track from the player recommendation list without immediately refreshing or scrambling that visible recommendation list.
-- [ ] **RECO-03**: Home recommendations and Now Playing related recommendations maintain separate refresh state and do not cancel, clear, or reset each other.
+- [x] **RECO-02**: User can tap a track from the player recommendation list without immediately refreshing or scrambling that visible recommendation list.
+- [x] **RECO-03**: Home recommendations and Now Playing related recommendations maintain separate refresh state and do not cancel, clear, or reset each other.
 - [x] **RECO-04**: Recommendation refresh work is bounded and lower priority than direct playback startup.
-- [ ] **RECO-05**: Recommendation sources apply the same music-only filtering principles as Search.
+- [x] **RECO-05**: Recommendation sources apply the same music-only filtering principles as Search.
 
 ### Memory and Images
 
@@ -47,9 +47,9 @@ v1 聚焦当前用户已经反复遇到的卡顿和稳定性问题。目标不�
 
 ### Regression Coverage
 
-- [ ] **TEST-01**: Search store tests cover query identity, mode identity, pagination, stale-result rejection, and music-only filtering.
+- [x] **TEST-01**: Search store tests cover query identity, mode identity, pagination, stale-result rejection, and music-only filtering.
 - [ ] **TEST-02**: Playback tests or instrumentation verify post-start enrichment is not awaited before the playback request.
-- [ ] **TEST-03**: Recommendation tests or UI tests verify first playback does not reset Home recommendations and tapping a related track does not immediately refresh the related list.
+- [x] **TEST-03**: Recommendation tests or UI tests verify first playback does not reset Home recommendations and tapping a related track does not immediately refresh the related list.
 - [x] **TEST-04**: Player chrome UI tests cover mini-player expansion, full-player minimization, and list scrolling without accidental dismissal.
 - [ ] **TEST-05**: Image/cache behavior has at least one regression check for bounded image work or memory-pressure cleanup.
 
@@ -110,14 +110,14 @@ Roadmap mapping is filled during roadmap creation.
 | PLAY-05 | Phase 1 | Complete |
 | SRCH-01 | Phase 1 | Complete |
 | SRCH-02 | Phase 1 | Complete |
-| SRCH-03 | Phase 2 | Pending |
-| SRCH-04 | Phase 2 | Pending |
-| SRCH-05 | Phase 2 | Pending |
+| SRCH-03 | Phase 2 | Complete |
+| SRCH-04 | Phase 2 | Complete |
+| SRCH-05 | Phase 2 | Complete |
 | RECO-01 | Phase 1 | Complete |
-| RECO-02 | Phase 2 | Pending |
-| RECO-03 | Phase 2 | Pending |
+| RECO-02 | Phase 2 | Complete |
+| RECO-03 | Phase 2 | Complete |
 | RECO-04 | Phase 1 | Complete |
-| RECO-05 | Phase 2 | Pending |
+| RECO-05 | Phase 2 | Complete |
 | MEM-01 | Phase 1 | Complete |
 | MEM-02 | Phase 1 | Complete |
 | MEM-03 | Phase 1 | Complete |
@@ -126,9 +126,9 @@ Roadmap mapping is filled during roadmap creation.
 | PLYR-03 | Phase 3 | Pending |
 | PLYR-04 | Phase 3 | Pending |
 | PLYR-05 | Phase 3 | Pending |
-| TEST-01 | Phase 3 | Pending |
+| TEST-01 | Phase 2 | Complete |
 | TEST-02 | Phase 3 | Pending |
-| TEST-03 | Phase 3 | Pending |
+| TEST-03 | Phase 2 | Complete |
 | TEST-04 | Phase 1 | Complete |
 | TEST-05 | Phase 3 | Pending |
 
@@ -140,4 +140,4 @@ Roadmap mapping is filled during roadmap creation.
 
 ---
 *Requirements defined: 2026-06-26*
-*Last updated: 2026-06-26 after Phase 01 gesture guardrails*
+*Last updated: 2026-06-27 after Phase 02 discovery reliability*

@@ -171,8 +171,9 @@ struct RecommendationEngine {
     /// 用实时收藏集过滤,所以即便命中的是几分钟前的缓存池,刚收藏的也会立刻消失。
     /// 电台连播保留收藏曲(否则电台永远不放你喜欢的歌)。
     private static func usable(_ pool: [ScoredTrack], mode: Mode, snapshot: Snapshot) -> [ScoredTrack] {
-        guard mode != .radio else { return pool }
-        return pool.filter { !snapshot.favoriteBVIDs.contains($0.track.bvid) }
+        let musicOnly = pool.filter { isDisplayableRecommendation($0.track, mode: mode) }
+        guard mode != .radio else { return musicOnly }
+        return musicOnly.filter { !snapshot.favoriteBVIDs.contains($0.track.bvid) }
     }
 
     private func buildCandidates(
@@ -229,7 +230,7 @@ struct RecommendationEngine {
                 candidates += await relatedCandidates(from: [current], source: .relatedCurrent)
                 candidates += await artistSearchCandidates(for: current)
             }
-            candidates += playlistNeighborCandidates(current: context.current, playlistTracks: context.playlistTracks)
+            candidates += playlistNeighborCandidates(current: context.current, playlistTracks: context.playlistTracks, mode: mode)
 
         case .relatedPanel:
             if let current = context.current {
@@ -238,7 +239,7 @@ struct RecommendationEngine {
                     candidates += await artistSearchCandidates(for: current)
                 }
             }
-            candidates += playlistNeighborCandidates(current: context.current, playlistTracks: context.playlistTracks)
+            candidates += playlistNeighborCandidates(current: context.current, playlistTracks: context.playlistTracks, mode: mode)
             if candidates.count < 12 {
                 candidates += await relatedCandidates(from: Array(snapshot.historyTracks.prefix(1)), source: .relatedHistory, perSeedLimit: 8)
             }
@@ -329,11 +330,12 @@ struct RecommendationEngine {
         }
     }
 
-    private func playlistNeighborCandidates(current: Track?, playlistTracks: [Track]) -> [Candidate] {
+    private func playlistNeighborCandidates(current: Track?, playlistTracks: [Track], mode: Mode) -> [Candidate] {
         guard let current, let index = playlistTracks.firstIndex(where: { $0.bvid == current.bvid }) else { return [] }
         let bounds = max(0, index - 3)..<min(playlistTracks.count, index + 4)
         return playlistTracks[bounds]
             .filter { $0.bvid != current.bvid }
+            .filter { Self.isDisplayableRecommendation($0, mode: mode) }
             .map { Candidate(track: $0, source: .playlistNeighbor, seed: current) }
     }
 
@@ -404,6 +406,7 @@ struct RecommendationEngine {
         let current = context.current
 
         let scored = candidates
+            .filter { isDisplayableRecommendation($0.track, mode: mode) }
             .filter { candidate in
                 guard let current else { return true }
                 return !candidate.track.key.matches(current)
@@ -423,6 +426,15 @@ struct RecommendationEngine {
         return best.values.sorted { lhs, rhs in
             if lhs.score == rhs.score { return lhs.track.title < rhs.track.title }
             return lhs.score > rhs.score
+        }
+    }
+
+    static func isDisplayableRecommendation(_ track: Track, mode: Mode) -> Bool {
+        switch mode {
+        case .home, .relatedPanel:
+            MusicFilter.isSearchResultMusic(track)
+        case .radio:
+            MusicFilter.isMusic(track)
         }
     }
 

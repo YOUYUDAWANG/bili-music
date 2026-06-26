@@ -38,11 +38,14 @@ struct SearchLocalContent: Equatable {
 @Observable
 @MainActor
 final class SearchStore {
+    typealias SearchPageProvider = @Sendable (_ keyword: String, _ page: Int, _ musicOnly: Bool) async throws -> [Track]
+
     private(set) var results: [Track] = []
     private(set) var sections: SearchResultSections?
     private(set) var searchHistory: [String] = []
     private(set) var searching = false
     private(set) var errorMessage: String?
+    private(set) var loadMoreErrorMessage: String?
     private(set) var historyLoaded = false
     private(set) var resultsQuery = ""
     private(set) var hasMoreResults = false
@@ -56,6 +59,17 @@ final class SearchStore {
     private var nextPage = 1
     private var resultCache: [SearchCacheKey: SearchCachedSnapshot] = [:]
     private let historyKey = "searchHistory"
+    private let searchPage: SearchPageProvider
+
+    init() {
+        self.searchPage = { keyword, page, musicOnly in
+            try await SearchStore.defaultSearchPage(keyword: keyword, page: page, musicOnly: musicOnly)
+        }
+    }
+
+    init(searchPageForTesting searchPage: @escaping SearchPageProvider) {
+        self.searchPage = searchPage
+    }
 
     func loadHistory() async {
         guard !historyLoaded else { return }
@@ -101,6 +115,7 @@ final class SearchStore {
         guard !text.isEmpty else { return }
         searchTask?.cancel()
         let searchID = UUID()
+        let requestMode = mode
         let hadCachedResults = restoreCachedResultsIfAvailable(for: text)
         if !hadCachedResults {
             resetTransientState(cancelTask: false)
@@ -108,9 +123,10 @@ final class SearchStore {
         activeSearchID = searchID
         activeQuery = text
         searching = !hadCachedResults
+        loadMoreErrorMessage = nil
         rememberSearch(text)
         searchTask = Task { [weak self] in
-            await self?.search(text: text, searchID: searchID, preload: preload)
+            await self?.search(text: text, mode: requestMode, searchID: searchID, preload: preload)
         }
     }
 
@@ -129,12 +145,17 @@ final class SearchStore {
 
     private func loadMorePage(preload: @escaping @MainActor ([Track]) -> Void) async {
         let text = resultsQuery
+        let requestMode = mode
         let searchID = activeSearchID
         loadingMore = true
-        defer { loadingMore = false }
+        loadMoreErrorMessage = nil
+        defer {
+            if activeSearchID == searchID, resultsQuery == text, mode == requestMode {
+                loadingMore = false
+            }
+        }
 
         do {
-            let client = BiliClient()
             var pageStart = nextPage
             var excluded = Set(results.map(\.bvid))
             var loaded: [Track] = []
@@ -143,11 +164,11 @@ final class SearchStore {
             // 严格音乐过滤后,某一批可能全被丢弃;连续跳过几批,避免底部看起来卡住。
             for _ in 0..<3 {
                 let batch = try await Self.searchBatch(
-                    client: client,
+                    searchPage: searchPage,
                     keywords: activeKeywords,
                     pages: pageStart...(pageStart + 1),
                     query: text,
-                    mode: mode,
+                    mode: requestMode,
                     excluding: excluded)
                 pageStart += 2
                 stillHasRawResults = batch.rawCount > 0
@@ -161,17 +182,20 @@ final class SearchStore {
 
             guard !Task.isCancelled,
                   activeSearchID == searchID,
-                  resultsQuery == text else { return }
+                  resultsQuery == text,
+                  mode == requestMode else { return }
             nextPage = pageStart
             hasMoreResults = stillHasRawResults && nextPage <= 30
             if !loaded.isEmpty {
                 results.append(contentsOf: loaded)
+                sections = SearchResultSections.make(from: results)
                 cacheCurrentSnapshot()
                 preload(loaded)
             }
         } catch {
-            guard activeSearchID == searchID, resultsQuery == text else { return }
-            hasMoreResults = false
+            guard activeSearchID == searchID, resultsQuery == text, mode == requestMode else { return }
+            loadMoreErrorMessage = error.localizedDescription
+            hasMoreResults = true
         }
     }
 
@@ -188,6 +212,7 @@ final class SearchStore {
         nextPage = snapshot.nextPage
         hasMoreResults = snapshot.hasMoreResults
         errorMessage = nil
+        loadMoreErrorMessage = nil
         searching = false
         loadingMore = false
         return true
@@ -248,6 +273,7 @@ final class SearchStore {
         activeSearchID = UUID()
         searching = false
         errorMessage = nil
+        loadMoreErrorMessage = nil
         results = []
         sections = nil
         resultsQuery = ""
@@ -275,25 +301,27 @@ final class SearchStore {
         }
     }
 
-    private func search(text: String, searchID: UUID, preload: @escaping @MainActor ([Track]) -> Void) async {
+    private func search(text: String, mode requestMode: SearchResultMode, searchID: UUID, preload: @escaping @MainActor ([Track]) -> Void) async {
         defer {
-            if activeSearchID == searchID {
+            if activeSearchID == searchID, activeQuery == text, mode == requestMode {
                 searching = false
             }
         }
         do {
-            let client = BiliClient()
             let keywords = Self.searchKeywords(for: text)
             let pageStart = 1
             let pageCount = 3
             let batch = try await Self.searchBatch(
-                client: client,
+                searchPage: searchPage,
                 keywords: keywords,
                 pages: pageStart...(pageStart + pageCount - 1),
                 query: text,
-                mode: mode)
+                mode: requestMode)
 
-            guard !Task.isCancelled, activeSearchID == searchID else { return }
+            guard !Task.isCancelled,
+                  activeSearchID == searchID,
+                  activeQuery == text,
+                  mode == requestMode else { return }
             results = batch.tracks
             sections = SearchResultSections.make(from: batch.tracks)
             resultsQuery = text
@@ -304,7 +332,10 @@ final class SearchStore {
             cacheCurrentSnapshot()
             preload(batch.tracks)
         } catch {
-            guard !Task.isCancelled, activeSearchID == searchID else { return }
+            guard !Task.isCancelled,
+                  activeSearchID == searchID,
+                  activeQuery == text,
+                  mode == requestMode else { return }
             errorMessage = error.localizedDescription
         }
     }
@@ -324,36 +355,39 @@ final class SearchStore {
     }
 
     private static func searchBatch(
-        client: BiliClient,
+        searchPage: @escaping SearchPageProvider,
         keywords: [String],
         pages: ClosedRange<Int>,
         query: String,
         mode: SearchResultMode,
         excluding excluded: Set<String> = []
     ) async throws -> SearchBatch {
-        let pageItems = try await withThrowingTaskGroup(of: [BiliClient.SearchItem].self) { group in
+        let pageItems = try await withThrowingTaskGroup(of: [Track].self) { group in
             for keyword in keywords {
                 for page in pages {
                     group.addTask {
-                        try await client.search(
-                            keyword: keyword,
-                            page: page,
-                            musicOnly: mode.usesBiliMusicOnlySearch)
+                        try await searchPage(keyword, page, mode.usesBiliMusicOnlySearch)
                     }
                 }
             }
-            var allItems: [BiliClient.SearchItem] = []
-            for try await items in group {
-                allItems.append(contentsOf: items)
+            var tracks: [Track] = []
+            for try await pageTracks in group {
+                tracks.append(contentsOf: pageTracks)
             }
-            return allItems
+            return tracks
         }
         let filtered = await Task.detached(priority: .userInitiated) {
-            dedupeSearchTracks(pageItems.map(Track.init(search:))
+            dedupeSearchTracks(pageItems
                 .filter { !excluded.contains($0.bvid) }
                 .filter { MusicFilter.isSearchResult($0, query: query, mode: mode) })
         }.value
         return SearchBatch(tracks: filtered, rawCount: pageItems.count)
+    }
+
+    private static func defaultSearchPage(keyword: String, page: Int, musicOnly: Bool) async throws -> [Track] {
+        let client = BiliClient()
+        return try await client.search(keyword: keyword, page: page, musicOnly: musicOnly)
+            .map(Track.init(search:))
     }
 
     private static func searchKeywords(for text: String) -> [String] {

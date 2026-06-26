@@ -84,4 +84,111 @@ final class SearchModelsTests: XCTestCase {
 
         XCTAssertEqual(store.mode, .music)
     }
+
+    @MainActor
+    func testStaleSearchResultsCannotReplaceActiveQuery() async throws {
+        let oldTrack = makeTrack(bvid: "BVOLD", title: "旧歌 Live")
+        let newTrack = makeTrack(bvid: "BVNEW", title: "新歌 Live")
+        let store = SearchStore(searchPageForTesting: { keyword, _, _ in
+            if keyword == "旧歌" {
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                return [oldTrack]
+            }
+            return [newTrack]
+        })
+
+        store.submitSearch("旧歌") { _ in }
+        try await Task.sleep(nanoseconds: 20_000_000)
+        store.submitSearch("新歌") { _ in }
+        try await Task.sleep(nanoseconds: 250_000_000)
+
+        XCTAssertEqual(store.resultsQuery, "新歌")
+        XCTAssertEqual(store.results.map { $0.bvid }, ["BVNEW"])
+        XCTAssertFalse(store.searching)
+    }
+
+    @MainActor
+    func testLoadMoreFailurePreservesExistingResultsAndRetryState() async throws {
+        let seed = makeTrack(bvid: "BVSEED", title: "晴天 Live")
+        let store = SearchStore(searchPageForTesting: { _, _, _ in
+            throw SearchStoreTestError.pageFailed
+        })
+        restoreSearch(store, query: "晴天", tracks: [seed], nextPage: 4, hasMoreResults: true)
+
+        await store.loadMore { _ in }
+
+        XCTAssertEqual(store.results.map { $0.bvid }, ["BVSEED"])
+        XCTAssertTrue(store.hasMoreResults)
+        XCTAssertNotNil(store.loadMoreErrorMessage)
+        XCTAssertFalse(store.loadingMore)
+    }
+
+    @MainActor
+    func testLoadMoreAppendsFilteredMusicResultsAndRebuildsSections() async throws {
+        let seed = makeTrack(bvid: "BVSEED", title: "晴天 Live")
+        let music = makeTrack(bvid: "BVMUSIC", title: "周杰伦《晴天》现场版")
+        let nonMusic = makeTrack(typeID: 17, bvid: "BVGAME", title: "三国杀实况攻略合集", artist: "游戏区UP")
+        let store = SearchStore(searchPageForTesting: { _, _, _ in
+            [music, nonMusic]
+        })
+        restoreSearch(store, query: "晴天", tracks: [seed], nextPage: 4, hasMoreResults: true)
+
+        await store.loadMore { _ in }
+
+        XCTAssertEqual(store.results.map { $0.bvid }, ["BVSEED", "BVMUSIC"])
+        XCTAssertEqual(store.sections?.bestMatch?.bvid, "BVSEED")
+        XCTAssertEqual(store.sections?.songs.map { $0.bvid }, ["BVMUSIC"])
+        XCTAssertNil(store.loadMoreErrorMessage)
+    }
+
+    @MainActor
+    func testLoadMoreSkipsFilteredEmptyPagesWithinBoundedWindow() async throws {
+        let seed = makeTrack(bvid: "BVSEED", title: "晴天 Live")
+        let music = makeTrack(bvid: "BVMUSIC", title: "周杰伦《晴天》Official MV")
+        let nonMusic = makeTrack(typeID: 17, bvid: "BVGAME", title: "三国杀实况攻略合集", artist: "游戏区UP")
+        let store = SearchStore(searchPageForTesting: { _, page, _ in
+            page < 6 ? [nonMusic] : [music]
+        })
+        restoreSearch(store, query: "晴天", tracks: [seed], nextPage: 4, hasMoreResults: true)
+
+        await store.loadMore { _ in }
+
+        XCTAssertEqual(store.results.map { $0.bvid }, ["BVSEED", "BVMUSIC"])
+        XCTAssertTrue(store.hasMoreResults)
+    }
+}
+
+private enum SearchStoreTestError: LocalizedError {
+    case pageFailed
+
+    var errorDescription: String? { "page failed" }
+}
+
+private func makeTrack(
+    typeID: Int? = 3,
+    bvid: String,
+    title: String,
+    artist: String = "周杰伦",
+    duration: Int = 269
+) -> Track {
+    Track(typeID: typeID, bvid: bvid, title: title, artist: artist, coverURL: nil, duration: duration)
+}
+
+@MainActor
+private func restoreSearch(
+    _ store: SearchStore,
+    query: String,
+    tracks: [Track],
+    nextPage: Int,
+    hasMoreResults: Bool
+) {
+    store.storeCachedSnapshotForTesting(
+        query: query,
+        mode: .music,
+        snapshot: SearchCachedSnapshot(
+            tracks: tracks,
+            nextPage: nextPage,
+            activeKeywords: [query],
+            hasMoreResults: hasMoreResults))
+    XCTAssertTrue(store.restoreCachedResultsIfAvailable(for: query))
 }

@@ -136,7 +136,10 @@ enum MusicFilter {
         let text = (title + " " + artist).lowercased()
 
         if nonMusicHints.contains(where: { text.contains($0.lowercased()) }) {
-            return musicHints.contains(where: { text.contains($0.lowercased()) })
+            return musicHints.contains { hint in
+                let normalizedHint = hint.lowercased()
+                return !weakMusicHints.contains(normalizedHint) && text.contains(normalizedHint)
+            }
         }
 
         if musicHints.contains(where: { text.contains($0.lowercased()) }) {

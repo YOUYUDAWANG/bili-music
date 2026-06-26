@@ -2,60 +2,60 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 2
-current_phase_name: Discovery Reliability and Music-Only Results
+current_phase: 3
+current_phase_name: Player Interaction and Regression Coverage
 status: planning
-stopped_at: Phase 2 context gathered; ready to plan discovery reliability and music-only results
-last_updated: "2026-06-26T17:17:53.743Z"
-last_activity: 2026-06-26
-last_activity_desc: "Completed quick task 260627-36w: 设置里支持音频 CDN 测速并选择默认线路"
+stopped_at: Phase 2 complete; ready to plan player interaction and regression coverage
+last_updated: "2026-06-27T02:20:00+09:00"
+last_activity: 2026-06-27
+last_activity_desc: "Phase 02 search and recommendation reliability completed"
 progress:
   total_phases: 3
-  completed_phases: 1
-  total_plans: 5
-  completed_plans: 5
-  percent: 33
+  completed_phases: 2
+  total_plans: 6
+  completed_plans: 6
+  percent: 67
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-26)
+See: .planning/PROJECT.md (updated 2026-06-27)
 
 **Core value:** 让音乐尽快、稳定地响起来；当功能冲突时，播放启动速度和不中断播放优先于推荐、歌词、MV、UI 动效和其他增强体验。
-**Current focus:** Phase 02 — Discovery Reliability and Music-Only Results
+**Current focus:** Phase 03 — Player Interaction and Regression Coverage
 
 ## Current Position
 
-Phase: 2 — Discovery Reliability and Music-Only Results
+Phase: 3 — Player Interaction and Regression Coverage
 Plan: Not started
-Status: Phase 2 context gathered; Phase 1 automated verification and real iPhone first-audible playback UAT passed, with the CDN expired prepared-stream retry case recorded as accepted residual risk.
-Last activity: 2026-06-26 — Completed quick task 260627-36w: 设置里支持音频 CDN 测速并选择默认线路
+Status: Phase 2 completed; ready to plan player interaction, layout density, and regression coverage.
+Last activity: 2026-06-27 — Phase 02 search and recommendation reliability completed.
 
-Progress: [##########] 100%
+Progress: [######----] 67%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 10
+- Total plans completed: 11
 - Average duration: 13 min
-- Total execution time: 1.08 hours
+- Total execution time: 1.30 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1. Playback Critical Path and Responsiveness | 5 | 65 min | 13 min |
-| 2. Discovery Reliability and Music-Only Results | TBD | - | - |
+| 2. Discovery Reliability and Music-Only Results | 1 | 13 min | 13 min |
 | 3. Player Interaction and Regression Coverage | TBD | - | - |
 | 01 | 5 | - | - |
 
 **Recent Trend:**
 
-- Last 5 plans: 01-01, 01-02, 01-03, 01-04, 01-05
-- Trend: Playback, search focus, Home recommendation stability, and image memory guardrails complete
+- Last 5 plans: 01-02, 01-03, 01-04, 01-05, 02-01
+- Trend: Playback, search focus, Home recommendation stability, image memory guardrails, and discovery reliability complete
 
 *Updated after each plan completion*
 
@@ -78,6 +78,10 @@ Recent decisions affecting current work:
 - [01-05]: Image cache and in-flight image loading are keyed by URL plus target pixel size and downsample remote bytes before decoded images enter memory.
 - [01-05]: Backgrounding and memory warnings release reloadable decoded images through AppResourceCleanup without clearing PlayerEngine current track or queue.
 - [01-06]: Player gesture threshold logic is extracted into `PlayerGesturePolicy` and covered by unit tests plus existing player chrome UI tests.
+- [02-01]: Search result application is scoped by request identity, query, and mode; stale first-page or pagination work cannot replace the active visible list.
+- [02-01]: Search pagination preserves existing results on later-page failure, keeps retry state available, rebuilds sections after append, and applies music-only filtering per page.
+- [02-01]: Now Playing recommendation taps keep the visible recommendation list stable, mark it stale, and defer refresh until the panel is reopened unless an external visible-track change requires immediate refresh.
+- [02-01]: Recommendation candidate pools apply music-only display filtering before scoring and final presentation.
 
 ### Pending Todos
 
@@ -108,6 +112,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-26T08:18:30.291Z
-Stopped at: Phase 2 context gathered; ready to plan discovery reliability and music-only results
-Resume file: .planning/phases/02-discovery-reliability-and-music-only-results/02-CONTEXT.md
+Last session: 2026-06-27T02:20:00+09:00
+Stopped at: Phase 2 completed; ready to plan player interaction and regression coverage
+Resume file: .planning/phases/02-discovery-reliability-and-music-only-results/02-01-PLAN.md

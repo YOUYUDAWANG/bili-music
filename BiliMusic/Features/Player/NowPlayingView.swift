@@ -9,6 +9,24 @@ private struct ScrollOffsetKey: PreferenceKey {
     }
 }
 
+struct RecommendationPanelRefreshPolicy: Equatable {
+    var shouldLoadImmediately: Bool
+    var shouldMarkStale: Bool
+
+    static func currentTrackChanged(
+        suppressImmediateRefresh: Bool,
+        recommendationPanelVisible: Bool
+    ) -> RecommendationPanelRefreshPolicy {
+        if suppressImmediateRefresh {
+            return RecommendationPanelRefreshPolicy(shouldLoadImmediately: false, shouldMarkStale: true)
+        }
+        if recommendationPanelVisible {
+            return RecommendationPanelRefreshPolicy(shouldLoadImmediately: true, shouldMarkStale: false)
+        }
+        return RecommendationPanelRefreshPolicy(shouldLoadImmediately: false, shouldMarkStale: true)
+    }
+}
+
 /// 全屏正在播放页(从 mini bar 上拉打开)。
 struct NowPlayingView: View {
     @Environment(PlayerEngine.self) private var engine
@@ -126,12 +144,12 @@ struct NowPlayingView: View {
             playlistLookupTask?.cancel()
             scheduleCurrentPlaylistLookup(force: false, delay: .milliseconds(1800))
             shownRecommendationKeys = []
-            if suppressNextRecommendationRefresh {
-                suppressNextRecommendationRefresh = false
-                return
-            }
-            recommendationsStale = true
-            if selectedPage == PlayerPage.recommendations.rawValue {
+            let refreshPolicy = RecommendationPanelRefreshPolicy.currentTrackChanged(
+                suppressImmediateRefresh: suppressNextRecommendationRefresh,
+                recommendationPanelVisible: selectedPage == PlayerPage.recommendations.rawValue)
+            suppressNextRecommendationRefresh = false
+            recommendationsStale = refreshPolicy.shouldMarkStale
+            if refreshPolicy.shouldLoadImmediately {
                 scheduleRecommendationLoad(clear: true)
                 recommendationsStale = false
             }

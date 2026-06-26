@@ -14,7 +14,7 @@ v1 is a vertical MVP stabilization pass for the existing brownfield SwiftUI app.
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Playback Critical Path and Responsiveness** - First sound, first-play stability, search focus, and memory/image guardrails stop blocking the music path. Automated verification and real-device first-audible UAT passed; one CDN retry integration case is accepted residual risk. (completed 2026-06-26)
-- [ ] **Phase 2: Discovery Reliability and Music-Only Results** - Search and recommendations stay scoped, stable, paginated, and music-only.
+- [x] **Phase 2: Discovery Reliability and Music-Only Results** - Search and recommendations stay scoped, stable, paginated, and music-only. (completed 2026-06-27)
 - [ ] **Phase 3: Player Interaction and Regression Coverage** - Player gestures, layout density, and targeted regression checks protect the daily playback experience.
 
 ## Phase Details
@@ -58,7 +58,10 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. User can tap a track from the player recommendation list without the visible list immediately refreshing, scrambling, or clearing.
   4. Home recommendations and Now Playing related recommendations maintain separate refresh state and apply the same music-only filtering principles across their sources.
 
-**Plans**: TBD
+**Plans**: 1/1 plan executed
+**Verification**: Search and recommendation focused unit tests passed; player chrome UI tests passed.
+
+- [x] 02-01-PLAN.md
 **UI hint**: yes
 
 ### Phase 3: Player Interaction and Regression Coverage
@@ -93,5 +96,5 @@ Phases execute in numeric order: 1 -> 2 -> 3
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Playback Critical Path and Responsiveness | 5/5 | Complete    | 2026-06-26 |
-| 2. Discovery Reliability and Music-Only Results | 0/TBD | Not started | - |
+| 2. Discovery Reliability and Music-Only Results | 1/1 | Complete    | 2026-06-27 |
 | 3. Player Interaction and Regression Coverage | 0/TBD | Not started | - |
