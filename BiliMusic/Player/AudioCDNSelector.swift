@@ -4,6 +4,16 @@ import OSLog
 private let cdnLog = Logger(subsystem: "com.fubuki.BiliMusic", category: "cdn")
 
 enum AudioCDNSelector {
+    static let preferredHostDefaultsKey = "preferredAudioCDNHost"
+
+    struct Measurement: Identifiable, Equatable {
+        let host: String
+        let milliseconds: Double?
+        let reachable: Bool
+
+        var id: String { host }
+    }
+
     private enum ProbeResult {
         case reachable(URL, milliseconds: Double)
         case failed(URL)
@@ -29,7 +39,13 @@ enum AudioCDNSelector {
     }
 
     static func rankedCandidates(_ urls: [URL]) async -> [URL] {
-        await hostHealth.ranked(deduped(urls))
+        let ranked = await hostHealth.ranked(deduped(urls))
+        return applyPreferredHost(to: ranked)
+    }
+
+    static func preferredURL(from urls: [URL]) -> URL? {
+        guard let preferredHost = preferredHost else { return nil }
+        return deduped(urls).first { $0.host()?.caseInsensitiveCompare(preferredHost) == .orderedSame }
     }
 
     static func recordPlaybackSuccess(url: URL) async {
@@ -78,6 +94,54 @@ enum AudioCDNSelector {
         }
     }
 
+    static func measureCandidates(
+        from urls: [URL],
+        timeout: Duration = .milliseconds(1200),
+        maxConcurrentProbes: Int = 6
+    ) async -> [Measurement] {
+        let candidates = Array(dedupedByHost(deduped(urls)).prefix(max(1, maxConcurrentProbes)))
+        guard !candidates.isEmpty else { return [] }
+
+        var measurements: [Measurement] = []
+        await withTaskGroup(of: ProbeResult.self) { group in
+            for url in candidates {
+                group.addTask {
+                    await probe(url: url, timeout: timeout)
+                }
+            }
+
+            for await result in group {
+                switch result {
+                case .reachable(let url, let milliseconds):
+                    await hostHealth.recordSuccess(url: url, milliseconds: milliseconds)
+                    measurements.append(Measurement(
+                        host: url.host() ?? url.absoluteString,
+                        milliseconds: milliseconds,
+                        reachable: true))
+                case .failed(let url):
+                    await hostHealth.recordFailure(url: url)
+                    measurements.append(Measurement(
+                        host: url.host() ?? url.absoluteString,
+                        milliseconds: nil,
+                        reachable: false))
+                case .timedOut:
+                    break
+                }
+            }
+        }
+
+        return measurements.sorted { lhs, rhs in
+            switch (lhs.reachable, rhs.reachable) {
+            case (true, false): return true
+            case (false, true): return false
+            case (true, true):
+                return (lhs.milliseconds ?? .greatestFiniteMagnitude) < (rhs.milliseconds ?? .greatestFiniteMagnitude)
+            case (false, false):
+                return lhs.host.localizedStandardCompare(rhs.host) == .orderedAscending
+            }
+        }
+    }
+
     private static func probe(url: URL, timeout: Duration) async -> ProbeResult {
         guard !Task.isCancelled else { return .failed(url) }
         var request = URLRequest(url: url)
@@ -106,9 +170,37 @@ enum AudioCDNSelector {
         }
     }
 
+    private static var preferredHost: String? {
+        let raw = UserDefaults.standard.string(forKey: preferredHostDefaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return raw.isEmpty ? nil : raw
+    }
+
+    private static func applyPreferredHost(to urls: [URL]) -> [URL] {
+        guard let preferredHost else { return urls }
+        let preferred = urls.filter { $0.host()?.caseInsensitiveCompare(preferredHost) == .orderedSame }
+        guard !preferred.isEmpty else { return urls }
+        let rest = urls.filter { $0.host()?.caseInsensitiveCompare(preferredHost) != .orderedSame }
+        return preferred + rest
+    }
+
+    private static func dedupedByHost(_ urls: [URL]) -> [URL] {
+        var seen = Set<String>()
+        var result: [URL] = []
+        for url in urls {
+            let host = url.host() ?? url.absoluteString
+            let key = host.lowercased()
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            result.append(url)
+        }
+        return result
+    }
+
 #if DEBUG
     static func resetHostHealthForTesting() async {
         await hostHealth.reset()
+        UserDefaults.standard.removeObject(forKey: preferredHostDefaultsKey)
     }
 
     static func recordProbeSuccessForTesting(url: URL, milliseconds: Double) async {
@@ -117,6 +209,14 @@ enum AudioCDNSelector {
 
     static func recordProbeFailureForTesting(url: URL) async {
         await hostHealth.recordFailure(url: url)
+    }
+
+    static func setPreferredHostForTesting(_ host: String?) {
+        if let host, !host.isEmpty {
+            UserDefaults.standard.set(host, forKey: preferredHostDefaultsKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: preferredHostDefaultsKey)
+        }
     }
 #endif
 }

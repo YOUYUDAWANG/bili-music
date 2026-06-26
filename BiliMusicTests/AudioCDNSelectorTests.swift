@@ -107,4 +107,27 @@ final class AudioCDNSelectorTests: XCTestCase {
 
         XCTAssertEqual(ranked, [backup, primary])
     }
+
+    func testPreferredURLSelectsMatchingBackupHost() throws {
+        AudioCDNSelector.setPreferredHostForTesting("backup.example")
+        defer { AudioCDNSelector.setPreferredHostForTesting(nil) }
+        let primary = try XCTUnwrap(URL(string: "https://base.example/audio.m4a"))
+        let backup = try XCTUnwrap(URL(string: "https://backup.example/audio.m4a"))
+
+        let selected = AudioCDNSelector.preferredURL(from: [primary, backup])
+
+        XCTAssertEqual(selected, backup)
+    }
+
+    func testRankedCandidatesPutPreferredHostFirst() async throws {
+        await AudioCDNSelector.resetHostHealthForTesting()
+        AudioCDNSelector.setPreferredHostForTesting("backup.example")
+        defer { AudioCDNSelector.setPreferredHostForTesting(nil) }
+        let primary = try XCTUnwrap(URL(string: "https://base.example/audio.m4a"))
+        let backup = try XCTUnwrap(URL(string: "https://backup.example/audio.m4a"))
+
+        let ranked = await AudioCDNSelector.rankedCandidates([primary, backup])
+
+        XCTAssertEqual(ranked, [backup, primary])
+    }
 }

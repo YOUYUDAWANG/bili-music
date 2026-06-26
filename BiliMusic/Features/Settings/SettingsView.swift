@@ -3,6 +3,7 @@ import SwiftUI
 
 /// 设置页：账号登录/登出、推荐种子夹、音质、缓存、播放偏好、播放历史入口。
 struct SettingsView: View {
+    @Environment(PlayerEngine.self) private var engine
     @State private var loggedIn = CookieStore.isLoggedIn
     @State private var username: String?
     @State private var showLogin = false
@@ -11,7 +12,12 @@ struct SettingsView: View {
     @AppStorage("downloadQuality") private var downloadQuality = 0
     @AppStorage("preferMVOnWiFi") private var preferMVOnWiFi = true
     @AppStorage("recommendFolderId") private var recommendFolderId = 0
+    @AppStorage(AudioCDNSelector.preferredHostDefaultsKey) private var preferredAudioCDNHost = ""
+    @AppStorage("audioCDNProbeRows") private var audioCDNProbeRowsData = ""
     @State private var favFolders: [BiliClient.FavFolder] = []
+    @State private var cdnProbeRows: [AudioCDNProbeRow] = []
+    @State private var isTestingCDN = false
+    @State private var cdnProbeMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -59,6 +65,63 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                Section("CDN 线路") {
+                    Picker("音频 CDN", selection: $preferredAudioCDNHost) {
+                        Text("自动").tag("")
+                        if !preferredAudioCDNHost.isEmpty,
+                           !cdnProbeRows.contains(where: { $0.host == preferredAudioCDNHost }) {
+                            Text(preferredAudioCDNHost).tag(preferredAudioCDNHost)
+                        }
+                        ForEach(cdnProbeRows.filter(\.reachable)) { row in
+                            Text(row.pickerTitle).tag(row.host)
+                        }
+                    }
+                    Button {
+                        Task { await runCDNProbe() }
+                    } label: {
+                        HStack {
+                            Label(isTestingCDN ? "测速中" : "测速", systemImage: "speedometer")
+                            Spacer()
+                            if isTestingCDN {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isTestingCDN)
+                    if let cdnProbeMessage {
+                        Text(cdnProbeMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(cdnProbeRows) { row in
+                        Button {
+                            guard row.reachable else { return }
+                            preferredAudioCDNHost = row.host
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: row.reachable ? "checkmark.circle.fill" : "xmark.circle")
+                                    .foregroundStyle(row.reachable ? .green : .secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(row.host)
+                                        .lineLimit(1)
+                                    Text(row.measuredAtText)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text(row.latencyText)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(row.reachable ? .primary : .secondary)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!row.reachable)
+                    }
+                    Text("选择某个 host 后,若本次 playurl 返回该 CDN 会优先使用;播放失败或慢启动仍会自动切换备用线路")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Section("缓存") {
                     Toggle("自动缓存播放过的歌曲", isOn: $autoCache)
                     Text("在线播放的歌曲会在后台存到本地,下次播放不再消耗流量")
@@ -88,6 +151,7 @@ struct SettingsView: View {
                 }
             }
             .task {
+                loadCDNProbeRows()
                 await loadUsername()
                 await loadFolders()
             }
@@ -104,6 +168,99 @@ struct SettingsView: View {
     private func loadFolders() async {
         guard loggedIn else { return }
         favFolders = (try? await BiliClient().favFolders()) ?? []
+    }
+
+    private func runCDNProbe() async {
+        guard !isTestingCDN else { return }
+        isTestingCDN = true
+        cdnProbeMessage = "正在获取候选线路..."
+        defer { isTestingCDN = false }
+
+        guard let track = await cdnProbeTrack() else {
+            cdnProbeMessage = "先播放一首歌后再测速"
+            return
+        }
+
+        do {
+            let cid: Int
+            if let trackCID = track.cid {
+                cid = trackCID
+            } else if let page = try await BiliClient().pageList(bvid: track.bvid).first {
+                cid = page.cid
+            } else {
+                throw BiliClient.APIError(code: -1, message: "无分P")
+            }
+
+            let stream = try await BiliClient().audioStream(
+                bvid: track.bvid,
+                cid: cid,
+                preferredQuality: playbackQuality)
+            let measurements = await AudioCDNSelector.measureCandidates(
+                from: stream.candidateURLs,
+                timeout: .milliseconds(1400),
+                maxConcurrentProbes: 8)
+            let rows = measurements.map {
+                AudioCDNProbeRow(
+                    host: $0.host,
+                    milliseconds: $0.milliseconds,
+                    reachable: $0.reachable,
+                    measuredAt: Date())
+            }
+            cdnProbeRows = rows
+            saveCDNProbeRows()
+            if let fastest = rows.first(where: \.reachable) {
+                cdnProbeMessage = "最快线路: \(fastest.host)"
+            } else {
+                cdnProbeMessage = "没有可用线路,播放仍会使用 B 站默认地址"
+            }
+        } catch {
+            cdnProbeMessage = "测速失败: \(error.localizedDescription)"
+        }
+    }
+
+    private func cdnProbeTrack() async -> Track? {
+        if let current = engine.current {
+            return current
+        }
+        await PlaybackHistoryStore.shared.loadIfNeeded()
+        return PlaybackHistoryStore.shared.entries.first?.track
+    }
+
+    private func loadCDNProbeRows() {
+        guard let data = audioCDNProbeRowsData.data(using: .utf8),
+              let rows = try? JSONDecoder().decode([AudioCDNProbeRow].self, from: data) else {
+            cdnProbeRows = []
+            return
+        }
+        cdnProbeRows = rows
+    }
+
+    private func saveCDNProbeRows() {
+        guard let data = try? JSONEncoder().encode(cdnProbeRows),
+              let raw = String(data: data, encoding: .utf8) else { return }
+        audioCDNProbeRowsData = raw
+    }
+}
+
+private struct AudioCDNProbeRow: Identifiable, Codable, Equatable {
+    let host: String
+    let milliseconds: Double?
+    let reachable: Bool
+    let measuredAt: Date
+
+    var id: String { host }
+
+    var pickerTitle: String {
+        "\(host) \(latencyText)"
+    }
+
+    var latencyText: String {
+        guard reachable, let milliseconds else { return "失败" }
+        return "\(Int(milliseconds.rounded())) ms"
+    }
+
+    var measuredAtText: String {
+        measuredAt.formatted(date: .omitted, time: .shortened)
     }
 }
 

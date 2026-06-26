@@ -229,7 +229,8 @@ struct BiliClient {
         }
         let backups = (chosen.backupUrl ?? []).compactMap(URL.init(string:))
         let candidates = AudioCDNSelector.deduped([url] + backups)
-        return (url, candidates, chosen.id, chosen.bandwidth)
+        let selected = AudioCDNSelector.preferredURL(from: candidates) ?? url
+        return (selected, candidates, chosen.id, chosen.bandwidth)
     }
 
     /// MV 取流场景：内嵌优先稳定快速，全屏优先高清并自动降级。
