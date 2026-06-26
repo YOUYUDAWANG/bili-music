@@ -36,6 +36,10 @@ final class ImageMemoryCache {
         cache.removeAllObjects()
     }
 
+    func releaseReloadableImages() {
+        cache.removeAllObjects()
+    }
+
     static func memoryCost(for image: UIImage) -> Int {
         let width = Int(image.size.width * image.scale)
         let height = Int(image.size.height * image.scale)

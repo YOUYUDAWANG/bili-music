@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// 根视图：使用系统 TabView + iOS 26 bottom accessory 承载 mini 播放器。
 struct RootView: View {
@@ -69,11 +70,12 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .background {
                 Task {
-                    await CacheStore.shared.flush()
-                    await PlaybackHistoryStore.shared.flush()
-                    await engine.handleScenePhase(isBackground: true)
+                    await AppResourceCleanup.handleBackgrounding(engine: engine)
                 }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { notification in
+            AppResourceCleanup.handleMemoryWarning(notification)
         }
         .task {
             Task(priority: .utility) {
@@ -313,6 +315,21 @@ struct RootView: View {
 
     private func miniOpenProgress(for translationY: CGFloat) -> CGFloat {
         min(1, max(0, -translationY / Metrics.openingDragRange))
+    }
+}
+
+@MainActor
+enum AppResourceCleanup {
+    static func handleBackgrounding(engine: PlayerEngine) async {
+        ImageMemoryCache.shared.releaseReloadableImages()
+        await CacheStore.shared.flush()
+        await PlaybackHistoryStore.shared.flush()
+        await engine.handleScenePhase(isBackground: true)
+    }
+
+    static func handleMemoryWarning(_ notification: Notification) {
+        guard notification.name == UIApplication.didReceiveMemoryWarningNotification else { return }
+        ImageMemoryCache.shared.releaseReloadableImages()
     }
 }
 
