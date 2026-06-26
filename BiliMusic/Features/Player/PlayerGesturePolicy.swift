@@ -12,6 +12,13 @@ enum PlayerGesturePolicy {
     static let dismissPredictedThreshold: CGFloat = 260
     static let topChromeDismissTranslationThreshold: CGFloat = 90
     static let topChromeDismissPredictedThreshold: CGFloat = 180
+    private static let horizontalPageIntentRatio: CGFloat = 1.12
+
+    enum DismissRegion {
+        case centerBody
+        case topChrome
+        case listBody
+    }
 
     static func miniOpenProgress(for translationY: CGFloat) -> CGFloat {
         clamp(-translationY / miniOpeningDragRange)
@@ -63,12 +70,16 @@ enum PlayerGesturePolicy {
     static func dismissDragOffset(
         translation: CGSize,
         startY: CGFloat,
-        dismissGrabZoneHeight: CGFloat = Self.dismissGrabZoneHeight
+        dismissGrabZoneHeight: CGFloat = Self.dismissGrabZoneHeight,
+        region: DismissRegion? = nil,
+        isProgressScrubbing: Bool = false
     ) -> CGFloat? {
         guard shouldTrackDismissDrag(
             translation: translation,
             startY: startY,
-            dismissGrabZoneHeight: dismissGrabZoneHeight
+            dismissGrabZoneHeight: dismissGrabZoneHeight,
+            region: region,
+            isProgressScrubbing: isProgressScrubbing
         ) else { return nil }
         return min(340, max(0, translation.height))
     }
@@ -77,42 +88,106 @@ enum PlayerGesturePolicy {
         translation: CGSize,
         predictedEndTranslation: CGSize,
         startY: CGFloat,
-        dismissGrabZoneHeight: CGFloat = Self.dismissGrabZoneHeight
+        dismissGrabZoneHeight: CGFloat = Self.dismissGrabZoneHeight,
+        region: DismissRegion? = nil,
+        isProgressScrubbing: Bool = false
     ) -> Bool {
         guard shouldTrackDismissDrag(
             translation: translation,
             startY: startY,
-            dismissGrabZoneHeight: dismissGrabZoneHeight
+            dismissGrabZoneHeight: dismissGrabZoneHeight,
+            region: region,
+            isProgressScrubbing: isProgressScrubbing
         ) else { return false }
-        return translation.height > dismissTranslationThreshold ||
-            predictedEndTranslation.height > dismissPredictedThreshold
+        switch region {
+        case nil, .centerBody:
+            return translation.height > dismissTranslationThreshold ||
+                predictedEndTranslation.height > dismissPredictedThreshold
+        case .topChrome?:
+            return translation.height > topChromeDismissTranslationThreshold ||
+                predictedEndTranslation.height > topChromeDismissPredictedThreshold
+        case .listBody?:
+            return false
+        }
     }
 
     static func topChromeDismissDragOffset(translation: CGSize) -> CGFloat? {
-        guard shouldTrackTopChromeDismissDrag(translation: translation) else { return nil }
-        return min(340, max(0, translation.height))
+        dismissDragOffset(
+            translation: translation,
+            startY: 0,
+            region: .topChrome,
+            isProgressScrubbing: false)
     }
 
     static func shouldDismissFromTopChrome(
         translation: CGSize,
         predictedEndTranslation: CGSize
     ) -> Bool {
-        guard shouldTrackTopChromeDismissDrag(translation: translation) else { return false }
-        return translation.height > topChromeDismissTranslationThreshold ||
-            predictedEndTranslation.height > topChromeDismissPredictedThreshold
+        shouldDismissFullPlayer(
+            translation: translation,
+            predictedEndTranslation: predictedEndTranslation,
+            startY: 0,
+            region: .topChrome,
+            isProgressScrubbing: false)
+    }
+
+    static func horizontalPageSwipeIntent(
+        translation: CGSize,
+        predictedEndTranslation: CGSize,
+        width: CGFloat
+    ) -> CGFloat? {
+        let horizontalIntent = strongerIntent(
+            translation.width,
+            predictedEndTranslation.width)
+        let verticalIntent = strongerIntent(
+            translation.height,
+            predictedEndTranslation.height)
+        let horizontalThreshold = max(28, width * 0.07)
+        guard abs(horizontalIntent) > horizontalThreshold,
+              abs(horizontalIntent) > abs(verticalIntent) * horizontalPageIntentRatio
+        else { return nil }
+        return horizontalIntent
+    }
+
+    static func isHorizontalPageSwipe(
+        translation: CGSize,
+        predictedEndTranslation: CGSize,
+        width: CGFloat
+    ) -> Bool {
+        horizontalPageSwipeIntent(
+            translation: translation,
+            predictedEndTranslation: predictedEndTranslation,
+            width: width) != nil
     }
 
     private static func predictedTranslationY(translationY: CGFloat, velocityY: CGFloat) -> CGFloat {
         translationY + velocityY * velocityProjectionTime
     }
 
+    private static func strongerIntent(_ translation: CGFloat, _ predicted: CGFloat) -> CGFloat {
+        abs(predicted) > abs(translation) ? predicted : translation
+    }
+
     private static func shouldTrackDismissDrag(
         translation: CGSize,
         startY: CGFloat,
-        dismissGrabZoneHeight: CGFloat
+        dismissGrabZoneHeight: CGFloat,
+        region: DismissRegion?,
+        isProgressScrubbing: Bool
     ) -> Bool {
-        shouldTrackTopChromeDismissDrag(translation: translation) &&
-            startY < dismissGrabZoneHeight
+        guard !isProgressScrubbing else { return false }
+        switch region {
+        case nil:
+            return shouldTrackTopChromeDismissDrag(translation: translation) &&
+                startY < dismissGrabZoneHeight
+        case .centerBody?:
+            return shouldTrackTopChromeDismissDrag(translation: translation)
+        case .topChrome?:
+            return shouldTrackTopChromeDismissDrag(translation: translation) &&
+                startY < dismissGrabZoneHeight
+        case .listBody?:
+            return false
+        }
     }
 
     private static func shouldTrackTopChromeDismissDrag(translation: CGSize) -> Bool {
