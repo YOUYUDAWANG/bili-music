@@ -22,10 +22,10 @@ struct RootView: View {
     }
 
     private enum Motion {
-        static let open = Animation.interpolatingSpring(mass: 0.86, stiffness: 170, damping: 21, initialVelocity: 0)
-        static let close = Animation.interpolatingSpring(mass: 0.92, stiffness: 210, damping: 28, initialVelocity: 0)
-        static let cancel = Animation.interpolatingSpring(mass: 0.85, stiffness: 235, damping: 30, initialVelocity: 0)
-        static let closeRemovalDelay: TimeInterval = 0.38
+        static let open = Animation.smooth(duration: 0.52, extraBounce: 0.055)
+        static let close = Animation.smooth(duration: 0.38, extraBounce: 0.015)
+        static let cancel = Animation.smooth(duration: 0.24, extraBounce: 0)
+        static let closeRemovalDelay: TimeInterval = 0.40
     }
 
     var body: some View {
@@ -41,6 +41,12 @@ struct RootView: View {
                         safeAreaTop: proxy.safeAreaInsets.top
                     )
                         .offset(y: fullPlayerOffset(height: proxy.size.height, safeAreaInsets: proxy.safeAreaInsets))
+                        .opacity(fullPlayerOpacity)
+                        .scaleEffect(
+                            x: fullPlayerScaleX,
+                            y: fullPlayerScaleY,
+                            anchor: .bottom
+                        )
                         .ignoresSafeArea()
                         .zIndex(10)
                         .allowsHitTesting(showFullPlayer)
@@ -94,9 +100,9 @@ struct RootView: View {
 
     @ViewBuilder
     private var systemTabs: some View {
-        if engine.current != nil {
-            baseTabs
-                .tabViewBottomAccessory {
+        baseTabs
+            .tabViewBottomAccessory {
+                if engine.current != nil {
                     SystemMiniPlayer(
                         miniOpenDragTranslation: $miniOpenDragTranslation,
                         isFullPlayerPresented: showFullPlayer,
@@ -107,9 +113,7 @@ struct RootView: View {
                         onOpenDragEnded: { handleMiniOpenDragEnded($0) }
                     )
                 }
-        } else {
-            baseTabs
-        }
+            }
     }
 
     private var openAnimation: Animation {
@@ -176,9 +180,25 @@ struct RootView: View {
     private var renderedPlayerOpenProgress: CGFloat {
         let clamped = min(1, max(0, playerOpenProgress))
         if isMiniOpening && !showFullPlayer {
-            return 1 - CGFloat(pow(Double(1 - clamped), 1.22))
+            return 1 - CGFloat(pow(Double(1 - clamped), 1.08))
         }
-        return transitionProgress(clamped)
+        return clamped
+    }
+
+    private var fullPlayerOpacity: Double {
+        let progress = Double(renderedPlayerOpenProgress)
+        guard !reduceMotion else { return progress }
+        return min(1, 0.72 + progress * 0.28)
+    }
+
+    private var fullPlayerScaleX: CGFloat {
+        guard !reduceMotion else { return 1 }
+        return 0.985 + renderedPlayerOpenProgress * 0.015
+    }
+
+    private var fullPlayerScaleY: CGFloat {
+        guard !reduceMotion else { return 1 }
+        return 0.992 + renderedPlayerOpenProgress * 0.008
     }
 
     private func openFullPlayer(startProgress explicitStartProgress: CGFloat? = nil) {
@@ -325,7 +345,7 @@ private struct SystemMiniPlayer: View {
             HStack(spacing: lerp(7, 9, layoutProgress)) {
                 artwork(layoutProgress: layoutProgress)
 
-                VStack(alignment: .leading, spacing: layoutProgress) {
+                VStack(alignment: .leading, spacing: 1) {
                     Text(engine.current?.title ?? "")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.primary)
@@ -335,10 +355,10 @@ private struct SystemMiniPlayer: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                        .opacity(layoutProgress)
-                        .frame(height: 13 * layoutProgress, alignment: .top)
+                        .frame(height: 13, alignment: .top)
                         .clipped()
                 }
+                .frame(height: 30, alignment: .center)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .transaction { transaction in
                     transaction.animation = nil
@@ -381,7 +401,6 @@ private struct SystemMiniPlayer: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(.default, openFullPlayer)
         .onDisappear { miniOpenDragTranslation = nil }
-        .animation(reduceMotion ? nil : .smooth(duration: 0.22, extraBounce: 0.02), value: layoutProgress)
         .task(id: engine.current?.coverURL) {
             guard let url = engine.current?.coverURL,
                   let fullURL = thumbnailURL(url, width: 960, height: 540),
@@ -392,8 +411,11 @@ private struct SystemMiniPlayer: View {
 
     private var miniLayoutProgress: CGFloat {
         guard isInline else { return 1 }
-        guard let miniOpenDragTranslation else { return 0 }
-        return min(1, max(0, -miniOpenDragTranslation / 34))
+        if let miniOpenDragTranslation {
+            return min(1, max(0, -miniOpenDragTranslation / 34))
+        }
+        guard isFullPlayerPresented || openProgress > 0 else { return 0 }
+        return min(1, max(0, openProgress / 0.12))
     }
 
     private func artwork(layoutProgress: CGFloat) -> some View {
@@ -430,7 +452,7 @@ private struct SystemMiniPlayer: View {
                 endPoint: .bottomTrailing
             )
             Image(systemName: "music.note")
-                .font(.system(size: isInline ? 10 : 14, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Color.primary.opacity(0.42))
         }
     }
