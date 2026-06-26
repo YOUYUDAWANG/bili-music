@@ -238,7 +238,7 @@ struct NowPlayingView: View {
 
     private func playerPages(coverSize: CGFloat, width: CGFloat, safeAreaTop: CGFloat) -> some View {
         TabView(selection: $selectedPage) {
-            horizontalListPage {
+            horizontalListPage(accessibilityIdentifier: "playerQueuePage") {
                 queueList
             }
             .tag(PlayerPage.queue.rawValue)
@@ -259,7 +259,7 @@ struct NowPlayingView: View {
             }
             .tag(PlayerPage.nowPlaying.rawValue)
 
-            horizontalListPage {
+            horizontalListPage(accessibilityIdentifier: "playerRecommendationsPage") {
                 recommendationsList
             }
             .tag(PlayerPage.recommendations.rawValue)
@@ -719,7 +719,10 @@ struct NowPlayingView: View {
         }
     }
 
-    private func horizontalListPage<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+    private func horizontalListPage<Content: View>(
+        accessibilityIdentifier: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 12) {
                 content()
@@ -729,13 +732,18 @@ struct NowPlayingView: View {
             .padding(.top, Layout.contentTopInset)
             .padding(.bottom, 28)
         }
+        .accessibilityIdentifier(accessibilityIdentifier)
     }
 
     @ViewBuilder
     private var queueList: some View {
         if engine.queue.isEmpty {
-            ContentUnavailableView("播放列表为空", systemImage: "list.bullet")
-                .frame(minHeight: 160)
+            playerPageState(
+                title: "队列为空",
+                message: "从搜索、推荐或收藏夹播放歌曲后，这里会显示当前队列。",
+                systemName: "list.bullet"
+            )
+            .accessibilityIdentifier("playerQueueEmptyState")
         } else {
             VStack(spacing: 0) {
                 ForEach(Array(engine.queue.enumerated()), id: \.element.id) { index, track in
@@ -759,21 +767,34 @@ struct NowPlayingView: View {
                     }
                 }
             }
+            .accessibilityIdentifier("playerQueueList")
         }
     }
 
     @ViewBuilder
     private var recommendationsList: some View {
         if recommendationsLoading {
-            ProgressView()
-                .frame(maxWidth: .infinity, minHeight: 160)
-        } else if let recommendationsError {
-            ContentUnavailableView("推荐加载失败", systemImage: "exclamationmark.triangle",
-                                   description: Text(recommendationsError))
-            .frame(minHeight: 160)
+            playerPageState(
+                title: "正在加载推荐...",
+                message: "播放不会因此中断。",
+                systemName: "music.note.list",
+                isLoading: true
+            )
+            .accessibilityIdentifier("playerRecommendationsLoadingState")
+        } else if recommendationsError != nil {
+            playerPageState(
+                title: "推荐加载失败",
+                message: "推荐加载失败，请稍后重试。",
+                systemName: "exclamationmark.triangle"
+            )
+            .accessibilityIdentifier("playerRecommendationsErrorState")
         } else if recommendedTracks.isEmpty {
-            ContentUnavailableView("没有推荐歌曲", systemImage: "music.note.list")
-                .frame(minHeight: 160)
+            playerPageState(
+                title: "暂无推荐",
+                message: "播放一首歌曲后再打开推荐页。",
+                systemName: "music.note.list"
+            )
+            .accessibilityIdentifier("playerRecommendationsEmptyState")
         } else {
             VStack(spacing: 0) {
                 ForEach(Array(recommendedTracks.prefix(12).enumerated()), id: \.element.id) { index, track in
@@ -789,7 +810,46 @@ struct NowPlayingView: View {
                     }
                 }
             }
+            .accessibilityIdentifier("playerRecommendationsList")
         }
+    }
+
+    private func playerPageState(
+        title: String,
+        message: String,
+        systemName: String,
+        isLoading: Bool = false
+    ) -> some View {
+        VStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color.primary.opacity(0.055))
+                    .frame(width: 58, height: 58)
+
+                if isLoading {
+                    ProgressView()
+                } else {
+                    Image(systemName: systemName)
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            VStack(spacing: 6) {
+                Text(title)
+                    .font(.system(size: 22, weight: .semibold))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                Text(message)
+                    .font(.system(size: 17))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 220)
+        .padding(.vertical, 24)
+        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder

@@ -38,6 +38,14 @@ final class RecommendationSchedulingTests: XCTestCase {
         XCTAssertTrue(policy.shouldMarkStale)
     }
 
+    func testRecommendationTapSetsSuppressionBeforePlayback() throws {
+        let source = try Self.sourceFile("BiliMusic/Features/Player/NowPlayingView.swift")
+        let suppressionRange = try XCTUnwrap(source.range(of: "suppressNextRecommendationRefresh = true"))
+        let playbackRange = try XCTUnwrap(source.range(of: "Task { await engine.play(tracks: recommendedTracks, startAt: index, queueMode: .radio) }"))
+
+        XCTAssertLessThan(suppressionRange.lowerBound, playbackRange.lowerBound)
+    }
+
     func testVisibleExternalTrackChangeLoadsRecommendationsImmediately() {
         let policy = RecommendationPanelRefreshPolicy.currentTrackChanged(
             suppressImmediateRefresh: false,
