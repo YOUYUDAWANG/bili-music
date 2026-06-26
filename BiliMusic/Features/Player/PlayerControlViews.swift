@@ -52,6 +52,98 @@ struct ActionSymbolLabel: View {
     }
 }
 
+struct PlayerToolbarActionButton: View {
+    let title: String
+    let systemName: String
+    var isActive = false
+    var isEnabled = true
+    var isBusy = false
+    var accessibilityLabel: String? = nil
+    var accessibilityValue: String? = nil
+    let action: () -> Void
+
+    var body: some View {
+        Button {
+            guard isEnabled, !isBusy else { return }
+            action()
+        } label: {
+            PlayerToolbarActionVisual(
+                title: title,
+                systemName: systemName,
+                isActive: isActive,
+                isEnabled: isEnabled,
+                isBusy: isBusy
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled || isBusy)
+        .accessibilityLabel(accessibilityLabel ?? title)
+        .accessibilityValue(accessibilityValue ?? (isActive ? "已开启" : ""))
+        .accessibilityAddTraits(isActive ? .isSelected : [])
+    }
+}
+
+struct PlayerToolbarActionLabel: View {
+    let title: String
+    let systemName: String
+    var isActive = false
+    var isEnabled = true
+    var isBusy = false
+    var accessibilityLabel: String? = nil
+    var accessibilityValue: String? = nil
+
+    var body: some View {
+        PlayerToolbarActionVisual(
+            title: title,
+            systemName: systemName,
+            isActive: isActive,
+            isEnabled: isEnabled,
+            isBusy: isBusy
+        )
+        .accessibilityLabel(accessibilityLabel ?? title)
+        .accessibilityValue(accessibilityValue ?? (isActive ? "已开启" : ""))
+        .accessibilityAddTraits(isActive ? .isSelected : [])
+    }
+}
+
+private struct PlayerToolbarActionVisual: View {
+    let title: String
+    let systemName: String
+    let isActive: Bool
+    let isEnabled: Bool
+    let isBusy: Bool
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(isActive ? AppTheme.accent.opacity(0.14) : Color.primary.opacity(0.055))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.primary.opacity(isActive ? 0.12 : 0.06), lineWidth: 1)
+                }
+
+            if isBusy {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: systemName)
+                    .font(.system(size: 20, weight: .semibold))
+                    .contentTransition(.symbolEffect(.replace))
+            }
+        }
+        .frame(minWidth: 44, maxWidth: .infinity, minHeight: 44)
+        .frame(height: 48)
+        .foregroundStyle(foregroundColor)
+        .opacity(isEnabled ? 1 : 0.46)
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var foregroundColor: Color {
+        guard isEnabled else { return .secondary }
+        return isActive ? AppTheme.accent : AppTheme.label
+    }
+}
+
 // MARK: - Progress Bar
 
 /// 进度条独立成视图,把对 `engine.currentTime` 的订阅限制在这里。

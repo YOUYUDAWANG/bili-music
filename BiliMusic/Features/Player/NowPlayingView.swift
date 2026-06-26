@@ -218,7 +218,8 @@ struct NowPlayingView: View {
                 .accessibilityIdentifier("nowPlayingProgress")
             transportControls
                 .accessibilityIdentifier("playerTransportControls")
-            actionRow
+            queueModeMenu
+            playerToolbar
                 .accessibilityIdentifier("playerToolbar")
 
             if let favoriteError = favorites.lastError {
@@ -409,77 +410,88 @@ struct NowPlayingView: View {
         .foregroundStyle(AppTheme.label)
     }
 
-    private var actionRow: some View {
-        HStack(spacing: 12) {
+    private var playerToolbar: some View {
+        HStack(spacing: 10) {
+            lyricsButton
             favoriteButton
             downloadIconButton
-            if !engine.lyrics.isEmpty {
-                lyricsButton
-            }
-            queueModeMenu
-            moreMenu
+            audioQualityMenu
+            mvSwitchButton
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 10)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.primary.opacity(0.045), in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        }
         .padding(.horizontal, 24)
     }
 
-    @ViewBuilder
     private var favoriteButton: some View {
-        if let track = engine.current {
-            ActionSymbolButton(
-                title: favorites.isFavorite(track) ? "已收藏" : "收藏",
-                systemName: favorites.isFavorite(track) ? "heart.fill" : "heart"
-            ) {
-                guard !favorites.busyBVIDs.contains(track.bvid) else { return }
-                let wasFavorite = favorites.isFavorite(track)
-                Task {
-                    await favorites.toggle(track: track)
-                    favoriteWasAdded = !wasFavorite
-                    favoriteHapticTrigger += 1
-                }
+        let track = engine.current
+        let isFavorite = track.map { favorites.isFavorite($0) } ?? false
+        let isBusy = track.map { favorites.busyBVIDs.contains($0.bvid) } ?? false
+
+        return PlayerToolbarActionButton(
+            title: isFavorite ? "已收藏" : "收藏",
+            systemName: isFavorite ? "heart.fill" : "heart",
+            isActive: isFavorite,
+            isEnabled: track != nil,
+            isBusy: isBusy,
+            accessibilityLabel: isFavorite ? "已收藏" : "收藏",
+            accessibilityValue: isBusy ? "正在更新" : (isFavorite ? "已收藏" : "未收藏")
+        ) {
+            guard let track, !favorites.busyBVIDs.contains(track.bvid) else { return }
+            let wasFavorite = favorites.isFavorite(track)
+            Task {
+                await favorites.toggle(track: track)
+                favoriteWasAdded = !wasFavorite
+                favoriteHapticTrigger += 1
             }
-            .symbolEffect(.bounce, value: favorites.isFavorite(track))
-            .opacity(favorites.busyBVIDs.contains(track.bvid) ? 0.55 : 1)
-            .accessibilityAddTraits(.isButton)
-            .accessibilityHint("收藏到默认收藏夹")
-            .sensoryFeedback(.intent(favoriteWasAdded ? .success : .selection), trigger: favoriteHapticTrigger)
         }
+        .symbolEffect(.bounce, value: isFavorite)
+        .accessibilityHint("收藏到默认收藏夹")
+        .sensoryFeedback(.intent(favoriteWasAdded ? .success : .selection), trigger: favoriteHapticTrigger)
     }
 
-    @ViewBuilder
     private var lyricsButton: some View {
-        ActionSymbolButton(title: "歌词", systemName: "quote.bubble") {
+        let hasLyrics = !engine.lyrics.isEmpty
+        return PlayerToolbarActionButton(
+            title: hasLyrics ? "歌词" : "暂无歌词",
+            systemName: hasLyrics ? "quote.bubble.fill" : "quote.bubble",
+            isActive: showLyrics && hasLyrics,
+            isEnabled: hasLyrics,
+            accessibilityLabel: hasLyrics ? "歌词" : "暂无歌词",
+            accessibilityValue: hasLyrics ? "可打开" : "不可用"
+        ) {
+            guard hasLyrics else { return }
             showLyrics = true
         }
     }
 
-    @ViewBuilder
     private var downloadIconButton: some View {
         let downloads = DownloadManager.shared
-        if let track = engine.current {
-            if CacheStore.shared.entry(for: track) != nil {
-                ActionSymbolButton(title: "已缓存", systemName: "arrow.down.circle.fill") {}
-                    .foregroundStyle(AppTheme.success)
-            } else if downloads.progress(for: track) != nil {
-                VStack(spacing: 6) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(.thinMaterial)
-                            .frame(width: 54, height: 42)
-                        ProgressView()
-                    }
-                }
-                .frame(maxWidth: .infinity)
-            } else {
-                ActionSymbolButton(title: "缓存", systemName: "arrow.down.circle") {
-                    downloadTrigger += 1
-                    Task { await downloads.download(track: track) }
-                }
-                .sensoryFeedback(.intent(.start), trigger: downloadTrigger)
-            }
+        let track = engine.current
+        let progress = track.flatMap { downloads.progress(for: $0) }
+        let isCached = track.map { CacheStore.shared.entry(for: $0) != nil } ?? false
+        let title = isCached ? "已缓存" : (progress != nil ? "缓存中" : "缓存")
+        let icon = isCached ? "checkmark.circle.fill" : "arrow.down.circle"
+
+        return PlayerToolbarActionButton(
+            title: title,
+            systemName: icon,
+            isActive: isCached,
+            isEnabled: track != nil && !isCached,
+            isBusy: progress != nil,
+            accessibilityLabel: title,
+            accessibilityValue: downloadAccessibilityValue(progress: progress, isCached: isCached)
+        ) {
+            guard let track else { return }
+            downloadTrigger += 1
+            Task { await downloads.download(track: track) }
         }
+        .sensoryFeedback(.intent(.start), trigger: downloadTrigger)
     }
 
     private var queueModeMenu: some View {
@@ -492,9 +504,96 @@ struct NowPlayingView: View {
                 }
             }
         } label: {
-            ActionSymbolLabel(title: "播放模式", systemName: engine.queueMode.icon)
+            HStack(spacing: 6) {
+                Image(systemName: engine.queueMode.icon)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(engine.queueMode.rawValue)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .frame(height: 34)
+            .background(Color.primary.opacity(0.05), in: Capsule())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("播放模式")
+        .accessibilityValue(engine.queueMode.rawValue)
+        .accessibilityIdentifier("playerQueueModeMenu")
+    }
+
+    private var audioQualityMenu: some View {
+        Menu {
+            Section("音质") {
+                ForEach(BiliClient.qualityOptions, id: \.id) { option in
+                    Button {
+                        Task { await engine.setPlaybackQuality(option.id) }
+                    } label: {
+                        Label(option.title, systemImage: PlayerEngine.playbackQuality == option.id ? "checkmark" : "circle")
+                    }
+                }
+                if let quality = engine.currentAudioQuality {
+                    Divider()
+                    Label("当前: \(BiliClient.qualityName(quality))", systemImage: "waveform")
+                    if let bandwidth = engine.currentAudioBandwidth {
+                        Label("码率: \(formatBitrate(bandwidth))", systemImage: "speedometer")
+                    }
+                } else if engine.playbackMode == .mv {
+                    Divider()
+                    Label("当前为 MV 视频流", systemImage: "play.rectangle")
+                }
+            }
+        } label: {
+            PlayerToolbarActionLabel(
+                title: "音质",
+                systemName: "waveform",
+                isActive: engine.currentAudioQuality != nil || engine.playbackMode == .mv,
+                accessibilityLabel: "音质",
+                accessibilityValue: audioQualityAccessibilityValue
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var mvSwitchButton: some View {
+        let isMV = engine.playbackMode == .mv
+        let canSwitch = isMV || engine.videoAvailable
+        let targetMode: PlayerEngine.PlaybackMode = isMV ? .music : .mv
+
+        return PlayerToolbarActionButton(
+            title: isMV ? "音乐" : "MV",
+            systemName: isMV ? "music.note" : "play.rectangle",
+            isActive: isMV,
+            isEnabled: canSwitch,
+            isBusy: switchingMode,
+            accessibilityLabel: canSwitch ? (isMV ? "切回音乐" : "切换 MV") : "暂无 MV",
+            accessibilityValue: mvSwitchAccessibilityValue(canSwitch: canSwitch, isMV: isMV)
+        ) {
+            selectedMode = targetMode
+        }
+    }
+
+    private func downloadAccessibilityValue(progress: Double?, isCached: Bool) -> String {
+        if isCached { return "已缓存" }
+        if let progress {
+            return "正在缓存 \(Int(progress * 100))%"
+        }
+        return "未缓存"
+    }
+
+    private var audioQualityAccessibilityValue: String {
+        if let quality = engine.currentAudioQuality {
+            return BiliClient.qualityName(quality)
+        }
+        if engine.playbackMode == .mv {
+            return "MV 视频流"
+        }
+        return "未选择"
+    }
+
+    private func mvSwitchAccessibilityValue(canSwitch: Bool, isMV: Bool) -> String {
+        guard canSwitch else { return "不可用" }
+        return isMV ? "MV 播放中" : "音乐播放中"
     }
 
     private var moreMenu: some View {
