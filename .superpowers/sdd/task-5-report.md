@@ -77,3 +77,35 @@ xcodebuild test -project BiliMusic.xcodeproj -scheme BiliMusic -destination 'pla
 - `SearchStore.localContent` is still precomputed and local, but now refreshes recent-playback and cached-track snapshots through explicit store refreshes and cheap count-based view triggers instead of staying stale for the lifetime of `SearchView`.
 - `queryDidChange("")` no longer clears prepared results or sections, so focusing or returning to an empty query stays local and does not destroy already-loaded search state.
 - The search-field focus path still avoids synchronous recent/cache scans in the SwiftUI body and still does not trigger Bilibili search work outside explicit submit/retry/pagination flows.
+
+## Task 5 Second Fix Report
+
+### Files changed
+
+- `BiliMusic/Player/PlaybackHistoryStore.swift`
+- `BiliMusic/Cache/CacheStore.swift`
+- `BiliMusic/Features/Search/SearchView.swift`
+- `BiliMusicTests/SearchStoreTests.swift`
+- `.superpowers/sdd/task-5-report.md`
+
+### Commands run
+
+```bash
+xcodebuild test -project BiliMusic.xcodeproj -scheme BiliMusic -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:BiliMusicTests/SearchStoreTests
+xcodebuild test -project BiliMusic.xcodeproj -scheme BiliMusic -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:BiliMusicTests/SearchModelsTests
+```
+
+### Results
+
+- `SearchStoreTests`: passed `5/5`, including same-count history replay and same-count cache replacement snapshot refresh coverage.
+- `SearchModelsTests`: passed `22/22`.
+
+### Self-review
+
+- Added `contentRevision` to `PlaybackHistoryStore` and `CacheStore`, incrementing only when visible entry content or ordering actually changes, including replay reordering, same-key cache replacement, clear/remove, and loaded-entry application that changes the snapshot.
+- Switched `SearchView` refresh triggers from `history.entries.count` and `cache.entries.count` to those revision integers, so same-count reorder/replace mutations now refresh `SearchStore.localContent`.
+- Kept explicit-submit-only remote search behavior and left raw-title behavior untouched.
+
+### Concerns
+
+- An initial attempt to run both requested `xcodebuild` selectors in parallel hit Xcode's `build.db` lock; rerunning serially succeeded without code changes.

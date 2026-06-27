@@ -35,6 +35,7 @@ final class CacheStore {
     private(set) var entries: [CachedEntry] = [] {
         didSet { rebuildIndex() }
     }
+    private(set) var contentRevision = 0
 
     // TrackKey → entry 的 O(1) 索引。B 站同一个 BV 可以有多个 cid/分P,
     // 缓存身份必须精确到 cid,否则分P歌曲会互相覆盖。
@@ -132,8 +133,10 @@ final class CacheStore {
 
     func add(_ entry: CachedEntry) {
         mutationVersion += 1
-        entries.removeAll { $0.key == entry.key }
-        entries.insert(entry, at: 0)
+        var updated = entries
+        updated.removeAll { $0.key == entry.key }
+        updated.insert(entry, at: 0)
+        setEntries(updated)
         save(immediate: true)
     }
 
@@ -143,7 +146,9 @@ final class CacheStore {
             removedDuringLoad.insert(entry.key)
         }
         try? FileManager.default.removeItem(at: Self.audioDir.appendingPathComponent(entry.fileName))
-        entries.removeAll { $0.key == entry.key }
+        var updated = entries
+        updated.removeAll { $0.key == entry.key }
+        setEntries(updated)
         save(immediate: true)
     }
 
@@ -155,7 +160,7 @@ final class CacheStore {
         entries.forEach {
             try? FileManager.default.removeItem(at: Self.audioDir.appendingPathComponent($0.fileName))
         }
-        entries = []
+        setEntries([])
         save(immediate: true)
     }
 
@@ -213,15 +218,25 @@ final class CacheStore {
             let retainedLoaded = loaded
                 .filter { !removedDuringLoad.contains($0.key) }
                 .filter { !currentKeys.contains($0.key) }
-            entries += retainedLoaded
-            save(immediate: true)
+            let updated = entries + retainedLoaded
+            let didChange = updated != entries
+            setEntries(updated)
+            if didChange {
+                save(immediate: true)
+            }
             isLoaded = true
         } else {
-            entries = loaded
+            setEntries(loaded)
             isLoaded = true
         }
         loadTask = nil
         removedDuringLoad = []
         clearedDuringLoad = false
+    }
+
+    private func setEntries(_ newEntries: [CachedEntry]) {
+        guard entries != newEntries else { return }
+        entries = newEntries
+        contentRevision += 1
     }
 }

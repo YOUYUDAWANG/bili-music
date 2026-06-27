@@ -12,6 +12,7 @@ final class PlaybackHistoryStore {
     static let shared = PlaybackHistoryStore()
 
     private(set) var entries: [PlaybackHistoryEntry] = []
+    private(set) var contentRevision = 0
     private let fileURL: URL
     private(set) var isLoaded = false
     private var loadTask: Task<[PlaybackHistoryEntry], Never>?
@@ -27,18 +28,20 @@ final class PlaybackHistoryStore {
     /// 记录一次播放：已存在则次数 +1 并置顶，否则新增；超出 300 条裁掉最旧的。
     func record(_ track: Track) {
         mutationVersion += 1
-        if let index = entries.firstIndex(where: { $0.key.matches(track) }) {
-            entries[index].playCount += 1
-            entries[index].lastPlayedAt = Date()
-            entries[index].track = track
-            let entry = entries.remove(at: index)
-            entries.insert(entry, at: 0)
+        var updated = entries
+        if let index = updated.firstIndex(where: { $0.key.matches(track) }) {
+            updated[index].playCount += 1
+            updated[index].lastPlayedAt = Date()
+            updated[index].track = track
+            let entry = updated.remove(at: index)
+            updated.insert(entry, at: 0)
         } else {
-            entries.insert(PlaybackHistoryEntry(track: track, playCount: 1, lastPlayedAt: Date()), at: 0)
+            updated.insert(PlaybackHistoryEntry(track: track, playCount: 1, lastPlayedAt: Date()), at: 0)
         }
-        if entries.count > 300 {
-            entries.removeLast(entries.count - 300)
+        if updated.count > 300 {
+            updated.removeLast(updated.count - 300)
         }
+        setEntries(updated)
         save()
     }
 
@@ -48,7 +51,7 @@ final class PlaybackHistoryStore {
         if loadTask != nil, !isLoaded {
             discardPendingLoad = true
         }
-        entries = []
+        setEntries([])
         save(immediate: true)
     }
 
@@ -124,15 +127,25 @@ final class PlaybackHistoryStore {
         if discardPendingLoad {
             isLoaded = true
         } else if changedWhileLoading {
-            entries = Self.merge(current: entries, loaded: loaded)
-            save()
+            let merged = Self.merge(current: entries, loaded: loaded)
+            let didChange = merged != entries
+            setEntries(merged)
+            if didChange {
+                save()
+            }
             isLoaded = true
         } else {
-            entries = loaded
+            setEntries(loaded)
             isLoaded = true
         }
         loadTask = nil
         discardPendingLoad = false
+    }
+
+    private func setEntries(_ newEntries: [PlaybackHistoryEntry]) {
+        guard entries != newEntries else { return }
+        entries = newEntries
+        contentRevision += 1
     }
 
     private static func merge(
