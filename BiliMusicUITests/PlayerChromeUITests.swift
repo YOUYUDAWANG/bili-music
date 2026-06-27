@@ -37,6 +37,22 @@ final class PlayerChromeUITests: XCTestCase {
     }
 
     @MainActor
+    func testMiniPlayerArtworkAndFullArtworkSurviveTwoOpenCloseTransitions() throws {
+        for iteration in 1...2 {
+            XCTAssertTrue(element("miniPlayerArtwork").waitForExistence(timeout: 3), "Mini artwork should be visible before opening on round \(iteration).")
+
+            try openFullPlayerFromMini()
+            XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 3), "Full player should open on round \(iteration).")
+            XCTAssertTrue(element("nowPlayingArtwork").waitForExistence(timeout: 3), "Full artwork should be visible after opening on round \(iteration).")
+
+            centerPlayerCoverArea().dragDownToDismiss()
+
+            XCTAssertTrue(element("nowPlayingView").waitForNonExistence(timeout: 3), "Full player should close on round \(iteration).")
+            XCTAssertTrue(element("miniPlayerArtwork").waitForExistence(timeout: 3), "Mini artwork should be visible again after closing on round \(iteration).")
+        }
+    }
+
+    @MainActor
     func testFullPlayerChromeStaysBelowStatusBar() throws {
         try openFullPlayerFromMini()
 

@@ -160,7 +160,6 @@ struct NowPlayingView: View {
     @State private var favoriteWasAdded = false
     @State private var downloadTrigger = 0
     @State private var isProgressScrubbing = false
-    @State private var progressScrubGeneration = 0
     @State private var progressFrameInGlobal: CGRect = .null
     @State private var bottomContextFrameInGlobal: CGRect = .null
     @State private var listRowActionSuppressedUntil: Date?
@@ -415,6 +414,7 @@ struct NowPlayingView: View {
                 .lineSpacing(2)
                 .minimumScaleFactor(0.82)
                 .fixedSize(horizontal: false, vertical: true)
+                .matchedGeometryEffect(id: "playerTitle", in: namespace)
                 .frame(maxWidth: .infinity, alignment: centered ? .center : .leading)
                 .accessibilityIdentifier("nowPlayingMetadata")
             Text(displayArtist)
@@ -434,13 +434,13 @@ struct NowPlayingView: View {
     }
 
     private var displayTitle: String {
-        guard let rawTitle = engine.current?.title else { return "" }
-        return TrackTitleFormatter.cleanedTitle(rawTitle)
+        guard let current = engine.current else { return "" }
+        return TrackTitleFormatter.displayMetadata(for: current, clean: cleanListTitles).title
     }
 
     private var displayArtist: String {
         guard let current = engine.current else { return "" }
-        return TrackTitleFormatter.displayMetadata(for: current, clean: true).artist
+        return TrackTitleFormatter.displayMetadata(for: current, clean: cleanListTitles).artist
     }
 
     private func portraitPlayerControls(isCompact: Bool) -> some View {
@@ -587,6 +587,7 @@ struct NowPlayingView: View {
                 .accessibilityLabel("全屏播放 MV")
             }
         }
+            .matchedGeometryEffect(id: "playerArtwork", in: namespace)
             .frame(width: coverSize, height: coverSize * 9 / 16)
             .opacity(coverRevealOpacity)
             .clipShape(RoundedRectangle(cornerRadius: AppTheme.playerCoverRadius))
@@ -595,6 +596,7 @@ struct NowPlayingView: View {
                     .stroke(Color.primary.opacity(0.06), lineWidth: 1)
             }
             .shadow(color: .black.opacity(0.42), radius: 28, y: 18)
+            .accessibilityIdentifier("nowPlayingArtwork")
             .simultaneousGesture(TapGesture().onEnded {
                 guard engine.playbackMode == .mv else { return }
                 revealInlineMVChrome()
@@ -1766,7 +1768,6 @@ struct NowPlayingView: View {
     }
 
     private func setProgressScrubbing(_ scrubbing: Bool) {
-        progressScrubGeneration += 1
         isProgressScrubbing = scrubbing
     }
 

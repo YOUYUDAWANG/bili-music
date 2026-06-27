@@ -293,9 +293,6 @@ struct RootView: View {
         if !isTrackingMiniOpenDrag {
             guard shouldBeginMiniOpenDrag(sample) else { return }
             isTrackingMiniOpenDrag = true
-            #if DEBUG
-            NSLog("mini drag began start=(%.1f, %.1f)", Double(sample.startLocation.x), Double(sample.startLocation.y))
-            #endif
         }
 
         miniOpenDragTranslation = sample.translation.height
@@ -309,10 +306,6 @@ struct RootView: View {
                 for: sample.translation.height))
             return
         }
-
-        #if DEBUG
-        NSLog("mini drag change translationY=%.1f", Double(sample.translation.height))
-        #endif
     }
 
     private func handleMiniOpenDragEnded(_ sample: MiniOpenDragSample) {
@@ -355,6 +348,7 @@ private struct SystemMiniPlayer: View {
     @Environment(PlayerEngine.self) private var engine
     @Environment(\.tabViewBottomAccessoryPlacement) private var placement
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(TrackTitleFormatter.cleanListTitlesDefaultsKey) private var cleanListTitles = false
     @Binding var miniOpenDragTranslation: CGFloat?
     let isFullPlayerPresented: Bool
     var namespace: Namespace.ID
@@ -374,17 +368,18 @@ private struct SystemMiniPlayer: View {
 	        let accessoryProgress = isFullPlayerPresented || miniOpenDragTranslation != nil
 	            ? transitionProgress(openProgress)
 	            : 0
-	        let display = engine.current.map { TrackTitleFormatter.displayMetadata(for: $0, clean: true) }
+	        let display = engine.current.map { TrackTitleFormatter.displayMetadata(for: $0, clean: cleanListTitles) }
 
 	        HStack(spacing: lerp(7, 9, layoutProgress)) {
             HStack(spacing: lerp(7, 9, layoutProgress)) {
                 artwork(layoutProgress: layoutProgress)
 
-                VStack(alignment: .leading, spacing: 1) {
+	                VStack(alignment: .leading, spacing: 1) {
 	                    Text(display?.title ?? "")
 	                        .font(.caption.weight(.semibold))
 	                        .foregroundStyle(.primary)
 	                        .lineLimit(1)
+                            .matchedGeometryEffect(id: "playerTitle", in: namespace)
 	                        .frame(maxWidth: .infinity, alignment: .leading)
 	                    Text(display?.artist ?? "")
 	                        .font(.caption2)
@@ -471,6 +466,7 @@ private struct SystemMiniPlayer: View {
                 artworkPlaceholder
             }
         }
+        .matchedGeometryEffect(id: "playerArtwork", in: namespace)
         .frame(width: lerp(34, 44, layoutProgress), height: lerp(19, 25, layoutProgress))
         .clipShape(RoundedRectangle(cornerRadius: lerp(4, 5, layoutProgress), style: .continuous))
         .overlay {
@@ -478,6 +474,7 @@ private struct SystemMiniPlayer: View {
                 .stroke(Color.primary.opacity(0.06), lineWidth: 0.5)
         }
         .shadow(color: .black.opacity(0.10), radius: 2.5, x: 0, y: 1)
+        .accessibilityIdentifier("miniPlayerArtwork")
     }
 
     private var artworkPlaceholder: some View {
