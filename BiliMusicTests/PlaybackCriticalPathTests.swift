@@ -85,9 +85,18 @@ final class PlaybackCriticalPathTests: XCTestCase {
 
         await engine.play(tracks: [track], startAt: 0)
 
-        XCTAssertTrue(events.contains(.historyScheduled))
-        XCTAssertTrue(events.contains(.artworkScheduled))
-        XCTAssertTrue(events.contains(.lyricsScheduled))
+        let firstPlayingIndex = events.firstIndex(of: .firstPlaying(.localCache)) ?? events.firstIndex(of: .firstPlaying(.preparedRemote))
+        let historyIndex = events.firstIndex(of: .historyScheduled)
+        let artworkIndex = events.firstIndex(of: .artworkScheduled)
+        let lyricsIndex = events.firstIndex(of: .lyricsScheduled)
+
+        XCTAssertNotNil(firstPlayingIndex)
+        XCTAssertNotNil(historyIndex)
+        XCTAssertNotNil(artworkIndex)
+        XCTAssertNotNil(lyricsIndex)
+        XCTAssertLessThan(firstPlayingIndex!, historyIndex!)
+        XCTAssertLessThan(firstPlayingIndex!, artworkIndex!)
+        XCTAssertLessThan(firstPlayingIndex!, lyricsIndex!)
         XCTAssertFalse(events.contains(.mvPreparationScheduled))
         XCTAssertFalse(events.contains(.queuePrefetchScheduled))
         XCTAssertFalse(events.contains(.autoCacheScheduled))
@@ -121,7 +130,7 @@ final class PlaybackCriticalPathTests: XCTestCase {
     }
 
     func testNowPlayingInfoReportsPlayingAfterFirstObservedAudio() async throws {
-        let track = Self.track(title: "【4K修复】Fixture Artist《Critical Path Song》Official MV")
+        let track = Self.track()
         let cached = Self.stream(
             url: URL(fileURLWithPath: "/tmp/critical-path.m4a"),
             cid: 1001,

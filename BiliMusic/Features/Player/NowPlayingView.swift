@@ -206,9 +206,6 @@ struct NowPlayingView: View {
         }
         .onAppear {
             scheduleCurrentPlaylistLookup(force: false, delay: .milliseconds(1600))
-            if engine.state == .playing {
-                scheduleRecommendationLoad(clear: false, allowBackground: true)
-            }
         }
         .onChange(of: engine.playbackMode) { _, mode in
             if mode == .mv {
@@ -236,21 +233,22 @@ struct NowPlayingView: View {
             suppressNextRecommendationRefresh = false
             recommendationsStale = refreshPolicy.shouldMarkStale
             if refreshPolicy.shouldLoadImmediately {
-                scheduleRecommendationLoad(clear: true, allowBackground: false)
+                scheduleRecommendationLoad(clear: true)
                 recommendationsStale = false
-            } else if engine.state == .playing {
-                scheduleRecommendationLoad(clear: false, allowBackground: true)
             }
         }
         .onChange(of: engine.state) { _, state in
             guard state == .playing else { return }
-            scheduleRecommendationLoad(clear: false, allowBackground: true)
+            guard selectedPage == PlayerPage.recommendations.rawValue else { return }
+            guard recommendationsStale || recommendedTracks.isEmpty || !recommendationsMatchCurrentTrack else { return }
+            recommendationsStale = false
+            scheduleRecommendationLoad(clear: !recommendedTracks.isEmpty)
         }
         .onChange(of: selectedPage) { _, page in
             guard page == PlayerPage.recommendations.rawValue else { return }
             guard recommendationsStale || recommendedTracks.isEmpty || !recommendationsMatchCurrentTrack else { return }
             recommendationsStale = false
-            scheduleRecommendationLoad(clear: !recommendedTracks.isEmpty, allowBackground: false)
+            scheduleRecommendationLoad(clear: !recommendedTracks.isEmpty)
         }
         .onDisappear {
             recommendationTask?.cancel()
@@ -1476,7 +1474,7 @@ struct NowPlayingView: View {
         return recommendationSeedKey.matches(current)
     }
 
-    private func scheduleRecommendationLoad(clear: Bool, allowBackground: Bool) {
+    private func scheduleRecommendationLoad(clear: Bool) {
         recommendationTask?.cancel()
         recommendationsError = nil
         if clear {
@@ -1487,7 +1485,7 @@ struct NowPlayingView: View {
             recommendationsLoading = false
             return
         }
-        guard allowBackground || selectedPage == PlayerPage.recommendations.rawValue else {
+        guard selectedPage == PlayerPage.recommendations.rawValue else {
             recommendationsLoading = false
             return
         }

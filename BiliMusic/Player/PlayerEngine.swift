@@ -1366,10 +1366,6 @@ final class PlayerEngine {
         }
         let available = videoStream != nil
         videoAvailable = available
-        if available, shouldAutoSwitchToMV(generation: generation, bvid: track.bvid) {
-            playbackMode = .mv
-            await startCurrent(resumeAt: currentTime)
-        }
     }
 
     private func shouldAutoSwitchToMV(generation: UUID, bvid: String) -> Bool {
