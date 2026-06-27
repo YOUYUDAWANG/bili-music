@@ -66,7 +66,7 @@ final class SearchStoreTests: XCTestCase {
     }
 
     @MainActor
-    func testRefreshLocalContentUpdatesForSameCountHistoryReplay() async {
+    func testTopHistoryReplayDoesNotBumpContentRevisionWhenVisibleProjectionIsUnchanged() async {
         let previousHistory = UserDefaults.standard.string(forKey: historyKey)
         let history = PlaybackHistoryStore.shared
         let cache = CacheStore.shared
@@ -79,6 +79,37 @@ final class SearchStoreTests: XCTestCase {
         UserDefaults.standard.set(#"["晴天"]"#, forKey: historyKey)
         history.record(makeTrack(bvid: "BVRECENT001", title: "第一次播放"))
         history.record(makeTrack(bvid: "BVRECENT002", title: "第二次播放"))
+        history.record(makeTrack(bvid: "BVRECENT002", title: "第二次播放"))
+
+        let store = SearchStore()
+        await store.loadLocalContent(history: history, cache: cache)
+        let initialRevision = history.contentRevision
+
+        history.record(makeTrack(bvid: "BVRECENT002", title: "第二次播放"))
+
+        store.refreshLocalContent(history: history, cache: cache)
+
+        XCTAssertEqual(history.contentRevision, initialRevision)
+        XCTAssertEqual(store.localContent.historyTerms, ["晴天"])
+        XCTAssertEqual(store.localContent.recentTracks.map(\.bvid), ["BVRECENT002", "BVRECENT001"])
+        XCTAssertEqual(store.localContent.recentTracks.first?.title, "第二次播放")
+        XCTAssertTrue(store.localContent.cachedTracks.isEmpty)
+    }
+
+    @MainActor
+    func testNonTopHistoryReplayBumpsContentRevisionWhenVisibleProjectionReorders() async {
+        let previousHistory = UserDefaults.standard.string(forKey: historyKey)
+        let history = PlaybackHistoryStore.shared
+        let cache = CacheStore.shared
+        await prepareSharedLocalStores(history: history, cache: cache)
+        defer {
+            restoreSearchHistory(previousHistory)
+            resetSharedLocalStores(history: history, cache: cache)
+        }
+
+        UserDefaults.standard.set(#"[\"晴天\"]"#, forKey: historyKey)
+        history.record(makeTrack(bvid: "BVRECENT001", title: "第一次播放"))
+        history.record(makeTrack(bvid: "BVRECENT002", title: "第二次播放"))
 
         let store = SearchStore()
         await store.loadLocalContent(history: history, cache: cache)
@@ -89,14 +120,41 @@ final class SearchStoreTests: XCTestCase {
         store.refreshLocalContent(history: history, cache: cache)
 
         XCTAssertGreaterThan(history.contentRevision, initialRevision)
-        XCTAssertEqual(store.localContent.historyTerms, ["晴天"])
         XCTAssertEqual(store.localContent.recentTracks.map(\.bvid), ["BVRECENT001", "BVRECENT002"])
         XCTAssertEqual(store.localContent.recentTracks.first?.title, "重播后更新标题")
-        XCTAssertTrue(store.localContent.cachedTracks.isEmpty)
     }
 
     @MainActor
-    func testRefreshLocalContentUpdatesForSameCountCacheReplacement() async {
+    func testReplacingCacheEntryWithSameTrackProjectionDoesNotBumpContentRevision() async {
+        let previousHistory = UserDefaults.standard.string(forKey: historyKey)
+        let history = PlaybackHistoryStore.shared
+        let cache = CacheStore.shared
+        await prepareSharedLocalStores(history: history, cache: cache)
+        defer {
+            restoreSearchHistory(previousHistory)
+            resetSharedLocalStores(history: history, cache: cache)
+        }
+
+        let first = makeTrack(bvid: "BVCACHE001", title: "旧缓存 1")
+        let second = makeTrack(bvid: "BVCACHE002", title: "旧缓存 2")
+        cache.add(makeCachedEntry(track: first))
+        cache.add(makeCachedEntry(track: second))
+
+        let store = SearchStore()
+        await store.loadLocalContent(history: history, cache: cache)
+        let initialRevision = cache.contentRevision
+
+        cache.add(makeCachedEntry(track: second, fileName: "BVCACHE002-v2.m4a", fileSize: 2048))
+
+        store.refreshLocalContent(history: history, cache: cache)
+
+        XCTAssertEqual(cache.contentRevision, initialRevision)
+        XCTAssertEqual(store.localContent.cachedTracks.map(\.bvid), ["BVCACHE002", "BVCACHE001"])
+        XCTAssertEqual(store.localContent.cachedTracks.first?.title, "旧缓存 2")
+    }
+
+    @MainActor
+    func testReplacingCacheEntryWithChangedTrackProjectionBumpsContentRevision() async {
         let previousHistory = UserDefaults.standard.string(forKey: historyKey)
         let history = PlaybackHistoryStore.shared
         let cache = CacheStore.shared
@@ -204,7 +262,11 @@ private func restoreSearch(
     XCTAssertTrue(store.restoreCachedResultsIfAvailable(for: query))
 }
 
-private func makeCachedEntry(track: Track) -> CachedEntry {
+private func makeCachedEntry(
+    track: Track,
+    fileName: String? = nil,
+    fileSize: Int64 = 1024
+) -> CachedEntry {
     CachedEntry(
         bvid: track.bvid,
         cid: track.cid ?? 1,
@@ -212,8 +274,8 @@ private func makeCachedEntry(track: Track) -> CachedEntry {
         artist: track.artist,
         coverURL: track.coverURL?.absoluteString,
         duration: track.duration,
-        fileName: "\(track.bvid).m4a",
-        fileSize: 1024,
+        fileName: fileName ?? "\(track.bvid).m4a",
+        fileSize: fileSize,
         downloadedAt: Date(),
         quality: nil)
 }

@@ -31,6 +31,7 @@ struct CachedEntry: Codable, Identifiable, Equatable {
 @MainActor
 final class CacheStore {
     static let shared = CacheStore()
+    private static let searchVisibleTrackLimit = 6
 
     private(set) var entries: [CachedEntry] = [] {
         didSet { rebuildIndex() }
@@ -236,7 +237,15 @@ final class CacheStore {
 
     private func setEntries(_ newEntries: [CachedEntry]) {
         guard entries != newEntries else { return }
+        let previousProjection = searchVisibleTracks(from: entries)
+        let nextProjection = searchVisibleTracks(from: newEntries)
         entries = newEntries
-        contentRevision += 1
+        if previousProjection != nextProjection {
+            contentRevision += 1
+        }
+    }
+
+    private func searchVisibleTracks(from entries: [CachedEntry]) -> [Track] {
+        Array(entries.prefix(Self.searchVisibleTrackLimit).map(\.track))
     }
 }

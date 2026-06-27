@@ -109,3 +109,28 @@ xcodebuild test -project BiliMusic.xcodeproj -scheme BiliMusic -destination 'pla
 ### Concerns
 
 - An initial attempt to run both requested `xcodebuild` selectors in parallel hit Xcode's `build.db` lock; rerunning serially succeeded without code changes.
+
+## Task 5 Third Fix Report
+
+### Files changed
+
+- `BiliMusic/Player/PlaybackHistoryStore.swift`
+- `BiliMusic/Cache/CacheStore.swift`
+- `BiliMusicTests/SearchStoreTests.swift`
+- `.superpowers/sdd/task-5-report.md`
+
+### Commands run
+
+```bash
+xcodebuild test -project BiliMusic.xcodeproj -scheme BiliMusic -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:BiliMusicTests/SearchStoreTests
+xcodebuild test -project BiliMusic.xcodeproj -scheme BiliMusic -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:BiliMusicTests/SearchModelsTests
+```
+
+### Results
+
+- `SearchStoreTests`: passed `7/7` after tightening the cache no-op case to replace the already-top cached track with identical rendered `Track` data.
+- `SearchModelsTests`: passed `22/22`.
+
+### Concerns
+
+- `contentRevision` is now intentionally scoped to the top six ordered `Track` projections that Search can render from each store. Non-visible entry mutations still persist and update store state, but they no longer trigger Search refreshes by themselves.

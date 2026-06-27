@@ -10,6 +10,7 @@ private let log = Logger(subsystem: "com.fubuki.BiliMusic", category: "history")
 @MainActor
 final class PlaybackHistoryStore {
     static let shared = PlaybackHistoryStore()
+    private static let searchVisibleTrackLimit = 6
 
     private(set) var entries: [PlaybackHistoryEntry] = []
     private(set) var contentRevision = 0
@@ -144,8 +145,16 @@ final class PlaybackHistoryStore {
 
     private func setEntries(_ newEntries: [PlaybackHistoryEntry]) {
         guard entries != newEntries else { return }
+        let previousProjection = searchVisibleTracks(from: entries)
+        let nextProjection = searchVisibleTracks(from: newEntries)
         entries = newEntries
-        contentRevision += 1
+        if previousProjection != nextProjection {
+            contentRevision += 1
+        }
+    }
+
+    private func searchVisibleTracks(from entries: [PlaybackHistoryEntry]) -> [Track] {
+        Array(entries.prefix(Self.searchVisibleTrackLimit).map(\.track))
     }
 
     private static func merge(
