@@ -10,36 +10,34 @@ struct FavoritesView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            List {
-                if let errorMessage {
-                    Text(errorMessage).foregroundStyle(AppTheme.error).font(.caption)
-                }
-                ForEach(folders) { folder in
-                    NavigationLink(value: folder.id) {
-                        HStack(spacing: 12) {
-                            RoundedRectangle(cornerRadius: 7)
-                                .fill(AppTheme.accent.opacity(0.14))
-                                .frame(width: 46, height: 46)
-                                .overlay {
-                                    Image(systemName: "music.note.list")
-                                        .foregroundStyle(AppTheme.accent)
-                                }
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(folder.title)
-                                    .font(.subheadline)
-                                Text("\(folder.media_count) 个内容")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .foregroundStyle(AppTheme.error)
+                            .font(.caption)
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 10)
+                    }
+                    ForEach(Array(folders.enumerated()), id: \.element.id) { index, folder in
+                        NavigationLink(value: folder.id) {
+                            favoriteFolderRow(folder)
+                        }
+                        .buttonStyle(MusicRowButtonStyle())
+                        .simultaneousGesture(TapGesture().onEnded {
+                            FavoriteManager.shared.remember(folderId: folder.id, title: folder.title)
+                        })
+
+                        if index != folders.count - 1 {
+                            Divider()
+                                .padding(.leading, 76)
                         }
                     }
-                    .simultaneousGesture(TapGesture().onEnded {
-                        FavoriteManager.shared.remember(folderId: folder.id, title: folder.title)
-                    })
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 96)
             }
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
             .background(AppTheme.groupedBackground)
             .navigationTitle("收藏夹")
             .navigationBarTitleDisplayMode(.inline)
@@ -68,6 +66,34 @@ struct FavoritesView: View {
             }
             .refreshable { await load() }
         }
+    }
+
+    private func favoriteFolderRow(_ folder: BiliClient.FavFolder) -> some View {
+        HStack(spacing: 12) {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(AppTheme.accent.opacity(0.12))
+                .frame(width: 46, height: 46)
+                .overlay {
+                    Image(systemName: "music.note.list")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(AppTheme.accent)
+                }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(folder.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text("\(folder.media_count) 个内容")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
     }
 
     /// 拉取收藏夹列表，并在首次进入时恢复上次打开的夹。
@@ -104,41 +130,55 @@ struct FavFolderDetailView: View {
     @State private var trackTapTrigger = 0
 
     var body: some View {
-        List {
-            if let errorMessage {
-                Text(errorMessage).foregroundStyle(AppTheme.error).font(.caption)
-            }
-            ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                Button {
-                    trackTapTrigger += 1
-                    Task { await engine.play(tracks: tracks, startAt: index) }
-                } label: {
-                    TrackRow(track: track, isPlaying: engine.current.map { track.key.matches($0) } ?? false)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                if let errorMessage {
+                    Text(errorMessage)
+                        .foregroundStyle(AppTheme.error)
+                        .font(.caption)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 10)
                 }
-                .buttonStyle(.plain)
-                .sensoryFeedback(.intent(.lightImpact), trigger: trackTapTrigger)
-                .contextMenu {
+                ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
                     Button {
-                        Task { await engine.playRadio(seed: track) }
+                        trackTapTrigger += 1
+                        Task { await engine.play(tracks: tracks, startAt: index) }
                     } label: {
-                        Label("电台播放", systemImage: PlayerEngine.QueueMode.radio.icon)
+                        TrackRow(track: track, isPlaying: engine.current.map { track.key.matches($0) } ?? false)
                     }
-                    Button {
-                        Task { await engine.play(tracks: tracks, startAt: index, queueMode: .shuffle) }
-                    } label: {
-                        Label("随机播放这个收藏夹", systemImage: PlayerEngine.QueueMode.shuffle.icon)
+                    .buttonStyle(MusicRowButtonStyle())
+                    .sensoryFeedback(.intent(.lightImpact), trigger: trackTapTrigger)
+                    .contextMenu {
+                        Button {
+                            Task { await engine.playRadio(seed: track) }
+                        } label: {
+                            Label("电台播放", systemImage: PlayerEngine.QueueMode.radio.icon)
+                        }
+                        Button {
+                            Task { await engine.play(tracks: tracks, startAt: index, queueMode: .shuffle) }
+                        } label: {
+                            Label("随机播放这个收藏夹", systemImage: PlayerEngine.QueueMode.shuffle.icon)
+                        }
+                    }
+                    .onAppear {
+                        if track == tracks.last { Task { await loadMore() } }
+                    }
+
+                    if index != tracks.count - 1 {
+                        Divider()
+                            .padding(.leading, 82)
                     }
                 }
-                .onAppear {
-                    if track == tracks.last { Task { await loadMore() } }
+                if loading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 18)
                 }
             }
-            if loading {
-                ProgressView().frame(maxWidth: .infinity)
-            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 96)
         }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
         .background(AppTheme.groupedBackground)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)

@@ -48,60 +48,55 @@ struct LibraryView: View {
         let entries = visibleEntries
         let isFiltered = !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         NavigationStack {
-            List {
+            ScrollView {
                 if !cache.entries.isEmpty {
-                    Section {
+                    LazyVStack(alignment: .leading, spacing: 0) {
                         CacheSummaryView(count: entries.count,
                                          totalCount: cache.entries.count,
                                          bytes: entries.reduce(0) { $0 + $1.fileSize },
                                          isFiltered: isFiltered)
-                    }
-                }
+                        .padding(.horizontal, 2)
+                        .padding(.bottom, 12)
 
-                ForEach(entries) { entry in
-                    Button {
-                        let tracks = entries.map(\.track)
-                        let index = entries.firstIndex(of: entry) ?? 0
-                        Task { await engine.play(tracks: tracks, startAt: index) }
-                    } label: {
-                        HStack(alignment: .center, spacing: 10) {
-                            TrackRow(track: entry.track, isPlaying: engine.current.map { entry.track.key.matches($0) } ?? false)
-                            VStack(alignment: .trailing, spacing: 6) {
-                                if let q = entry.quality {
-                                    Text(BiliClient.qualityName(q))
-                                        .font(.caption2)
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(.quaternary, in: Capsule())
+                        ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                            Button {
+                                let tracks = entries.map(\.track)
+                                Task { await engine.play(tracks: tracks, startAt: index) }
+                            } label: {
+                                cacheRow(entry)
+                            }
+                            .buttonStyle(MusicRowButtonStyle())
+                            .contextMenu {
+                                Button {
+                                    Task { await engine.playRadio(seed: entry.track) }
+                                } label: {
+                                    Label("电台播放", systemImage: PlayerEngine.QueueMode.radio.icon)
                                 }
-                                Text(format(bytes: entry.fileSize))
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
+                                Button {
+                                    let tracks = entries.map(\.track)
+                                    Task { await engine.play(tracks: tracks, startAt: index, queueMode: .shuffle) }
+                                } label: {
+                                    Label("随机播放当前列表", systemImage: PlayerEngine.QueueMode.shuffle.icon)
+                                }
+                                Divider()
+                                Button(role: .destructive) {
+                                    cache.remove(entry)
+                                } label: {
+                                    Label("删除缓存", systemImage: "trash")
+                                }
+                            }
+
+                            if index != entries.count - 1 {
+                                Divider()
+                                    .padding(.leading, 82)
                             }
                         }
                     }
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        Button {
-                            Task { await engine.playRadio(seed: entry.track) }
-                        } label: {
-                            Label("电台播放", systemImage: PlayerEngine.QueueMode.radio.icon)
-                        }
-                        Button {
-                            let tracks = entries.map(\.track)
-                            let index = entries.firstIndex(of: entry) ?? 0
-                            Task { await engine.play(tracks: tracks, startAt: index, queueMode: .shuffle) }
-                        } label: {
-                            Label("随机播放当前列表", systemImage: PlayerEngine.QueueMode.shuffle.icon)
-                        }
-                    }
-                }
-                .onDelete { offsets in
-                    offsets.map { entries[$0] }.forEach { cache.remove($0) }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                    .padding(.bottom, 96)
                 }
             }
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
             .background(AppTheme.groupedBackground)
             .navigationTitle("缓存")
             .navigationBarTitleDisplayMode(.inline)
@@ -146,6 +141,28 @@ struct LibraryView: View {
                 }
             }
         }
+    }
+
+    private func cacheRow(_ entry: CachedEntry) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            TrackRow(
+                track: entry.track,
+                isPlaying: engine.current.map { entry.track.key.matches($0) } ?? false,
+                showsTrailingIcon: false)
+            VStack(alignment: .trailing, spacing: 5) {
+                if let q = entry.quality {
+                    Text(BiliClient.qualityName(q))
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(AppTheme.accent)
+                }
+                Text(format(bytes: entry.fileSize))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(minWidth: 44, alignment: .trailing)
+        }
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
     }
 
     /// 字节数格式化为人类可读大小。

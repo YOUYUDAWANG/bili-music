@@ -143,6 +143,18 @@ final class PlayerGesturePolicyTests: XCTestCase {
             width: 390))
     }
 
+    func testProgressScrubMathUsesVisibleTrackCoordinates() {
+        XCTAssertEqual(ProgressScrubMath.progress(locationX: 0, trackWidth: 240), 0)
+        XCTAssertEqual(ProgressScrubMath.progress(locationX: 120, trackWidth: 240), 0.5)
+        XCTAssertEqual(ProgressScrubMath.progress(locationX: 240, trackWidth: 240), 1)
+    }
+
+    func testProgressScrubMathClampsOutsideVisibleTrack() {
+        XCTAssertEqual(ProgressScrubMath.progress(locationX: -30, trackWidth: 240), 0)
+        XCTAssertEqual(ProgressScrubMath.progress(locationX: 300, trackWidth: 240), 1)
+        XCTAssertEqual(ProgressScrubMath.progress(locationX: 120, trackWidth: 0), 0)
+    }
+
     func testHorizontalListDragSuppressesRowTapWithoutBlockingVerticalScroll() {
         XCTAssertFalse(PlayerGesturePolicy.shouldSuppressListRowTap(
             translation: CGSize(width: 6, height: 2),

@@ -136,7 +136,7 @@ struct MusicStatusBlock<ActionLabel: View>: View {
                         .foregroundStyle(.primary)
                         .padding(.horizontal, 16)
                         .frame(height: 36)
-                        .background(AppTheme.secondaryBackground, in: Capsule())
+                        .background(AppTheme.secondaryBackground, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }
                 .buttonStyle(.plain)
             }
@@ -216,13 +216,8 @@ struct FeaturedTrackCard: View {
             }
             .padding(.horizontal, 2)
         }
-        .padding(12)
-        .background(AppTheme.rowBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(isPlaying ? AppTheme.accent.opacity(0.24) : Color.clear, lineWidth: 1)
-        }
-        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
     }
 
     private func thumbnailURL(_ url: URL?, width: Int, height: Int) -> URL? {
@@ -287,15 +282,13 @@ struct MusicTrackRow: View {
         .padding(.vertical, 8)
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
-        .background(
-            isPlaying ? AppTheme.accent.opacity(0.12) : AppTheme.rowBackground,
-            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(isPlaying ? AppTheme.accent.opacity(0.20) : Color.clear, lineWidth: 1)
+        .background {
+            if isPlaying {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(AppTheme.accent.opacity(0.12))
+            }
         }
-        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .contentShape(Rectangle())
     }
 
     @ViewBuilder

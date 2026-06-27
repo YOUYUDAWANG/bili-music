@@ -188,7 +188,7 @@ struct SearchView: View {
                                     .lineLimit(1)
                                     .padding(.horizontal, 12)
                                     .frame(height: 34)
-                                    .background(AppTheme.background, in: Capsule())
+                                    .background(AppTheme.background, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                             }
                             .buttonStyle(.plain)
                         }

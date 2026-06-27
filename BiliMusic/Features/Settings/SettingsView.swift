@@ -289,7 +289,7 @@ private struct PlaybackHistoryView: View {
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(.quaternary, in: Capsule())
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
                     }
                 }
                 .buttonStyle(.plain)

@@ -131,7 +131,7 @@ struct MVFullscreenView: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 12)
                 .frame(height: 42)
-                .background(.black.opacity(0.48), in: Capsule())
+                .background(.black.opacity(0.48), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
             }
             .buttonStyle(.plain)
             .simultaneousGesture(TapGesture().onEnded { revealChrome() })
