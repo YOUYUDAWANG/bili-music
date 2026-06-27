@@ -89,15 +89,17 @@ final class PlaybackCriticalPathTests: XCTestCase {
         let historyIndex = events.firstIndex(of: .historyScheduled)
         let artworkIndex = events.firstIndex(of: .artworkScheduled)
         let lyricsIndex = events.firstIndex(of: .lyricsScheduled)
+        let mvPreparationIndex = events.firstIndex(of: .mvPreparationScheduled)
 
         XCTAssertNotNil(firstPlayingIndex)
         XCTAssertNotNil(historyIndex)
         XCTAssertNotNil(artworkIndex)
         XCTAssertNotNil(lyricsIndex)
+        XCTAssertNotNil(mvPreparationIndex)
         XCTAssertLessThan(firstPlayingIndex!, historyIndex!)
         XCTAssertLessThan(firstPlayingIndex!, artworkIndex!)
         XCTAssertLessThan(firstPlayingIndex!, lyricsIndex!)
-        XCTAssertFalse(events.contains(.mvPreparationScheduled))
+        XCTAssertLessThan(firstPlayingIndex!, mvPreparationIndex!)
         XCTAssertFalse(events.contains(.queuePrefetchScheduled))
         XCTAssertFalse(events.contains(.autoCacheScheduled))
     }

@@ -1368,17 +1368,6 @@ final class PlayerEngine {
         videoAvailable = available
     }
 
-    private func shouldAutoSwitchToMV(generation: UUID, bvid: String) -> Bool {
-        UserDefaults.standard.bool(forKey: "preferMVOnWiFi")
-            && NetworkMonitor.shared.isWiFi
-            && manualPlaybackModeOverride == nil
-            && playbackMode == .music
-            && state == .playing
-            && UIApplication.shared.applicationState == .active
-            && playbackGeneration == generation
-            && current?.bvid == bvid
-    }
-
     // MARK: - 锁屏 / 控制中心
 
     private func setUpRemoteCommands() {
