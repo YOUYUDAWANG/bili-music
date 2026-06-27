@@ -188,10 +188,24 @@ final class PlayerChromeUITests: XCTestCase {
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before testing horizontal page ownership.")
 
         try swipeToPlayerPage(direction: .left)
-        try swipeToPlayerPage(direction: .right)
+        XCTAssertTrue(waitForPlayerPage("推荐"), "A left swipe from the center page should land on recommendations.")
 
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 1), "Horizontal page swipe should not minimize the full player.")
-        XCTAssertTrue(element("playerQueuePage").exists, "Horizontal page swipe back should land on the queue page.")
+        XCTAssertTrue(element("playerRecommendationsPage").exists, "Horizontal page swipe should expose the recommendations page.")
+    }
+
+    @MainActor
+    func testHorizontalRightSwipeFromCenterShowsQueueWithoutDismissing() throws {
+        try openFullPlayerFromMini()
+
+        let nowPlaying = element("nowPlayingView")
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before testing horizontal page ownership.")
+
+        try swipeToPlayerPage(direction: .right)
+        XCTAssertTrue(waitForPlayerPage("队列"), "A right swipe from the center page should land on the queue.")
+
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 1), "Horizontal page swipe should not minimize the full player.")
+        XCTAssertTrue(element("playerQueuePage").exists, "Horizontal page swipe should expose the queue page.")
     }
 
     @MainActor
@@ -350,17 +364,38 @@ final class PlayerChromeUITests: XCTestCase {
     private func swipeToPlayerPage(direction: PlayerPageSwipeDirection) throws {
         let nowPlaying = element("nowPlayingView")
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before swiping pages.")
-        let coverArea = centerPlayerCoverArea()
-        XCTAssertTrue(coverArea.screenPoint.y > nowPlaying.frame.minY, "The center player cover area should be measurable before swiping pages.")
-
-        let expectedPage = direction == .left ? "推荐" : "队列"
+        let currentTitle = currentPlayerPageTitle(timeout: 1) ?? "正在播放"
+        let expectedPage = expectedPageTitle(afterSwiping: direction, from: currentTitle)
+        let pager = element("playerHorizontalPager")
+        XCTAssertTrue(pager.waitForExistence(timeout: 2), "The native horizontal pager should be available before swiping pages.")
         if direction == .left {
-            coverArea.leftSwipe()
+            pager.swipeLeft()
         } else {
-            coverArea.rightSwipe()
+            pager.swipeRight()
         }
 
         XCTAssertTrue(waitForPlayerPage(expectedPage), "Horizontal swipe should switch the player page to \(expectedPage).")
+    }
+
+    @MainActor
+    private func currentPlayerPageTitle(timeout: TimeInterval = 2) -> String? {
+        let hint = element("playerPageHint")
+        guard hint.waitForExistence(timeout: timeout) else { return nil }
+        return hint.value as? String
+    }
+
+    private func expectedPageTitle(afterSwiping direction: PlayerPageSwipeDirection, from currentTitle: String) -> String {
+        let pages = ["队列", "正在播放", "推荐"]
+        guard let currentIndex = pages.firstIndex(of: currentTitle) else {
+            return direction == .left ? "推荐" : "队列"
+        }
+
+        switch direction {
+        case .left:
+            return pages[min(pages.count - 1, currentIndex + 1)]
+        case .right:
+            return pages[max(0, currentIndex - 1)]
+        }
     }
 
     @MainActor
