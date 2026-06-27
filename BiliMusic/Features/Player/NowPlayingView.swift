@@ -65,6 +65,47 @@ struct RecommendationPanelRefreshPolicy: Equatable {
     }
 }
 
+struct RecommendationVisibleLoadPolicy: Equatable {
+    var shouldLoad: Bool
+
+    static func playbackStarted(
+        recommendationsPageSelected: Bool,
+        recommendationsStale: Bool,
+        recommendationsEmpty: Bool,
+        recommendationsMismatched: Bool
+    ) -> RecommendationVisibleLoadPolicy {
+        visibleLoad(
+            recommendationsPageSelected: recommendationsPageSelected,
+            recommendationsStale: recommendationsStale,
+            recommendationsEmpty: recommendationsEmpty,
+            recommendationsMismatched: recommendationsMismatched)
+    }
+
+    static func selectedPageChanged(
+        recommendationsPageSelected: Bool,
+        recommendationsStale: Bool,
+        recommendationsEmpty: Bool,
+        recommendationsMismatched: Bool
+    ) -> RecommendationVisibleLoadPolicy {
+        visibleLoad(
+            recommendationsPageSelected: recommendationsPageSelected,
+            recommendationsStale: recommendationsStale,
+            recommendationsEmpty: recommendationsEmpty,
+            recommendationsMismatched: recommendationsMismatched)
+    }
+
+    private static func visibleLoad(
+        recommendationsPageSelected: Bool,
+        recommendationsStale: Bool,
+        recommendationsEmpty: Bool,
+        recommendationsMismatched: Bool
+    ) -> RecommendationVisibleLoadPolicy {
+        RecommendationVisibleLoadPolicy(
+            shouldLoad: recommendationsPageSelected &&
+                (recommendationsStale || recommendationsEmpty || recommendationsMismatched))
+    }
+}
+
 /// 全屏正在播放页(从 mini bar 上拉打开)。
 struct NowPlayingView: View {
     @Environment(PlayerEngine.self) private var engine
@@ -239,14 +280,22 @@ struct NowPlayingView: View {
         }
         .onChange(of: engine.state) { _, state in
             guard state == .playing else { return }
-            guard selectedPage == PlayerPage.recommendations.rawValue else { return }
-            guard recommendationsStale || recommendedTracks.isEmpty || !recommendationsMatchCurrentTrack else { return }
+            let loadPolicy = RecommendationVisibleLoadPolicy.playbackStarted(
+                recommendationsPageSelected: selectedPage == PlayerPage.recommendations.rawValue,
+                recommendationsStale: recommendationsStale,
+                recommendationsEmpty: recommendedTracks.isEmpty,
+                recommendationsMismatched: !recommendationsMatchCurrentTrack)
+            guard loadPolicy.shouldLoad else { return }
             recommendationsStale = false
             scheduleRecommendationLoad(clear: !recommendedTracks.isEmpty)
         }
         .onChange(of: selectedPage) { _, page in
-            guard page == PlayerPage.recommendations.rawValue else { return }
-            guard recommendationsStale || recommendedTracks.isEmpty || !recommendationsMatchCurrentTrack else { return }
+            let loadPolicy = RecommendationVisibleLoadPolicy.selectedPageChanged(
+                recommendationsPageSelected: page == PlayerPage.recommendations.rawValue,
+                recommendationsStale: recommendationsStale,
+                recommendationsEmpty: recommendedTracks.isEmpty,
+                recommendationsMismatched: !recommendationsMatchCurrentTrack)
+            guard loadPolicy.shouldLoad else { return }
             recommendationsStale = false
             scheduleRecommendationLoad(clear: !recommendedTracks.isEmpty)
         }

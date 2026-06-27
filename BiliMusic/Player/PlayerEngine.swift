@@ -154,6 +154,20 @@ final class PlayerEngine {
         var id: String { rawValue }
     }
 
+    struct PreparedVideoAvailabilityPolicy: Equatable {
+        var videoAvailable: Bool
+        var playbackMode: PlaybackMode
+
+        static func applyPreparedVideo(
+            currentPlaybackMode: PlaybackMode,
+            hasPreparedVideo: Bool
+        ) -> PreparedVideoAvailabilityPolicy {
+            PreparedVideoAvailabilityPolicy(
+                videoAvailable: hasPreparedVideo,
+                playbackMode: currentPlaybackMode)
+        }
+    }
+
     enum QueueMode: String, CaseIterable, Identifiable {
         case sequential = "顺序"
         case shuffle = "随机"
@@ -1364,8 +1378,11 @@ final class PlayerEngine {
                 quality: videoStream.quality,
                 fetchedAt: Date())
         }
-        let available = videoStream != nil
-        videoAvailable = available
+        let policy = PreparedVideoAvailabilityPolicy.applyPreparedVideo(
+            currentPlaybackMode: playbackMode,
+            hasPreparedVideo: videoStream != nil)
+        videoAvailable = policy.videoAvailable
+        playbackMode = policy.playbackMode
     }
 
     // MARK: - 锁屏 / 控制中心

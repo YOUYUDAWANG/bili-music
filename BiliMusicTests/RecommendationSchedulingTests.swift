@@ -64,6 +64,56 @@ final class RecommendationSchedulingTests: XCTestCase {
         XCTAssertTrue(policy.shouldMarkStale)
     }
 
+    func testPlayingDoesNotLoadRecommendationsWhenPanelIsHidden() {
+        let policy = RecommendationVisibleLoadPolicy.playbackStarted(
+            recommendationsPageSelected: false,
+            recommendationsStale: true,
+            recommendationsEmpty: true,
+            recommendationsMismatched: true)
+
+        XCTAssertFalse(policy.shouldLoad)
+    }
+
+    func testPlayingLoadsRecommendationsWhenVisibleAndStale() {
+        let policy = RecommendationVisibleLoadPolicy.playbackStarted(
+            recommendationsPageSelected: true,
+            recommendationsStale: true,
+            recommendationsEmpty: false,
+            recommendationsMismatched: false)
+
+        XCTAssertTrue(policy.shouldLoad)
+    }
+
+    func testPageSelectionLoadsRecommendationsWhenVisibleAndEmpty() {
+        let policy = RecommendationVisibleLoadPolicy.selectedPageChanged(
+            recommendationsPageSelected: true,
+            recommendationsStale: false,
+            recommendationsEmpty: true,
+            recommendationsMismatched: false)
+
+        XCTAssertTrue(policy.shouldLoad)
+    }
+
+    func testPageSelectionLoadsRecommendationsWhenVisibleAndMismatched() {
+        let policy = RecommendationVisibleLoadPolicy.selectedPageChanged(
+            recommendationsPageSelected: true,
+            recommendationsStale: false,
+            recommendationsEmpty: false,
+            recommendationsMismatched: true)
+
+        XCTAssertTrue(policy.shouldLoad)
+    }
+
+    func testPageSelectionDoesNotLoadRecommendationsWhenHiddenEvenIfStale() {
+        let policy = RecommendationVisibleLoadPolicy.selectedPageChanged(
+            recommendationsPageSelected: false,
+            recommendationsStale: true,
+            recommendationsEmpty: false,
+            recommendationsMismatched: false)
+
+        XCTAssertFalse(policy.shouldLoad)
+    }
+
     func testRecommendationDisplayFilterRejectsObviousNonMusic() {
         let gameplay = makeRecommendationTrack(
             typeID: 17,

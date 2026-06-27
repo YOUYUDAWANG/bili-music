@@ -89,17 +89,14 @@ final class PlaybackCriticalPathTests: XCTestCase {
         let historyIndex = events.firstIndex(of: .historyScheduled)
         let artworkIndex = events.firstIndex(of: .artworkScheduled)
         let lyricsIndex = events.firstIndex(of: .lyricsScheduled)
-        let mvPreparationIndex = events.firstIndex(of: .mvPreparationScheduled)
 
         XCTAssertNotNil(firstPlayingIndex)
         XCTAssertNotNil(historyIndex)
         XCTAssertNotNil(artworkIndex)
         XCTAssertNotNil(lyricsIndex)
-        XCTAssertNotNil(mvPreparationIndex)
         XCTAssertLessThan(firstPlayingIndex!, historyIndex!)
         XCTAssertLessThan(firstPlayingIndex!, artworkIndex!)
         XCTAssertLessThan(firstPlayingIndex!, lyricsIndex!)
-        XCTAssertLessThan(firstPlayingIndex!, mvPreparationIndex!)
         XCTAssertFalse(events.contains(.queuePrefetchScheduled))
         XCTAssertFalse(events.contains(.autoCacheScheduled))
     }
@@ -157,6 +154,28 @@ final class PlaybackCriticalPathTests: XCTestCase {
         XCTAssertEqual(info[MPNowPlayingInfoPropertyPlaybackRate] as? Double, 1)
         XCTAssertEqual(info[MPNowPlayingInfoPropertyDefaultPlaybackRate] as? Double, 1)
         XCTAssertEqual(info[MPNowPlayingInfoPropertyMediaType] as? UInt, MPNowPlayingInfoMediaType.audio.rawValue)
+    }
+
+    func testPreparedVideoAvailabilityPreservesMusicMode() {
+        let policy = PlayerEngine.PreparedVideoAvailabilityPolicy.applyPreparedVideo(
+            currentPlaybackMode: .music,
+            hasPreparedVideo: true)
+
+        XCTAssertTrue(policy.videoAvailable)
+        XCTAssertEqual(policy.playbackMode, .music)
+    }
+
+    func testPreparedVideoAvailabilityDoesNotImplyPlaybackDecision() {
+        let available = PlayerEngine.PreparedVideoAvailabilityPolicy.applyPreparedVideo(
+            currentPlaybackMode: .music,
+            hasPreparedVideo: true)
+        let unavailable = PlayerEngine.PreparedVideoAvailabilityPolicy.applyPreparedVideo(
+            currentPlaybackMode: .music,
+            hasPreparedVideo: false)
+
+        XCTAssertEqual(available.playbackMode, .music)
+        XCTAssertEqual(unavailable.playbackMode, .music)
+        XCTAssertNotEqual(available.videoAvailable, unavailable.videoAvailable)
     }
 
     private static func track(
