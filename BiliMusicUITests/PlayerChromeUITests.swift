@@ -120,6 +120,45 @@ final class PlayerChromeUITests: XCTestCase {
     }
 
     @MainActor
+    func testProgressScrubDoesNotDismissOrChangePlayerPage() throws {
+        try openFullPlayerFromMini()
+
+        let nowPlaying = element("nowPlayingView")
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before testing progress scrub ownership.")
+        let cover = element("nowPlayingCover")
+        XCTAssertTrue(cover.waitForExistence(timeout: 2), "The center player page should be visible before scrubbing.")
+
+        let progress = element("nowPlayingProgress")
+        XCTAssertTrue(progress.waitForExistence(timeout: 2), "The progress bar should be visible before scrubbing.")
+        let start = progress.coordinate(withNormalizedOffset: CGVector(dx: 0.22, dy: 0.5))
+        let end = progress.coordinate(withNormalizedOffset: CGVector(dx: 0.78, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: end)
+
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 1), "Scrubbing progress should not minimize the full player.")
+        XCTAssertFalse(element("playerQueuePage").isHittable, "Scrubbing progress should not swipe to the queue page.")
+        XCTAssertFalse(element("playerRecommendationsPage").isHittable, "Scrubbing progress should not swipe to the recommendations page.")
+    }
+
+    @MainActor
+    func testHorizontalPageSwipeChangesPageWithoutDismissing() throws {
+        try openFullPlayerFromMini()
+
+        let nowPlaying = element("nowPlayingView")
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before testing horizontal page ownership.")
+
+        try swipeToPlayerPage(direction: .left)
+
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 1), "Horizontal page swipe should not minimize the full player.")
+        XCTAssertTrue(element("playerRecommendationsPage").exists, "Horizontal page swipe should land on the recommendations page.")
+    }
+
+    @MainActor
+    func testDensePlayerLayoutKeepsKeyElementsOrderedAndBottomGapBounded() throws {
+        try openFullPlayerFromMini()
+        try assertDensePlayerLayout()
+    }
+
+    @MainActor
     func testTappingRecommendationKeepsHomeListStable() throws {
         try assertFixtureHomeRowStableWhileStartingPlayback()
     }
@@ -145,6 +184,50 @@ final class PlayerChromeUITests: XCTestCase {
 
     private func element(_ identifier: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+    }
+
+    @MainActor
+    private func assertDensePlayerLayout() throws {
+        let nowPlaying = element("nowPlayingView")
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before dense layout verification.")
+
+        let pageHint = element("playerPageHint")
+        let cover = element("nowPlayingCover")
+        let metadata = element("nowPlayingMetadata")
+        let progress = element("nowPlayingProgress")
+        let transport = element("playerTransportControls")
+        let toolbar = element("playerToolbar")
+
+        let elements = [pageHint, cover, metadata, progress, transport, toolbar]
+        for element in elements {
+            XCTAssertTrue(element.waitForExistence(timeout: 2), "Dense player layout element should exist: \(element)")
+            XCTAssertFalse(element.frame.isEmpty, "Dense player layout element should have a measurable frame: \(element)")
+        }
+
+        assertVerticalOrder(pageHint, cover, "Page hint should stay above the cover art.")
+        assertVerticalOrder(cover, metadata, "Cover art should stay above title metadata.")
+        assertVerticalOrder(metadata, progress, "Title metadata should stay above progress.")
+        assertVerticalOrder(progress, transport, "Progress should stay above transport controls.")
+        assertVerticalOrder(transport, toolbar, "Transport controls should stay above the player toolbar.")
+
+        let layoutElements = [cover, metadata, progress, transport, toolbar]
+        for firstIndex in 0..<layoutElements.count {
+            for secondIndex in (firstIndex + 1)..<layoutElements.count {
+                assertNoFrameOverlap(layoutElements[firstIndex], layoutElements[secondIndex])
+            }
+        }
+
+        let maxBottomGap: CGFloat = app.frame.height <= 700 ? 96 : 128
+        let bottomGap = app.frame.maxY - toolbar.frame.maxY
+        XCTAssertLessThanOrEqual(bottomGap, maxBottomGap, "Dense player layout should not leave excessive empty space below the toolbar.")
+    }
+
+    private func assertVerticalOrder(_ upper: XCUIElement, _ lower: XCUIElement, _ message: String) {
+        XCTAssertLessThanOrEqual(upper.frame.maxY, lower.frame.minY + 1, message)
+    }
+
+    private func assertNoFrameOverlap(_ first: XCUIElement, _ second: XCUIElement) {
+        XCTAssertFalse(first.frame.intersects(second.frame), "Dense player key elements should not overlap: \(first) and \(second)")
     }
 
     @MainActor
@@ -213,4 +296,5 @@ final class PlayerChromeUITests: XCTestCase {
         }
         return hint.value as? String == title
     }
+
 }

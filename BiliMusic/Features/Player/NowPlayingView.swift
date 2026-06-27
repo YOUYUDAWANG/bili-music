@@ -9,6 +9,13 @@ private struct ScrollOffsetKey: PreferenceKey {
     }
 }
 
+private struct PlayerProgressFrameKey: PreferenceKey {
+    static let defaultValue: CGRect = .null
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
+    }
+}
+
 struct RecommendationPanelRefreshPolicy: Equatable {
     var shouldLoadImmediately: Bool
     var shouldMarkStale: Bool
@@ -83,6 +90,7 @@ struct NowPlayingView: View {
     @State private var isProgressScrubbing = false
     @State private var suppressPageSwipeForScrub = false
     @State private var progressScrubGeneration = 0
+    @State private var progressFrameInGlobal: CGRect = .null
     @Environment(\.dismiss) private var dismiss
     private var favorites: FavoriteManager { .shared }
 
@@ -189,7 +197,7 @@ struct NowPlayingView: View {
     private func nowPlayingPage(coverSize: CGFloat) -> some View {
         VStack(spacing: 18) {
             mediaView(coverSize: coverSize)
-                .padding(.top, 4)
+                .padding(.top, 12)
                 .accessibilityIdentifier("nowPlayingCover")
                 .contentShape(Rectangle())
                 .highPriorityGesture(pageSwipeGesture(width: coverSize), including: .all)
@@ -216,6 +224,14 @@ struct NowPlayingView: View {
             .accessibilityIdentifier("nowPlayingMetadata")
 
             progressView
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: PlayerProgressFrameKey.self,
+                            value: geo.frame(in: .global)
+                        )
+                    }
+                )
                 .accessibilityIdentifier("nowPlayingProgress")
             transportControls
                 .accessibilityIdentifier("playerTransportControls")
@@ -273,6 +289,9 @@ struct NowPlayingView: View {
         .animation(reduceMotion ? .easeOut(duration: 0.12) : .snappy(duration: 0.28, extraBounce: 0.02), value: selectedPage)
         .safeAreaInset(edge: .top, spacing: 0) {
             playerTopChrome(safeAreaTop: safeAreaTop)
+        }
+        .onPreferenceChange(PlayerProgressFrameKey.self) { frame in
+            progressFrameInGlobal = frame
         }
     }
 
@@ -428,6 +447,8 @@ struct NowPlayingView: View {
                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
         }
         .padding(.horizontal, 24)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("playerToolbar")
     }
 
     private var favoriteButton: some View {
@@ -706,10 +727,10 @@ struct NowPlayingView: View {
         }
         .padding(.horizontal, 12)
         .frame(height: Layout.topChromeControlSize)
+        .accessibilityIdentifier("playerPageHint")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("播放器页面")
         .accessibilityValue(PlayerPage(rawValue: selectedPage)?.title ?? PlayerPage.nowPlaying.title)
-        .accessibilityIdentifier("playerPageHint")
     }
 
     private func setPlaybackMode(_ mode: PlayerEngine.PlaybackMode) {
@@ -1235,7 +1256,8 @@ struct NowPlayingView: View {
     private func pageSwipeGesture(width: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 12, coordinateSpace: .global)
             .onEnded { value in
-                guard !suppressPageSwipeForScrub else { return }
+                guard !isProgressGestureStart(value.startLocation) else { return }
+                guard !isProgressScrubbing, !suppressPageSwipeForScrub else { return }
                 guard let horizontalIntent = PlayerGesturePolicy.horizontalPageSwipeIntent(
                     translation: value.translation,
                     predictedEndTranslation: value.predictedEndTranslation,
@@ -1250,6 +1272,14 @@ struct NowPlayingView: View {
                     }
                 }
             }
+    }
+
+    private func isProgressGestureStart(_ location: CGPoint) -> Bool {
+        guard selectedPage == PlayerPage.nowPlaying.rawValue else { return false }
+        guard !progressFrameInGlobal.isNull, !progressFrameInGlobal.isEmpty else { return false }
+        return progressFrameInGlobal
+            .insetBy(dx: -28, dy: -18)
+            .contains(location)
     }
 
     private func setProgressScrubbing(_ scrubbing: Bool) {

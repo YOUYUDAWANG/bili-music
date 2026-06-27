@@ -169,6 +169,10 @@ struct PlayerProgressBar: View {
     @State private var trackWidth: CGFloat = 0
     @State private var scrubHapticTrigger = 0
 
+    private enum Metrics {
+        static let horizontalPadding: CGFloat = 28
+    }
+
     private var displayProgress: CGFloat {
         let current = isScrubbing ? scrubValue : engine.currentTime
         guard engine.duration > 0 else { return 0 }
@@ -198,28 +202,6 @@ struct PlayerProgressBar: View {
                     .animation(.spring(response: 0.2, dampingFraction: 0.8), value: isScrubbing)
             }
             .frame(height: 44)
-            .contentShape(Rectangle())
-            .highPriorityGesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        if !isScrubbing {
-                            scrubValue = min(engine.currentTime, engine.duration)
-                            isScrubbing = true
-                            engine.beginScrub()
-                            onScrubChanged(true)
-                            scrubHapticTrigger += 1
-                        }
-                        let progress = max(0, min(1, value.location.x / max(trackWidth, 1)))
-                        scrubValue = progress * engine.duration
-                    }
-                    .onEnded { _ in
-                        engine.endScrub(to: scrubValue)
-                        isScrubbing = false
-                        onScrubChanged(false)
-                        scrubHapticTrigger += 1
-                    },
-                including: .all
-            )
             .sensoryFeedback(.selection, trigger: scrubHapticTrigger)
             .background(
                 GeometryReader { geo in
@@ -237,7 +219,30 @@ struct PlayerProgressBar: View {
             .font(.caption.monospacedDigit())
             .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 28)
+        .padding(.horizontal, Metrics.horizontalPadding)
+        .contentShape(Rectangle())
+        .highPriorityGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    if !isScrubbing {
+                        scrubValue = min(engine.currentTime, engine.duration)
+                        isScrubbing = true
+                        engine.beginScrub()
+                        onScrubChanged(true)
+                        scrubHapticTrigger += 1
+                    }
+                    let x = value.location.x - Metrics.horizontalPadding
+                    let progress = max(0, min(1, x / max(trackWidth, 1)))
+                    scrubValue = progress * engine.duration
+                }
+                .onEnded { _ in
+                    engine.endScrub(to: scrubValue)
+                    isScrubbing = false
+                    onScrubChanged(false)
+                    scrubHapticTrigger += 1
+                },
+            including: .all
+        )
         .onDisappear {
             guard isScrubbing else { return }
             engine.endScrub(to: scrubValue)
