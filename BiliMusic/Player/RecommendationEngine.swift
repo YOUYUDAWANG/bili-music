@@ -138,6 +138,14 @@ struct RecommendationEngine {
         limit: Int = 24,
         policy: RecommendationSchedulingPolicy? = nil
     ) async -> [Track] {
+#if DEBUG
+        if UITestFixtures.enabled, mode == .relatedPanel {
+            return UITestFixtures.relatedPanelTracks(
+                current: context.current,
+                excludedKeys: context.excludedKeys,
+                limit: limit)
+        }
+#endif
         let schedulingPolicy = policy ?? RecommendationSchedulingPolicy.default(for: mode)
         let snapshot = await Self.makeSnapshot(mode: mode)
         let cacheKey = Self.cacheKey(mode: mode, context: context, snapshot: snapshot)

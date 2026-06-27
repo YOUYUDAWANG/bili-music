@@ -89,3 +89,23 @@ Verification:
 Concerns:
 
 - Reviewer finding 3 is only partially resolved: the view-local DEBUG recommendation fixture branch is still present because removing it safely would require broadening the test-fixture change beyond the owned files for this fix.
+
+## 2026-06-28 recommendation-fixture follow-up
+
+Status: DONE
+
+- Removed the DEBUG-only `UITestFixtures.enabled` branch from `NowPlayingView.loadRecommendations()`, so the player view no longer owns deterministic recommendation fixture data.
+- Moved deterministic DEBUG fixture behavior for player recommendations into `RecommendationEngine.recommendations(mode:context:limit:policy:)`, scoped only to `mode == .relatedPanel`.
+- Added `UITestFixtures.relatedPanelTracks(current:excludedKeys:limit:)` so the recommendation boundary can provide stable fixture rows while still honoring the current track and the excluded recommendation keys.
+- Left production behavior unchanged outside DEBUG, and did not touch native paging ownership or reintroduce any custom horizontal page-selection gesture.
+
+Verification:
+
+- `xcodebuild test -project BiliMusic.xcodeproj -scheme BiliMusic -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:BiliMusicUITests/PlayerChromeUITests/testRecommendationSideListScrollsVerticallyWithoutChangingPageOrTrack -only-testing:BiliMusicUITests/PlayerChromeUITests/testHorizontalPageSwipeChangesPageWithoutDismissing -only-testing:BiliMusicUITests/PlayerChromeUITests/testHorizontalRightSwipeFromCenterShowsQueueWithoutDismissing`
+  - Passed: 3/3
+- `xcodebuild test -project BiliMusic.xcodeproj -scheme BiliMusic -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:BiliMusicUITests/PlayerChromeUITests`
+  - Passed: 17/17
+
+Concerns:
+
+- None blocking.

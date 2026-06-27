@@ -1599,15 +1599,6 @@ struct NowPlayingView: View {
         let currentKey = current.key
         recommendationsLoading = selectedPage == PlayerPage.recommendations.rawValue && recommendedTracks.isEmpty
         defer { recommendationsLoading = false }
-#if DEBUG
-        if UITestFixtures.enabled {
-            let tracks = UITestFixtures.homeTracks.filter { !$0.key.matches(current) }
-            recommendationSeedKey = currentKey
-            recommendedTracks = tracks
-            recommendationsError = tracks.isEmpty ? "没有找到合适的推荐歌曲" : nil
-            return
-        }
-#endif
         let excluded = shownRecommendationKeys.union([currentKey])
         let tracks = await RecommendationEngine().recommendations(
             mode: .relatedPanel,
