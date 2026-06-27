@@ -39,15 +39,25 @@ final class PlayerChromeUITests: XCTestCase {
     @MainActor
     func testMiniPlayerArtworkAndFullArtworkSurviveTwoOpenCloseTransitions() throws {
         for iteration in 1...2 {
+            let miniTitle = element("miniPlayerTitle")
+            XCTAssertTrue(miniTitle.waitForExistence(timeout: 3), "Mini title should be visible before opening on round \(iteration).")
+            XCTAssertEqual(miniTitle.label, "Fixture Song One", "Mini title should keep the raw fixture title before opening on round \(iteration).")
             XCTAssertTrue(element("miniPlayerArtwork").waitForExistence(timeout: 3), "Mini artwork should be visible before opening on round \(iteration).")
 
             try openFullPlayerFromMini()
-            XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 3), "Full player should open on round \(iteration).")
+            let nowPlaying = element("nowPlayingView")
+            XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should open on round \(iteration).")
+
+            let fullTitle = element("nowPlayingTitle")
+            XCTAssertTrue(fullTitle.waitForExistence(timeout: 3), "Full title should be visible after opening on round \(iteration).")
+            XCTAssertEqual(fullTitle.label, "Fixture Song One", "Full title should keep the raw fixture title after opening on round \(iteration).")
             XCTAssertTrue(element("nowPlayingArtwork").waitForExistence(timeout: 3), "Full artwork should be visible after opening on round \(iteration).")
 
             centerPlayerCoverArea().dragDownToDismiss()
 
-            XCTAssertTrue(element("nowPlayingView").waitForNonExistence(timeout: 3), "Full player should close on round \(iteration).")
+            XCTAssertTrue(nowPlaying.waitForNonExistence(timeout: 3), "Full player should close on round \(iteration).")
+            XCTAssertTrue(miniTitle.waitForExistence(timeout: 3), "Mini title should be visible again after closing on round \(iteration).")
+            XCTAssertEqual(miniTitle.label, "Fixture Song One", "Mini title should keep the raw fixture title after closing on round \(iteration).")
             XCTAssertTrue(element("miniPlayerArtwork").waitForExistence(timeout: 3), "Mini artwork should be visible again after closing on round \(iteration).")
         }
     }

@@ -35,3 +35,25 @@ Test Suite 'Selected tests' passed at 2026-06-28 06:45:06.448.
 
 - `handleMiniOpenDragEnded` still keeps its single DEBUG end-of-drag log. The jank-causing per-frame changed logging is removed.
 - The new shared-element behavior is exercised by UITests via presence and round-trip stability checks, but there is still no pixel-diff visual assertion for the interpolation curve itself.
+
+## Task 4 Fix Report - 2026-06-28
+
+### Files Changed
+
+- `BiliMusic/Features/RootView.swift`
+- `BiliMusic/Features/Player/NowPlayingView.swift`
+- `BiliMusicUITests/PlayerChromeUITests.swift`
+
+### What Changed
+
+- Added stable accessibility identifiers for the mini-player title surface (`miniPlayerTitle`) and full-player title surface (`nowPlayingTitle`).
+- Kept the shared title transition on the existing matched geometry path while leaving title cleaning experimental and off by default.
+- Extended the two-round UI regression to assert mini/full title surfaces and mini/full artwork survive the same open-close cycle, and to verify the raw fixture title stays visible when title cleaning is disabled.
+
+### Command Run
+
+- `xcodebuild test -project BiliMusic.xcodeproj -scheme BiliMusic -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:BiliMusicUITests/PlayerChromeUITests`
+
+### Result
+
+- Passed: 17 UI tests, 0 failures

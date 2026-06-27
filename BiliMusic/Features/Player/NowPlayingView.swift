@@ -414,14 +414,16 @@ struct NowPlayingView: View {
                 .lineSpacing(2)
                 .minimumScaleFactor(0.82)
                 .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("nowPlayingTitle")
                 .matchedGeometryEffect(id: "playerTitle", in: namespace)
                 .frame(maxWidth: .infinity, alignment: centered ? .center : .leading)
-                .accessibilityIdentifier("nowPlayingMetadata")
+
             Text(displayArtist)
                 .font(.system(size: compact ? 13 : 17, weight: .regular))
                 .foregroundStyle(Color.white.opacity(0.62))
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: centered ? .center : .leading)
+
             if case .failed(let message) = engine.state {
                 Text(message)
                     .font(.caption)
@@ -430,6 +432,7 @@ struct NowPlayingView: View {
                     .frame(maxWidth: .infinity, alignment: centered ? .center : .leading)
             }
         }
+        .accessibilityIdentifier("nowPlayingMetadata")
         .frame(maxWidth: .infinity, alignment: centered ? .center : .leading)
     }
 

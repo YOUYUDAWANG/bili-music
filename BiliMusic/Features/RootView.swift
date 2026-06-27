@@ -363,27 +363,29 @@ private struct SystemMiniPlayer: View {
         placement == .inline
     }
 
-	    var body: some View {
-	        let layoutProgress = miniLayoutProgress
-	        let accessoryProgress = isFullPlayerPresented || miniOpenDragTranslation != nil
-	            ? transitionProgress(openProgress)
-	            : 0
-	        let display = engine.current.map { TrackTitleFormatter.displayMetadata(for: $0, clean: cleanListTitles) }
+    var body: some View {
+        let layoutProgress = miniLayoutProgress
+        let accessoryProgress = isFullPlayerPresented || miniOpenDragTranslation != nil
+            ? transitionProgress(openProgress)
+            : 0
+        let display = engine.current.map { TrackTitleFormatter.displayMetadata(for: $0, clean: cleanListTitles) }
 
-	        HStack(spacing: lerp(7, 9, layoutProgress)) {
+        HStack(spacing: lerp(7, 9, layoutProgress)) {
             HStack(spacing: lerp(7, 9, layoutProgress)) {
                 artwork(layoutProgress: layoutProgress)
 
-	                VStack(alignment: .leading, spacing: 1) {
-	                    Text(display?.title ?? "")
-	                        .font(.caption.weight(.semibold))
-	                        .foregroundStyle(.primary)
-	                        .lineLimit(1)
-                            .matchedGeometryEffect(id: "playerTitle", in: namespace)
-	                        .frame(maxWidth: .infinity, alignment: .leading)
-	                    Text(display?.artist ?? "")
-	                        .font(.caption2)
-	                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(display?.title ?? "")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .accessibilityIdentifier("miniPlayerTitle")
+                        .matchedGeometryEffect(id: "playerTitle", in: namespace)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Text(display?.artist ?? "")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .frame(height: 13, alignment: .top)
                         .clipped()
