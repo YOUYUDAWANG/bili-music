@@ -3,12 +3,20 @@ import SwiftUI
 /// 通用歌曲行组件：封面 + 标题 + UP 主 + 时长 + 播放状态指示。
 /// 行尾 ellipsis 可通过 Menu 展开更多操作（添加到队列、电台播放）。
 struct TrackRow: View {
+    enum Appearance {
+        case standard
+        case player
+    }
+
     @Environment(PlayerEngine.self) private var engine
+    @AppStorage(TrackTitleFormatter.cleanListTitlesDefaultsKey) private var cleanListTitles = true
     let track: Track
     var isPlaying = false
     var showsTrailingIcon = true
+    var appearance: Appearance = .standard
 
     var body: some View {
+        let display = TrackTitleFormatter.displayMetadata(for: track, clean: cleanListTitles)
         HStack(spacing: 14) {
             CachedAsyncImage(
                 url: thumbnailURL(track.coverURL, size: 160),
@@ -17,22 +25,24 @@ struct TrackRow: View {
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
                 ZStack {
-                    AppTheme.secondaryBackground
-                    Image(systemName: "music.note").font(.caption).foregroundStyle(.secondary)
+                    placeholderBackground
+                    Image(systemName: "music.note")
+                        .font(.caption)
+                        .foregroundStyle(secondaryForeground)
                 }
             }
             .frame(width: 64, height: 36)
             .clipShape(RoundedRectangle(cornerRadius: 5))
             VStack(alignment: .leading, spacing: 4) {
-                Text(track.title)
+                Text(displayTitle)
                     .font(.subheadline)
                     .lineLimit(2)
-                    .foregroundStyle(isPlaying ? AppTheme.accent : .primary)
+                    .foregroundStyle(titleForeground)
                 HStack(spacing: 6) {
                     if isPlaying {
                         Image(systemName: "waveform").font(.caption2).foregroundStyle(AppTheme.accent)
                     }
-                    Text(track.artist)
+                    Text(display.artist)
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Text(format(track.duration))
@@ -40,7 +50,7 @@ struct TrackRow: View {
                         .fixedSize(horizontal: true, vertical: false)
                 }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(secondaryForeground)
             }
             Spacer()
             if showsTrailingIcon {
@@ -64,7 +74,7 @@ struct TrackRow: View {
                     } label: {
                         Image(systemName: "ellipsis")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(trailingForeground)
                             .frame(width: 44, height: 44)
                             .contentShape(Rectangle())
                     }
@@ -73,7 +83,64 @@ struct TrackRow: View {
             }
         }
         .padding(.vertical, 5)
+        .padding(.horizontal, 8)
+        .background {
+            if isPlaying {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(rowHighlightFill)
+            }
+        }
         .contentShape(Rectangle())
+    }
+
+    private var titleForeground: Color {
+        if isPlaying { return AppTheme.accent }
+        switch appearance {
+        case .standard:
+            return .primary
+        case .player:
+            return Color.white.opacity(0.90)
+        }
+    }
+
+    private var displayTitle: String {
+        TrackTitleFormatter.listTitle(for: track, clean: cleanListTitles)
+    }
+
+    private var secondaryForeground: Color {
+        switch appearance {
+        case .standard:
+            return .secondary
+        case .player:
+            return Color.white.opacity(0.48)
+        }
+    }
+
+    private var trailingForeground: Color {
+        switch appearance {
+        case .standard:
+            return .secondary
+        case .player:
+            return Color.white.opacity(0.34)
+        }
+    }
+
+    private var placeholderBackground: Color {
+        switch appearance {
+        case .standard:
+            return AppTheme.secondaryBackground
+        case .player:
+            return Color.white.opacity(0.08)
+        }
+    }
+
+    private var rowHighlightFill: Color {
+        switch appearance {
+        case .standard:
+            return AppTheme.biliPinkSoft
+        case .player:
+            return AppTheme.accent.opacity(0.14)
+        }
     }
 
     private func format(_ seconds: Int) -> String {
@@ -87,6 +154,7 @@ struct TrackRow: View {
         let raw = url.absoluteString
         guard !raw.localizedCaseInsensitiveContains("transparent.png") else { return nil }
         guard raw.contains("hdslb.com"), !raw.contains("@") else { return url }
-        return URL(string: raw + "@\(size)w_\(size)h_1c.webp")
+        let height = max(1, Int(Double(size) * 9.0 / 16.0))
+        return URL(string: raw + "@\(size)w_\(height)h_1c.webp")
     }
 }

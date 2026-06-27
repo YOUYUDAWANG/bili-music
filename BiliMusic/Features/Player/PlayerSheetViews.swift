@@ -56,17 +56,89 @@ struct LyricsSheetView: View {
 struct MVFullscreenView: View {
     @Environment(PlayerEngine.self) private var engine
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("mvQuality") private var mvQuality = 0
+    @State private var switchingQuality = false
+    @State private var showChrome = true
+    @State private var chromeHideTask: Task<Void, Never>?
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Color.black.ignoresSafeArea()
-            if let player = engine.avPlayer {
-                VideoPlayer(player: player)
+        GeometryReader { proxy in
+            ZStack(alignment: .top) {
+                Color.black.ignoresSafeArea()
+                if let player = engine.avPlayer {
+                    VideoPlayer(player: player)
+                        .ignoresSafeArea()
+                } else {
+                    ProgressView()
+                        .tint(.white)
+                }
+
+                Rectangle()
+                    .fill(Color.black.opacity(0.001))
                     .ignoresSafeArea()
-            } else {
-                ProgressView()
-                    .tint(.white)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        revealChrome()
+                    }
+                    .accessibilityHidden(true)
+                    .accessibilityIdentifier("mvFullscreenTapCatcher")
+
+                fullscreenChrome(safeAreaInsets: proxy.safeAreaInsets)
+                    .opacity(showChrome ? 1 : 0)
+                    .allowsHitTesting(showChrome)
+                    .animation(.easeInOut(duration: 0.22), value: showChrome)
+                    .accessibilityIdentifier("mvFullscreenChrome")
             }
+        }
+        .onAppear {
+            revealChrome()
+        }
+        .onDisappear {
+            chromeHideTask?.cancel()
+        }
+        .task {
+            await engine.upgradeMVForFullscreen()
+        }
+    }
+
+    private func fullscreenChrome(safeAreaInsets: EdgeInsets) -> some View {
+        HStack {
+            Menu {
+                ForEach(BiliClient.videoQualityOptions, id: \.id) { option in
+                    Button {
+                        Task {
+                            revealChrome()
+                            switchingQuality = true
+                            mvQuality = option.id
+                            await engine.setMVQuality(option.id)
+                            switchingQuality = false
+                            revealChrome()
+                        }
+                    } label: {
+                        Label(option.title, systemImage: mvQuality == option.id ? "checkmark" : "circle")
+                    }
+                }
+                if let quality = engine.currentVideoQuality {
+                    Divider()
+                    Label("当前: \(BiliClient.videoQualityName(quality))", systemImage: "play.rectangle")
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: switchingQuality ? "arrow.triangle.2.circlepath" : "slider.horizontal.3")
+                    Text(BiliClient.videoQualityName(selectedMVQuality))
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .frame(height: 42)
+                .background(.black.opacity(0.48), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .simultaneousGesture(TapGesture().onEnded { revealChrome() })
+            .accessibilityLabel("MV 画质")
+            .accessibilityIdentifier("mvFullscreenQualityButton")
+
+            Spacer()
 
             Button {
                 dismiss()
@@ -78,11 +150,26 @@ struct MVFullscreenView: View {
                     .background(.black.opacity(0.48), in: Circle())
             }
             .buttonStyle(.plain)
-            .padding(16)
+            .accessibilityLabel("退出全屏 MV")
+            .accessibilityIdentifier("mvFullscreenCloseButton")
         }
-        .task {
-            await engine.upgradeMVForFullscreen()
+        .padding(.top, max(12, safeAreaInsets.top + 10))
+        .padding(.leading, max(16, safeAreaInsets.leading + 16))
+        .padding(.trailing, max(16, safeAreaInsets.trailing + 16))
+    }
+
+    private func revealChrome() {
+        chromeHideTask?.cancel()
+        showChrome = true
+        chromeHideTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(2600))
+            guard !Task.isCancelled else { return }
+            showChrome = false
         }
+    }
+
+    private var selectedMVQuality: Int {
+        engine.currentVideoQuality ?? mvQuality
     }
 }
 

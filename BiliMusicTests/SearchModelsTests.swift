@@ -44,6 +44,139 @@ final class SearchModelsTests: XCTestCase {
         XCTAssertTrue(MusicFilter.isSearchResult(mv, query: "晴天", mode: .music))
     }
 
+    func testTrackTitleFormatterExtractsTitleAndArtistFromNoisyBiliTitles() {
+        let quoted = Track(typeID: 193, bvid: "BV3", title: "【4K修复】周杰伦《晴天》Official MV", artist: "音乐UP",
+                           coverURL: nil, duration: 269)
+        let separated = Track(typeID: 193, bvid: "BV4", title: "YOASOBI - アイドル Official MV", artist: "搬运UP",
+                              coverURL: nil, duration: 213)
+
+        XCTAssertEqual(
+            TrackTitleFormatter.displayMetadata(for: quoted, clean: true),
+            TrackTitleFormatter.DisplayMetadata(title: "晴天", artist: "周杰伦"))
+        XCTAssertEqual(
+            TrackTitleFormatter.displayMetadata(for: separated, clean: true),
+            TrackTitleFormatter.DisplayMetadata(title: "アイドル", artist: "YOASOBI"))
+        XCTAssertEqual(
+            TrackTitleFormatter.displayMetadata(for: quoted, clean: false),
+            TrackTitleFormatter.DisplayMetadata(title: "【4K修复】周杰伦《晴天》Official MV", artist: "音乐UP"))
+    }
+
+    func testTrackTitleFormatterKeepsAmbiguousTitlesUnchanged() {
+        let commentary = Track(typeID: 3, bvid: "BV5", title: "【乐评】周杰伦晴天到底好在哪里", artist: "音乐杂谈UP",
+                               coverURL: nil, duration: 360)
+        let bracketTitle = Track(typeID: 3, bvid: "BV6", title: "【晴天】周杰伦", artist: "音乐分享UP",
+                                 coverURL: nil, duration: 269)
+
+        XCTAssertEqual(
+            TrackTitleFormatter.displayMetadata(for: commentary, clean: true),
+            TrackTitleFormatter.DisplayMetadata(title: "【乐评】周杰伦晴天到底好在哪里", artist: "音乐杂谈UP"))
+        XCTAssertEqual(
+            TrackTitleFormatter.displayMetadata(for: bracketTitle, clean: true),
+            TrackTitleFormatter.DisplayMetadata(title: "【晴天】周杰伦", artist: "音乐分享UP"))
+    }
+
+    func testTrackTitleFormatterUsesBracketOnlyWhenItMatchesFallbackArtist() {
+        let artistInBracket = Track(typeID: 3, bvid: "BV7", title: "【周杰伦】晴天 Official MV", artist: "周杰伦",
+                                    coverURL: nil, duration: 269)
+        let titleInBracket = Track(typeID: 3, bvid: "BV8", title: "【晴天】周杰伦 Official MV", artist: "周杰伦",
+                                   coverURL: nil, duration: 269)
+
+        XCTAssertEqual(
+            TrackTitleFormatter.displayMetadata(for: artistInBracket, clean: true),
+            TrackTitleFormatter.DisplayMetadata(title: "晴天", artist: "周杰伦"))
+        XCTAssertEqual(
+            TrackTitleFormatter.displayMetadata(for: titleInBracket, clean: true),
+            TrackTitleFormatter.DisplayMetadata(title: "晴天", artist: "周杰伦"))
+    }
+
+    func testTrackTitleFormatterDoesNotDropLiveInsideRealTitle() {
+        let track = Track(typeID: 3, bvid: "BV9", title: "Oasis - Live Forever Official MV", artist: "搬运UP",
+                          coverURL: nil, duration: 276)
+
+        XCTAssertEqual(
+            TrackTitleFormatter.displayMetadata(for: track, clean: true),
+            TrackTitleFormatter.DisplayMetadata(title: "Live Forever", artist: "Oasis"))
+    }
+
+    func testTrackTitleFormatterDoesNotStripShortNoiseInsideWords() {
+        let track = Track(typeID: 3, bvid: "BV10", title: "Artist - MVP", artist: "搬运UP",
+                          coverURL: nil, duration: 210)
+
+        XCTAssertEqual(
+            TrackTitleFormatter.displayMetadata(for: track, clean: true),
+            TrackTitleFormatter.DisplayMetadata(title: "MVP", artist: "Artist"))
+    }
+
+    func testLyricsClientBuildsBroadDedupedSearchPlans() {
+        let client = LyricsClient()
+        let artists = client.artistCandidates(parsedArtist: "周杰伦", trackArtist: "音乐分享UP")
+        let plans = client.queryPlans(
+            title: "晴天",
+            rawTitle: "【4K修复】周杰伦《晴天》Official MV",
+            artists: artists,
+            duration: 269)
+
+        XCTAssertEqual(artists, ["周杰伦"])
+        XCTAssertTrue(plans.contains { plan in
+            if case .exactGet(track: "晴天", artist: "周杰伦", duration: 269) = plan.kind { return true }
+            return false
+        })
+        XCTAssertTrue(plans.contains { plan in
+            if case .searchText("晴天") = plan.kind { return true }
+            return false
+        })
+        XCTAssertTrue(plans.contains { plan in
+            if case .searchText("周杰伦 晴天") = plan.kind { return true }
+            return false
+        })
+        XCTAssertEqual(Set(plans).count, plans.count)
+    }
+
+    func testLyricsClientMatchesLongerMVDurationWhenArtistMatches() throws {
+        let client = LyricsClient()
+        let candidate = LyricsClient.Candidate(
+            id: 1,
+            trackName: "晴天",
+            artistName: "周杰伦",
+            albumName: "叶惠美",
+            duration: 270,
+            instrumental: false,
+            syncedLyrics: nil,
+            plainLyrics: "故事的小黄花\n从出生那年就飘着")
+
+        let best = try XCTUnwrap(client.bestCandidate(
+            [candidate],
+            songTitle: "晴天",
+            artists: ["周杰伦"],
+            duration: 304))
+        let lines = client.lyricLines(from: best, duration: 304)
+
+        XCTAssertEqual(best.trackName, "晴天")
+        XCTAssertEqual(lines.map(\.text), ["故事的小黄花", "从出生那年就飘着"])
+        XCTAssertGreaterThan(lines[1].from, lines[0].from)
+    }
+
+    func testLyricsClientUsesArtistEmbeddedInTitleForMVDurationTolerance() throws {
+        let client = LyricsClient()
+        let candidate = LyricsClient.Candidate(
+            id: 2,
+            trackName: "晴天",
+            artistName: "周杰伦",
+            albumName: "叶惠美",
+            duration: 270,
+            instrumental: false,
+            syncedLyrics: "[00:01.00]故事的小黄花",
+            plainLyrics: nil)
+
+        let best = try XCTUnwrap(client.bestCandidate(
+            [candidate],
+            songTitle: "周杰伦 晴天",
+            artists: [],
+            duration: 304))
+
+        XCTAssertEqual(best.artistName, "周杰伦")
+    }
+
     @MainActor
     func testSearchStoreRestoresCachedSnapshot() {
         let store = SearchStore()

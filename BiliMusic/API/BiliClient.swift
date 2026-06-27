@@ -15,6 +15,15 @@ struct BiliClient {
         (30216, "流畅 64K"),
     ]
 
+    static let videoQualityOptions: [(id: Int, title: String)] = [
+        (0,   "自动(最高)"),
+        (120, "4K"),
+        (116, "1080P 60帧"),
+        (112, "1080P 高码率"),
+        (80,  "1080P"),
+        (64,  "720P"),
+    ]
+
     /// 所有请求必带的浏览器伪装头（Referer + UA），缺则 CDN 返回 403。
     static let headers = [
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
@@ -206,6 +215,11 @@ struct BiliClient {
         let durl: [DURL]?
     }
 
+    struct VideoStream {
+        let url: URL
+        let quality: Int
+    }
+
     /// 按设置里的音质偏好取音频流。返回 URL(约 2 小时过期,不可持久化)和实际选中的音质 id。
     /// 偏好 0 = 最高(含 Hi-Res);否则选不超过偏好的最高一档。
     /// preferredQuality:0 = 最高(含 Hi-Res),否则选不超过该 id 的最高一档。播放/下载各传各的偏好。
@@ -238,32 +252,49 @@ struct BiliClient {
         case inline
         case fullscreen
 
-        var qualityCandidates: [Int] {
+        func qualityCandidates(preferredQuality: Int = 0) -> [Int] {
+            let defaults: [Int]
             switch self {
             case .inline:
                 // 内嵌播放器优先快速、稳定。
-                [112, 80, 64]
+                defaults = [112, 80, 64]
             case .fullscreen:
                 // 全屏时优先尝试更高清晰度,失败或账号权限不足时自动降级。
-                [120, 116, 112, 80, 64]
+                defaults = [120, 116, 112, 80, 64]
             }
+            guard preferredQuality > 0 else { return defaults }
+            let fallback = defaults.filter { $0 < preferredQuality }
+            return [preferredQuality] + fallback
         }
     }
 
-    /// 取单文件 MP4 视频流,用于 MV 模式。全屏路径会优先尝试更高 qn。
-    func videoStream(bvid: String, cid: Int, profile: VideoStreamProfile = .inline) async throws -> URL {
-        for qn in profile.qualityCandidates {
+    static func videoQualityName(_ id: Int) -> String {
+        videoQualityOptions.first(where: { $0.id == id })?.title ?? "\(id)"
+    }
+
+    func videoStreamResult(
+        bvid: String,
+        cid: Int,
+        profile: VideoStreamProfile = .inline,
+        preferredQuality: Int = 0
+    ) async throws -> VideoStream {
+        for qn in profile.qualityCandidates(preferredQuality: preferredQuality) {
             do {
                 let info: VideoPlayInfo = try await get(
                     "https://api.bilibili.com/x/player/playurl?bvid=\(bvid)&cid=\(cid)&qn=\(qn)&fnval=0&fourk=1")
                 if let raw = info.durl?.first?.url, let url = URL(string: raw) {
-                    return url
+                    return VideoStream(url: url, quality: info.quality ?? qn)
                 }
             } catch {
                 continue
             }
         }
         throw APIError(code: -1, message: "无可播放 MP4 视频流")
+    }
+
+    /// 取单文件 MP4 视频流,用于 MV 模式。全屏路径会优先尝试更高 qn。
+    func videoStream(bvid: String, cid: Int, profile: VideoStreamProfile = .inline) async throws -> URL {
+        try await videoStreamResult(bvid: bvid, cid: cid, profile: profile).url
     }
 
     /// 音质 id 的展示名

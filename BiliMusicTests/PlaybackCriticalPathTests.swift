@@ -1,8 +1,14 @@
+import MediaPlayer
 import XCTest
 @testable import BiliMusic
 
 @MainActor
 final class PlaybackCriticalPathTests: XCTestCase {
+    override func tearDown() {
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        super.tearDown()
+    }
+
     func testPlayAssignsCurrentBeforeAwaitedSourceResolutionCompletes() async {
         let track = Self.track()
         let resolver = CriticalPathAudioResolver(
@@ -114,13 +120,46 @@ final class PlaybackCriticalPathTests: XCTestCase {
         XCTAssertGreaterThan(prefetchIndex, firstPlayingIndex)
     }
 
-    private static func track(bvid: String = "BVPATH001", cid: Int? = 1001) -> Track {
+    func testNowPlayingInfoReportsPlayingAfterFirstObservedAudio() async throws {
+        let track = Self.track(title: "【4K修复】Fixture Artist《Critical Path Song》Official MV")
+        let cached = Self.stream(
+            url: URL(fileURLWithPath: "/tmp/critical-path.m4a"),
+            cid: 1001,
+            duration: 211,
+            quality: 30280,
+            bandwidth: 0)
+        let resolver = CriticalPathAudioResolver(
+            cached: cached,
+            prepared: cached)
+        let engine = PlayerEngine(
+            streamResolver: resolver,
+            startupTestHooks: .init(
+                startPlaybackOverride: { _, _, _ in },
+                reportFirstPlayingImmediately: true))
+
+        await engine.play(tracks: [track], startAt: 0)
+
+        let info = try XCTUnwrap(MPNowPlayingInfoCenter.default().nowPlayingInfo)
+        XCTAssertEqual(info[MPMediaItemPropertyTitle] as? String, "Critical Path Song")
+        XCTAssertEqual(info[MPMediaItemPropertyArtist] as? String, "Fixture Artist")
+        XCTAssertEqual(info[MPMediaItemPropertyPlaybackDuration] as? Double, 211)
+        XCTAssertEqual(info[MPNowPlayingInfoPropertyPlaybackRate] as? Double, 1)
+        XCTAssertEqual(info[MPNowPlayingInfoPropertyDefaultPlaybackRate] as? Double, 1)
+        XCTAssertEqual(info[MPNowPlayingInfoPropertyMediaType] as? UInt, MPNowPlayingInfoMediaType.audio.rawValue)
+    }
+
+    private static func track(
+        bvid: String = "BVPATH001",
+        cid: Int? = 1001,
+        title: String = "Critical Path Song",
+        artist: String = "Fixture Artist"
+    ) -> Track {
         Track(
             typeID: 3,
             bvid: bvid,
             cid: cid,
-            title: "Critical Path Song",
-            artist: "Fixture Artist",
+            title: title,
+            artist: artist,
             coverURL: nil,
             duration: cid == nil ? 0 : 211)
     }

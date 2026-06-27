@@ -234,15 +234,12 @@ struct RecommendationEngine {
 
         case .relatedPanel:
             if let current = context.current {
-                candidates += await relatedCandidates(from: [current], source: .relatedCurrent, perSeedLimit: 14)
+                candidates += await relatedCandidates(from: [current], source: .relatedCurrent, perSeedLimit: 24)
                 if candidates.count < 10 {
                     candidates += await artistSearchCandidates(for: current)
                 }
             }
             candidates += playlistNeighborCandidates(current: context.current, playlistTracks: context.playlistTracks, mode: mode)
-            if candidates.count < 12 {
-                candidates += await relatedCandidates(from: Array(snapshot.historyTracks.prefix(1)), source: .relatedHistory, perSeedLimit: 8)
-            }
         }
 
         return candidates

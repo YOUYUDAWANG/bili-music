@@ -17,30 +17,35 @@ struct HomeView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                if let errorMessage {
-                    Text(errorMessage).foregroundStyle(AppTheme.error).font(.caption)
-                }
-                if !tracks.isEmpty {
-                    Section {
-                        ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                            Button {
-                                trackTapTrigger += 1
-                                Task { await engine.play(tracks: tracks, startAt: index) }
-                            } label: {
-                                TrackRow(track: track, isPlaying: engine.current.map { track.key.matches($0) } ?? false)
-                            }
-                            .accessibilityIdentifier("homeTrackRow\(index)")
-                            .buttonStyle(.plain)
-                            .sensoryFeedback(.intent(.lightImpact), trigger: trackTapTrigger)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 22) {
+                    if let errorMessage {
+                        MusicStatusBlock(
+                            systemImage: "exclamationmark.triangle",
+                            title: "推荐暂时不可用",
+                            message: errorMessage
+                        ) {
+                            Text("重试")
+                        } action: {
+                            Task { await load(trigger: .manualRefresh) }
                         }
                     }
+
+                    if !tracks.isEmpty {
+                        featuredSection
+                        queueSection
+                    } else if loading {
+                        MusicLoadingBlock(title: "正在准备音乐推荐...")
+                    } else if errorMessage == nil {
+                        emptyState
+                    }
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 28)
             }
             .accessibilityIdentifier("homeList")
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
-            .background(AppTheme.groupedBackground)
+            .background(AppTheme.groupedBackground.ignoresSafeArea())
             .navigationTitle("推荐")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -66,17 +71,82 @@ struct HomeView: View {
                 }
             }
             .refreshable { await load(trigger: .manualRefresh) }
-            .overlay {
-                if loading && tracks.isEmpty { ProgressView() }
-                else if tracks.isEmpty && errorMessage == nil {
-                    ContentUnavailableView("还没有音乐推荐", systemImage: "music.note.list",
-                                           description: Text(CookieStore.isLoggedIn
-                                               ? "在 B 站收藏些喜欢的歌,这里会按收藏夹给你推荐"
-                                               : "去设置扫码登录,即可用你的收藏夹生成推荐"))
-                }
-            }
             .task {
                 if tracks.isEmpty { await load(trigger: .initialHomeLoad) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var featuredSection: some View {
+        if let first = tracks.first {
+            VStack(alignment: .leading, spacing: 10) {
+                MusicSectionHeader(
+                    title: "为你推荐",
+                    subtitle: loading ? "正在换一批" : "来自你的音乐收藏和相似歌曲",
+                    actionTitle: "换一批"
+                ) {
+                    refreshTrigger += 1
+                    Task { await load(trigger: .manualRefresh) }
+                }
+
+                Button {
+                    trackTapTrigger += 1
+                    Task { await engine.play(tracks: tracks, startAt: 0) }
+                } label: {
+                    FeaturedTrackCard(
+                        track: first,
+                        isPlaying: engine.current.map { first.key.matches($0) } ?? false
+                    )
+                }
+                .accessibilityIdentifier("homeTrackRow0")
+                .buttonStyle(.plain)
+                .sensoryFeedback(.intent(.lightImpact), trigger: trackTapTrigger)
+            }
+        }
+    }
+
+    private var emptyState: some View {
+        MusicStatusBlock(
+            systemImage: "music.note.list",
+            title: "还没有音乐推荐",
+            message: CookieStore.isLoggedIn
+                ? "在 B 站收藏一些喜欢的歌，这里会按你的音乐口味生成推荐。"
+                : "去设置扫码登录，即可用你的收藏夹生成推荐。"
+        ) {
+            Text(CookieStore.isLoggedIn ? "换一批" : "打开设置")
+        } action: {
+            if CookieStore.isLoggedIn {
+                Task { await load(trigger: .manualRefresh) }
+            } else {
+                showSettings = true
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var queueSection: some View {
+        let remaining = Array(tracks.dropFirst())
+        if !remaining.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                MusicSectionHeader(title: "接下来", subtitle: "\(remaining.count) 首歌")
+                LazyVStack(spacing: 8) {
+                    ForEach(Array(remaining.enumerated()), id: \.element.id) { offset, track in
+                        let index = offset + 1
+                        Button {
+                            trackTapTrigger += 1
+                            Task { await engine.play(tracks: tracks, startAt: index) }
+                        } label: {
+                            MusicTrackRow(
+                                track: track,
+                                isPlaying: engine.current.map { track.key.matches($0) } ?? false
+                            )
+                        }
+                        .accessibilityIdentifier("homeTrackRow\(index)")
+                        .buttonStyle(.plain)
+                        .sensoryFeedback(.intent(.lightImpact), trigger: trackTapTrigger)
+                    }
+                }
             }
         }
     }

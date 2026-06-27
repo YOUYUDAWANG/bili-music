@@ -20,13 +20,14 @@ struct SearchView: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            ScrollView {
                 searchContent
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                    .padding(.bottom, 28)
             }
-            .listStyle(.insetGrouped)
             .accessibilityIdentifier("searchList")
-            .scrollContentBackground(.hidden)
-            .background(AppTheme.groupedBackground)
+            .background(AppTheme.groupedBackground.ignoresSafeArea())
             .navigationTitle("搜索")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(
@@ -84,29 +85,32 @@ struct SearchView: View {
 
     @ViewBuilder
     private var searchContent: some View {
-        if trimmedQuery.isEmpty {
-            let content = localContent
-            if content.recentTracks.isEmpty && content.cachedTracks.isEmpty {
-                unavailableRow {
-                    ContentUnavailableView(
-                        "搜索音乐",
+        LazyVStack(alignment: .leading, spacing: 22) {
+            if trimmedQuery.isEmpty {
+                let content = localContent
+                if content.recentTracks.isEmpty && content.cachedTracks.isEmpty {
+                    MusicStatusBlock(
                         systemImage: "magnifyingglass",
-                        description: Text("输入歌名或 UP 主查找音乐内容")
+                        title: "搜索音乐",
+                        message: "输入歌名、艺人或来源，查找适合播放的音乐内容。"
                     )
+                } else {
+                    if !content.historyTerms.isEmpty {
+                        historySection(content.historyTerms)
+                    }
+                    trackSection(title: "最近播放", subtitle: "继续听上次打开过的歌曲", tracks: content.recentTracks)
+                    trackSection(title: "已缓存", subtitle: "离线也能播放", tracks: content.cachedTracks)
                 }
-            } else {
-                trackSection(title: "最近播放", tracks: content.recentTracks)
-                trackSection(title: "本地缓存", tracks: content.cachedTracks)
+            } else if store.searching {
+                loadingRow
+            } else if let errorMessage = store.errorMessage {
+                errorRow(errorMessage)
+            } else if store.shouldShowNoResults(query: query) {
+                noResultsRow
+            } else if store.shouldShowResults(query: query), let sections = store.sections {
+                resultSections(sections)
+                paginationControl
             }
-        } else if store.searching {
-            loadingRow
-        } else if let errorMessage = store.errorMessage {
-            errorRow(errorMessage)
-        } else if store.shouldShowNoResults(query: query) {
-            noResultsRow
-        } else if store.shouldShowResults(query: query), let sections = store.sections {
-            resultSections(sections)
-            paginationControl
         }
     }
 
@@ -137,45 +141,71 @@ struct SearchView: View {
     }
 
     private var loadingRow: some View {
-        HStack(spacing: 10) {
-            ProgressView()
-                .scaleEffect(0.82)
-            Text("正在搜索音乐...")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, minHeight: 68)
-        .listRowSeparator(.hidden)
+        MusicLoadingBlock(title: "正在搜索音乐...")
     }
 
     private func errorRow(_ message: String) -> some View {
-        VStack(spacing: 10) {
-            Text(message)
-                .foregroundStyle(AppTheme.error)
-                .font(.caption)
-                .multilineTextAlignment(.center)
-            Button("重试") {
-                store.retryCurrentSearch { tracks in
-                    engine.preload(tracks: tracks, limit: 2, delay: .milliseconds(500))
-                }
+        MusicStatusBlock(
+            systemImage: "exclamationmark.triangle",
+            title: "搜索失败",
+            message: message
+        ) {
+            Text("重试")
+        } action: {
+            store.retryCurrentSearch { tracks in
+                engine.preload(tracks: tracks, limit: 2, delay: .milliseconds(500))
             }
-            .font(.subheadline.weight(.semibold))
         }
-        .frame(maxWidth: .infinity, minHeight: 96)
-        .listRowSeparator(.hidden)
     }
 
     private var noResultsRow: some View {
-        unavailableRow {
-            ContentUnavailableView {
-                Label("没有找到音乐结果", systemImage: "music.note.list")
-            } description: {
-                Text("当前只显示音乐内容，可以查看更多结果。")
-            } actions: {
-                Button("更多结果") {
-                    store.broadenCurrentSearch { tracks in
-                        engine.preload(tracks: tracks, limit: 2, delay: .milliseconds(500))
+        MusicStatusBlock(
+            systemImage: "music.note.list",
+            title: "没有找到音乐结果",
+            message: "当前只显示音乐内容，可以放宽过滤查看更多结果。"
+        ) {
+            Text("更多结果")
+        } action: {
+            store.broadenCurrentSearch { tracks in
+                engine.preload(tracks: tracks, limit: 2, delay: .milliseconds(500))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func historySection(_ terms: [String]) -> some View {
+        if !terms.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                MusicSectionHeader(title: "最近搜索")
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(terms, id: \.self) { term in
+                            Button {
+                                query = term
+                                submitSearch()
+                            } label: {
+                                Label(term, systemImage: "clock")
+                                    .font(.subheadline)
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 12)
+                                    .frame(height: 34)
+                                    .background(AppTheme.background, in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        Button(role: .destructive) {
+                            store.clearHistory()
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 34, height: 34)
+                                .background(AppTheme.background, in: Circle())
+                        }
+                        .buttonStyle(.plain)
                     }
+                    .padding(.horizontal, 1)
                 }
             }
         }
@@ -184,29 +214,32 @@ struct SearchView: View {
     @ViewBuilder
     private func resultSections(_ sections: SearchResultSections) -> some View {
         if let bestMatch = sections.bestMatch {
-            trackSection(title: "最佳匹配", tracks: [bestMatch])
+            trackSection(title: "最佳匹配", subtitle: nil, tracks: [bestMatch])
         }
-        trackSection(title: "歌曲", tracks: sections.songs)
-        trackSection(title: "MV", tracks: sections.mvs)
+        trackSection(title: "歌曲", subtitle: "\(sections.songs.count) 首", tracks: sections.songs)
+        trackSection(title: "音乐视频", subtitle: "\(sections.mvs.count) 个", tracks: sections.mvs)
     }
 
     @ViewBuilder
-    private func trackSection(title: String, tracks: [Track]) -> some View {
+    private func trackSection(title: String, subtitle: String? = nil, tracks: [Track]) -> some View {
         if !tracks.isEmpty {
-            Section(title) {
-                ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                    Button {
-                        searchResultTapTrigger += 1
-                        if store.shouldShowResults(query: query) {
-                            playSearchResult(track)
-                        } else {
-                            play(tracks: tracks, startAt: index, selected: track)
+            VStack(alignment: .leading, spacing: 10) {
+                MusicSectionHeader(title: title, subtitle: subtitle)
+                LazyVStack(spacing: 8) {
+                    ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                        Button {
+                            searchResultTapTrigger += 1
+                            if store.shouldShowResults(query: query) {
+                                playSearchResult(track)
+                            } else {
+                                play(tracks: tracks, startAt: index, selected: track)
+                            }
+                        } label: {
+                            searchResultRow(track: track)
                         }
-                    } label: {
-                        searchResultRow(track: track)
+                        .buttonStyle(.plain)
+                        .sensoryFeedback(.intent(.lightImpact), trigger: searchResultTapTrigger)
                     }
-                    .buttonStyle(.plain)
-                    .sensoryFeedback(.intent(.lightImpact), trigger: searchResultTapTrigger)
                 }
             }
         }
@@ -214,10 +247,10 @@ struct SearchView: View {
 
     @ViewBuilder
     private var paginationControl: some View {
-        Section {
+        VStack(spacing: 10) {
             if store.loadingMore {
-                ProgressView()
-                    .frame(maxWidth: .infinity, minHeight: 48)
+                MusicLoadingBlock(title: "正在加载更多...")
+                    .frame(minHeight: 96)
             } else if let message = store.loadMoreErrorMessage {
                 VStack(spacing: 8) {
                     Text("加载更多失败")
@@ -235,11 +268,13 @@ struct SearchView: View {
                     } label: {
                         Text("重试加载")
                             .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity, minHeight: 36)
+                            .frame(maxWidth: .infinity, minHeight: 38)
                     }
                     .buttonStyle(.plain)
                 }
-                .frame(maxWidth: .infinity, minHeight: 76)
+                .padding(14)
+                .frame(maxWidth: .infinity, minHeight: 84)
+                .background(AppTheme.background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             } else if store.hasMoreResults {
                 Button {
                     Task {
@@ -251,6 +286,7 @@ struct SearchView: View {
                     Text("加载更多")
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(AppTheme.background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
                 .buttonStyle(.plain)
             } else {
@@ -263,27 +299,12 @@ struct SearchView: View {
     }
 
     private func searchResultRow(track: Track) -> some View {
-        HStack(spacing: 10) {
-            TrackRow(
-                track: track,
-                isPlaying: engine.current.map { track.key.matches($0) } ?? false,
-                showsTrailingIcon: false
-            )
-            if isPreparing(track) {
-                ProgressView()
-                    .scaleEffect(0.75)
-            }
-        }
-        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-        .contentShape(Rectangle())
-    }
-
-    private func unavailableRow<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        content()
-            .frame(maxWidth: .infinity, minHeight: 220)
-            .listRowInsets(EdgeInsets(top: 24, leading: 0, bottom: 24, trailing: 0))
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
+        MusicTrackRow(
+            track: track,
+            isPlaying: engine.current.map { track.key.matches($0) } ?? false,
+            showsMenu: false,
+            isLoading: isPreparing(track)
+        )
     }
 
     private func isPreparing(_ track: Track) -> Bool {

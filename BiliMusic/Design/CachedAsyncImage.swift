@@ -7,6 +7,7 @@ final class ImageMemoryCache {
     static let shared = ImageMemoryCache()
 
     private let cache = NSCache<NSString, UIImage>()
+    private var cacheKeysByCanonicalURL: [String: Set<String>] = [:]
 
     private init() {
         cache.countLimit = 240
@@ -18,7 +19,15 @@ final class ImageMemoryCache {
     }
 
     func image(for url: URL, targetPixelSize: CGSize?) -> UIImage? {
-        cache.object(forKey: Self.cacheKey(for: url, targetPixelSize: targetPixelSize))
+        cache.object(forKey: Self.cacheKey(for: url, targetPixelSize: targetPixelSize) as NSString)
+    }
+
+    func bestImage(forAnyVariantOf url: URL) -> UIImage? {
+        let canonicalURL = Self.canonicalURLKey(for: url)
+        guard let keys = cacheKeysByCanonicalURL[canonicalURL] else { return nil }
+        return keys
+            .compactMap { cache.object(forKey: $0 as NSString) }
+            .max { Self.pixelArea(for: $0) < Self.pixelArea(for: $1) }
     }
 
     func insert(_ image: UIImage, for url: URL, cost: Int? = nil) {
@@ -26,18 +35,22 @@ final class ImageMemoryCache {
     }
 
     func insert(_ image: UIImage, for url: URL, targetPixelSize: CGSize?, cost: Int? = nil) {
+        let key = Self.cacheKey(for: url, targetPixelSize: targetPixelSize)
         cache.setObject(
             image,
-            forKey: Self.cacheKey(for: url, targetPixelSize: targetPixelSize),
+            forKey: key as NSString,
             cost: cost ?? Self.memoryCost(for: image))
+        cacheKeysByCanonicalURL[Self.canonicalURLKey(for: url), default: []].insert(key)
     }
 
     func removeAll() {
         cache.removeAllObjects()
+        cacheKeysByCanonicalURL.removeAll()
     }
 
     func releaseReloadableImages() {
         cache.removeAllObjects()
+        cacheKeysByCanonicalURL.removeAll()
     }
 
     static func memoryCost(for image: UIImage) -> Int {
@@ -61,13 +74,26 @@ final class ImageMemoryCache {
             height: ceil(displaySize.height * scale))
     }
 
-    private static func cacheKey(for url: URL, targetPixelSize: CGSize?) -> NSString {
+    private static func cacheKey(for url: URL, targetPixelSize: CGSize?) -> String {
         guard let targetPixelSize else {
-            return "\(url.absoluteString)#original" as NSString
+            return "\(url.absoluteString)#original"
         }
         let width = max(1, Int(ceil(targetPixelSize.width)))
         let height = max(1, Int(ceil(targetPixelSize.height)))
-        return "\(url.absoluteString)#\(width)x\(height)" as NSString
+        return "\(url.absoluteString)#\(width)x\(height)"
+    }
+
+    private static func canonicalURLKey(for url: URL) -> String {
+        let raw = url.absoluteString
+        guard raw.contains("hdslb.com"),
+              let variantIndex = raw.firstIndex(of: "@") else {
+            return raw
+        }
+        return String(raw[..<variantIndex])
+    }
+
+    private static func pixelArea(for image: UIImage) -> CGFloat {
+        image.size.width * image.scale * image.size.height * image.scale
     }
 }
 
@@ -179,20 +205,37 @@ actor ImageLoadCoordinator {
     }
 }
 
+enum CachedImageDisplayState {
+    static func preferredImage(
+        loadedImage: UIImage?,
+        loadedIdentifier: String?,
+        currentIdentifier: String,
+        fallbackImage: UIImage?
+    ) -> UIImage? {
+        if loadedIdentifier == currentIdentifier, let loadedImage {
+            return loadedImage
+        }
+        return fallbackImage
+    }
+}
+
 struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     let url: URL?
     var headers: [String: String] = BiliClient.headers
     var targetSize: CGSize?
+    var fallbackImage: UIImage?
+    var onImageLoaded: @MainActor (UIImage) -> Void = { _ in }
     @ViewBuilder var content: (Image) -> Content
     @ViewBuilder var placeholder: () -> Placeholder
 
     @Environment(\.displayScale) private var displayScale
     @State private var image: UIImage?
+    @State private var loadedIdentifier: String?
 
     var body: some View {
         Group {
-            if let image {
-                content(Image(uiImage: image))
+            if let displayImage {
+                content(Image(uiImage: displayImage))
             } else {
                 placeholder()
             }
@@ -206,12 +249,17 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     private func load() async {
         guard let url else {
             image = nil
+            loadedIdentifier = nil
             return
         }
+        let identifier = loadIdentifier
         let scale = max(displayScale, 1)
         let targetPixelSize = ImageMemoryCache.targetPixelSize(for: targetSize, scale: scale)
         if let cached = ImageMemoryCache.shared.image(for: url, targetPixelSize: targetPixelSize) {
+            guard identifier == loadIdentifier else { return }
             image = cached
+            loadedIdentifier = identifier
+            onImageLoaded(cached)
             return
         }
         // 不提前清空 image：保留旧图或占位图，避免磁盘缓存命中时的闪烁
@@ -223,8 +271,19 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
               !Task.isCancelled else {
             return
         }
+        guard identifier == loadIdentifier else { return }
         ImageMemoryCache.shared.insert(decoded, for: url, targetPixelSize: targetPixelSize)
         image = decoded
+        loadedIdentifier = identifier
+        onImageLoaded(decoded)
+    }
+
+    private var displayImage: UIImage? {
+        CachedImageDisplayState.preferredImage(
+            loadedImage: image,
+            loadedIdentifier: loadedIdentifier,
+            currentIdentifier: loadIdentifier,
+            fallbackImage: fallbackImage)
     }
 
     private var loadIdentifier: String {

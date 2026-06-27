@@ -13,7 +13,9 @@ struct PlayerIconButton: View {
             Image(systemName: systemName)
                 .font(.system(size: size, weight: .semibold))
                 .frame(width: 56, height: 56)
+                .contentShape(Circle())
         }
+        .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
     }
 }
@@ -128,32 +130,37 @@ private struct PlayerToolbarActionVisual: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(isActive ? AppTheme.accent.opacity(0.14) : Color.primary.opacity(0.055))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Color.primary.opacity(isActive ? 0.12 : 0.06), lineWidth: 1)
-                }
+            if isActive || isBusy {
+                Circle()
+                    .fill(backgroundColor)
+            }
 
             if isBusy {
                 ProgressView()
                     .controlSize(.small)
+                    .tint(foregroundColor)
             } else {
                 Image(systemName: systemName)
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.system(size: 20, weight: isActive ? .semibold : .medium))
                     .contentTransition(.symbolEffect(.replace))
             }
         }
-        .frame(minWidth: 44, maxWidth: .infinity, minHeight: 44)
-        .frame(height: 48)
+        .frame(width: 44, height: 44)
         .foregroundStyle(foregroundColor)
-        .opacity(isEnabled ? 1 : 0.46)
-        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .opacity(isEnabled ? 1 : 0.34)
+        .contentShape(Circle())
+    }
+
+    private var backgroundColor: Color {
+        if isActive {
+            return Color.white.opacity(0.16)
+        }
+        return Color.white.opacity(0.10)
     }
 
     private var foregroundColor: Color {
-        guard isEnabled else { return .secondary }
-        return isActive ? AppTheme.accent : AppTheme.label
+        guard isEnabled else { return Color.white.opacity(0.40) }
+        return isActive ? Color.white : Color.white.opacity(0.76)
     }
 }
 
@@ -184,17 +191,17 @@ struct PlayerProgressBar: View {
             ZStack(alignment: .leading) {
                 // 底槽
                 RoundedRectangle(cornerRadius: 1.5)
-                    .fill(.quaternary)
+                    .fill(Color.white.opacity(0.22))
                     .frame(height: 3)
 
                 // 进度轨
                 RoundedRectangle(cornerRadius: 1.5)
-                    .fill(AppTheme.label)
+                    .fill(Color.white.opacity(0.92))
                     .frame(width: max(0, trackWidth * displayProgress), height: 3)
 
                 // 拇指球
                 Circle()
-                    .fill(AppTheme.label)
+                    .fill(Color.white)
                     .frame(width: 12, height: 12)
                     .offset(x: max(0, trackWidth * displayProgress - 6))
                     .scaleEffect(isScrubbing ? 1.15 : 1.0)
@@ -217,10 +224,14 @@ struct PlayerProgressBar: View {
                 Text(format(engine.duration))
             }
             .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Color.white.opacity(0.58))
         }
         .padding(.horizontal, Metrics.horizontalPadding)
         .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("播放进度")
+        .accessibilityValue("\(format(isScrubbing ? scrubValue : engine.currentTime)) / \(format(engine.duration))")
+        .accessibilityIdentifier("nowPlayingProgress")
         .highPriorityGesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { value in

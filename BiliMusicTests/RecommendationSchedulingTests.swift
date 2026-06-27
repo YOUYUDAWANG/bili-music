@@ -98,6 +98,27 @@ final class RecommendationSchedulingTests: XCTestCase {
         XCTAssertFalse(home.contains("recommendedTracks"))
     }
 
+    func testMVFullscreenChromeCanBeRevealedAboveVideoPlayer() throws {
+        let source = try Self.sourceFile("BiliMusic/Features/Player/PlayerSheetViews.swift")
+        let videoRange = try XCTUnwrap(source.range(of: "VideoPlayer(player: player)"))
+        let tapCatcherRange = try XCTUnwrap(source.range(of: "mvFullscreenTapCatcher"))
+        let chromeRange = try XCTUnwrap(source.range(of: "mvFullscreenChrome"))
+
+        XCTAssertLessThan(videoRange.lowerBound, tapCatcherRange.lowerBound)
+        XCTAssertLessThan(tapCatcherRange.lowerBound, chromeRange.lowerBound)
+        XCTAssertTrue(source.contains(".onTapGesture {\n                        revealChrome()\n                    }"))
+    }
+
+    func testMVFullscreenChromeKeepsCloseAndQualityControlsAddressable() throws {
+        let source = try Self.sourceFile("BiliMusic/Features/Player/PlayerSheetViews.swift")
+
+        XCTAssertTrue(source.contains("mvFullscreenQualityButton"))
+        XCTAssertTrue(source.contains("mvFullscreenCloseButton"))
+        XCTAssertTrue(source.contains("safeAreaInsets.top"))
+        XCTAssertTrue(source.contains("safeAreaInsets.leading"))
+        XCTAssertTrue(source.contains("safeAreaInsets.trailing"))
+    }
+
     private static func sourceFile(_ relativePath: String) throws -> String {
         let testURL = URL(fileURLWithPath: #filePath)
         let rootURL = testURL.deletingLastPathComponent().deletingLastPathComponent()

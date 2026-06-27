@@ -11,6 +11,7 @@ struct SettingsView: View {
     @AppStorage("playbackQuality") private var playbackQuality = 0
     @AppStorage("downloadQuality") private var downloadQuality = 0
     @AppStorage("preferMVOnWiFi") private var preferMVOnWiFi = true
+    @AppStorage(TrackTitleFormatter.cleanListTitlesDefaultsKey) private var cleanListTitles = true
     @AppStorage("recommendFolderId") private var recommendFolderId = 0
     @AppStorage(AudioCDNSelector.preferredHostDefaultsKey) private var preferredAudioCDNHost = ""
     @AppStorage("audioCDNProbeRows") private var audioCDNProbeRowsData = ""
@@ -133,6 +134,10 @@ struct SettingsView: View {
                     Text("进入后台会自动切回纯音乐流,保持锁屏播放体验")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+	                    Toggle("清洗列表标题", isOn: $cleanListTitles)
+	                    Text("列表中去掉 4K、修复、官方 MV 等噪声词,并尽量从标题提取歌手替代 UP 主;关闭后显示 B 站原标题和 UP 主")
+	                        .font(.caption)
+	                        .foregroundStyle(.secondary)
                     NavigationLink {
                         PlaybackHistoryView()
                     } label: {

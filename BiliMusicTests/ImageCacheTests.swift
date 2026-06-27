@@ -122,6 +122,98 @@ final class ImageCacheTests: XCTestCase {
     }
 
     @MainActor
+    func testForegroundRestoreKeepsCurrentArtworkAvailableAfterImageCleanup() async throws {
+        let baseURL = try XCTUnwrap(URL(string: "https://i0.hdslb.com/bfs/archive/current-cover.jpg"))
+        let artworkURL = try XCTUnwrap(URL(string: "https://i0.hdslb.com/bfs/archive/current-cover.jpg@960w_540h_1c.webp"))
+        let targetSize = CGSize(width: 960, height: 540)
+        let image = makeImage(size: targetSize, color: .cyan)
+        let track = makeTrack("BVBG00000003", coverURL: baseURL)
+        let engine = PlayerEngine()
+        engine.installUITestFixture(tracks: [track], startAt: 0)
+
+        ImageMemoryCache.shared.insert(image, for: artworkURL, targetPixelSize: targetSize)
+
+        await engine.handleScenePhase(isBackground: false)
+        ImageMemoryCache.shared.releaseReloadableImages()
+
+        XCTAssertEqual(engine.current?.bvid, track.bvid)
+        XCTAssertEqual(engine.currentCoverImage?.pixelSize, targetSize)
+    }
+
+    @MainActor
+    func testBackgroundCleanupPreservesCurrentArtwork() async throws {
+        let baseURL = try XCTUnwrap(URL(string: "https://i0.hdslb.com/bfs/archive/background-current-cover.jpg"))
+        let artworkURL = try XCTUnwrap(URL(string: "https://i0.hdslb.com/bfs/archive/background-current-cover.jpg@960w_540h_1c.webp"))
+        let targetSize = CGSize(width: 960, height: 540)
+        let image = makeImage(size: targetSize, color: .cyan)
+        let track = makeTrack("BVBG00000005", coverURL: baseURL)
+        let engine = PlayerEngine()
+        engine.installUITestFixture(tracks: [track], startAt: 0)
+
+        ImageMemoryCache.shared.insert(image, for: artworkURL, targetPixelSize: targetSize)
+
+        await AppResourceCleanup.handleBackgrounding(engine: engine)
+
+        XCTAssertNil(ImageMemoryCache.shared.image(for: artworkURL, targetPixelSize: targetSize))
+        XCTAssertEqual(engine.current?.bvid, track.bvid)
+        XCTAssertEqual(engine.currentCoverImage?.pixelSize, targetSize)
+    }
+
+    @MainActor
+    func testBackgroundCleanupPreservesCurrentArtworkFromThumbnailVariant() async throws {
+        let baseURL = try XCTUnwrap(URL(string: "https://i0.hdslb.com/bfs/archive/background-current-thumbnail.jpg"))
+        let thumbnailURL = try XCTUnwrap(URL(string: "https://i0.hdslb.com/bfs/archive/background-current-thumbnail.jpg@150w_85h_1c.webp"))
+        let targetSize = CGSize(width: 150, height: 85)
+        let image = makeImage(size: targetSize, color: .cyan)
+        let track = makeTrack("BVBG00000006", coverURL: baseURL)
+        let engine = PlayerEngine()
+        engine.installUITestFixture(tracks: [track], startAt: 0)
+
+        ImageMemoryCache.shared.insert(image, for: thumbnailURL, targetPixelSize: targetSize)
+
+        await AppResourceCleanup.handleBackgrounding(engine: engine)
+
+        XCTAssertNil(ImageMemoryCache.shared.image(for: thumbnailURL, targetPixelSize: targetSize))
+        XCTAssertEqual(engine.current?.bvid, track.bvid)
+        XCTAssertEqual(engine.currentCoverImage?.pixelSize, targetSize)
+    }
+
+    @MainActor
+    func testBackgroundCleanupUpgradesMiniArtworkBeforeImageRelease() async throws {
+        let baseURL = try XCTUnwrap(URL(string: "https://i0.hdslb.com/bfs/archive/background-current-upgrade.jpg"))
+        let artworkURL = try XCTUnwrap(URL(string: "https://i0.hdslb.com/bfs/archive/background-current-upgrade.jpg@960w_540h_1c.webp"))
+        let miniImage = makeImage(size: CGSize(width: 150, height: 85), color: .green)
+        let largeSize = CGSize(width: 960, height: 540)
+        let largeImage = makeImage(size: largeSize, color: .cyan)
+        let track = makeTrack("BVBG00000007", coverURL: baseURL)
+        let engine = PlayerEngine()
+        engine.installUITestFixture(tracks: [track], startAt: 0)
+
+        engine.rememberCurrentCover(miniImage, for: track)
+        ImageMemoryCache.shared.insert(largeImage, for: artworkURL, targetPixelSize: largeSize)
+
+        await AppResourceCleanup.handleBackgrounding(engine: engine)
+
+        XCTAssertNil(ImageMemoryCache.shared.image(for: artworkURL, targetPixelSize: largeSize))
+        XCTAssertEqual(engine.current?.bvid, track.bvid)
+        XCTAssertEqual(engine.currentCoverImage?.pixelSize, largeSize)
+    }
+
+    @MainActor
+    func testRememberCurrentCoverDoesNotReplaceLargeArtworkWithMiniArtwork() {
+        let track = makeTrack("BVBG00000004")
+        let engine = PlayerEngine()
+        engine.installUITestFixture(tracks: [track], startAt: 0)
+        let large = makeImage(size: CGSize(width: 960, height: 540), color: .blue)
+        let mini = makeImage(size: CGSize(width: 44, height: 25), color: .green)
+
+        engine.rememberCurrentCover(large, for: track)
+        engine.rememberCurrentCover(mini, for: track)
+
+        XCTAssertEqual(engine.currentCoverImage?.pixelSize, large.pixelSize)
+    }
+
+    @MainActor
     func testMemoryWarningHandlerReleasesReloadableImages() {
         let url = URL(string: "https://example.com/memory-warning-cover.jpg")!
         let image = makeImage(size: CGSize(width: 64, height: 36), color: .magenta)
@@ -133,6 +225,54 @@ final class ImageCacheTests: XCTestCase {
         XCTAssertNil(ImageMemoryCache.shared.image(for: url, targetPixelSize: image.pixelSize))
     }
 
+    @MainActor
+    func testMemoryWarningPreservesCurrentArtworkBeforeImageRelease() throws {
+        let baseURL = try XCTUnwrap(URL(string: "https://i0.hdslb.com/bfs/archive/memory-current-cover.jpg"))
+        let thumbnailURL = try XCTUnwrap(URL(string: "https://i0.hdslb.com/bfs/archive/memory-current-cover.jpg@150w_85h_1c.webp"))
+        let targetSize = CGSize(width: 150, height: 85)
+        let image = makeImage(size: targetSize, color: .cyan)
+        let track = makeTrack("BVBG00000008", coverURL: baseURL)
+        let engine = PlayerEngine()
+        engine.installUITestFixture(tracks: [track], startAt: 0)
+
+        ImageMemoryCache.shared.insert(image, for: thumbnailURL, targetPixelSize: targetSize)
+        AppResourceCleanup.handleMemoryWarning(
+            Notification(name: UIApplication.didReceiveMemoryWarningNotification),
+            engine: engine)
+
+        XCTAssertNil(ImageMemoryCache.shared.image(for: thumbnailURL, targetPixelSize: targetSize))
+        XCTAssertEqual(engine.current?.bvid, track.bvid)
+        XCTAssertEqual(engine.currentCoverImage?.pixelSize, targetSize)
+    }
+
+    @MainActor
+    func testCachedAsyncImagePrefersCurrentLoadedImageOverFallback() {
+        let loaded = makeImage(size: CGSize(width: 960, height: 540), color: .blue)
+        let fallback = makeImage(size: CGSize(width: 150, height: 85), color: .green)
+
+        let displayed = CachedImageDisplayState.preferredImage(
+            loadedImage: loaded,
+            loadedIdentifier: "cover#960x540",
+            currentIdentifier: "cover#960x540",
+            fallbackImage: fallback)
+
+        XCTAssertTrue(displayed === loaded)
+    }
+
+    @MainActor
+    func testCachedAsyncImageUsesFallbackInsteadOfLoadedImageForOldIdentifier() {
+        let staleLoaded = makeImage(size: CGSize(width: 960, height: 540), color: .blue)
+        let currentFallback = makeImage(size: CGSize(width: 150, height: 85), color: .green)
+
+        let displayed = CachedImageDisplayState.preferredImage(
+            loadedImage: staleLoaded,
+            loadedIdentifier: "old-cover#960x540",
+            currentIdentifier: "new-cover#960x540",
+            fallbackImage: currentFallback)
+
+        XCTAssertTrue(displayed === currentFallback)
+    }
+
     private func makeImage(size: CGSize, color: UIColor) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
@@ -142,7 +282,7 @@ final class ImageCacheTests: XCTestCase {
         }
     }
 
-    private func makeTrack(_ bvid: String) -> Track {
+    private func makeTrack(_ bvid: String, coverURL: URL? = nil) -> Track {
         Track(
             aid: nil,
             ownerMid: nil,
@@ -150,7 +290,7 @@ final class ImageCacheTests: XCTestCase {
             cid: 1,
             title: "Test Track \(bvid)",
             artist: "Tester",
-            coverURL: nil,
+            coverURL: coverURL,
             duration: 180)
     }
 }

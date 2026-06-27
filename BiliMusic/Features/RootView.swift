@@ -15,10 +15,10 @@ struct RootView: View {
     @Namespace private var playerTransition
 
     private enum Motion {
-        static let open = Animation.smooth(duration: 0.52, extraBounce: 0.055)
-        static let close = Animation.smooth(duration: 0.38, extraBounce: 0.015)
-        static let cancel = Animation.smooth(duration: 0.24, extraBounce: 0)
-        static let closeRemovalDelay: TimeInterval = 0.40
+        static let open = Animation.smooth(duration: 0.46, extraBounce: 0.08)
+        static let close = Animation.smooth(duration: 0.32, extraBounce: 0.02)
+        static let cancel = Animation.smooth(duration: 0.22, extraBounce: 0)
+        static let closeRemovalDelay: TimeInterval = 0.34
     }
 
     var body: some View {
@@ -31,6 +31,8 @@ struct RootView: View {
                     NowPlayingView(
                         onDismiss: { closeFullPlayer() },
                         namespace: playerTransition,
+                        isCoverTransitionSource: showFullPlayer,
+                        coverRevealProgress: renderedPlayerOpenProgress,
                         safeAreaTop: proxy.safeAreaInsets.top
                     )
                         .offset(y: fullPlayerOffset(height: proxy.size.height, safeAreaInsets: proxy.safeAreaInsets))
@@ -60,14 +62,25 @@ struct RootView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .background {
+            switch phase {
+            case .background:
                 Task {
                     await AppResourceCleanup.handleBackgrounding(engine: engine)
                 }
+            case .inactive:
+                Task {
+                    await engine.handleScenePhase(isBackground: true)
+                }
+            case .active:
+                Task {
+                    await engine.handleScenePhase(isBackground: false)
+                }
+            @unknown default:
+                break
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { notification in
-            AppResourceCleanup.handleMemoryWarning(notification)
+            AppResourceCleanup.handleMemoryWarning(notification, engine: engine)
         }
         .task {
             Task(priority: .utility) {
@@ -78,6 +91,11 @@ struct RootView: View {
 #if DEBUG
             if UITestFixtures.enabled {
                 engine.installUITestFixture(tracks: UITestFixtures.homeTracks, startAt: 0)
+                if ProcessInfo.processInfo.environment["BILIMUSIC_UITEST_OPEN_FULL_PLAYER"] != nil {
+                    DispatchQueue.main.async {
+                        openFullPlayer(startProgress: 1)
+                    }
+                }
             }
 #endif
             // 调试用:simctl launch 注入 AUTOPLAY_BV 即可无交互验证播放链路。
@@ -86,6 +104,9 @@ struct RootView: View {
                 PlaybackDiagnostics.DebugRecentEventStore.shared.clear()
 #endif
                 await engine.play(bvid: bv)
+                if ProcessInfo.processInfo.environment["AUTOPLAY_OPEN_FULL_PLAYER"] != nil {
+                    openFullPlayer(startProgress: 1)
+                }
                 NSLog("AUTOPLAY state=\(String(describing: engine.state)) track=\(engine.current?.title ?? "nil")")
 #if DEBUG
                 for event in PlaybackDiagnostics.DebugRecentEventStore.shared.snapshot() {
@@ -193,12 +214,12 @@ struct RootView: View {
 
     private var fullPlayerScaleX: CGFloat {
         guard !reduceMotion else { return 1 }
-        return 0.96 + renderedPlayerOpenProgress * 0.04
+        return 0.985 + renderedPlayerOpenProgress * 0.015
     }
 
     private var fullPlayerScaleY: CGFloat {
         guard !reduceMotion else { return 1 }
-        return 0.98 + renderedPlayerOpenProgress * 0.02
+        return 0.992 + renderedPlayerOpenProgress * 0.008
     }
 
     private func openFullPlayer(startProgress explicitStartProgress: CGFloat? = nil) {
@@ -315,14 +336,16 @@ struct RootView: View {
 @MainActor
 enum AppResourceCleanup {
     static func handleBackgrounding(engine: PlayerEngine) async {
+        engine.restoreCurrentArtworkFromImageCache()
         ImageMemoryCache.shared.releaseReloadableImages()
         await CacheStore.shared.flush()
         await PlaybackHistoryStore.shared.flush()
         await engine.handleScenePhase(isBackground: true)
     }
 
-    static func handleMemoryWarning(_ notification: Notification) {
+    static func handleMemoryWarning(_ notification: Notification, engine: PlayerEngine? = nil) {
         guard notification.name == UIApplication.didReceiveMemoryWarningNotification else { return }
+        engine?.restoreCurrentArtworkFromImageCache()
         ImageMemoryCache.shared.releaseReloadableImages()
     }
 }
@@ -346,25 +369,26 @@ private struct SystemMiniPlayer: View {
         placement == .inline
     }
 
-    var body: some View {
-        let layoutProgress = miniLayoutProgress
-        let accessoryProgress = isFullPlayerPresented || miniOpenDragTranslation != nil
-            ? transitionProgress(openProgress)
-            : 0
+	    var body: some View {
+	        let layoutProgress = miniLayoutProgress
+	        let accessoryProgress = isFullPlayerPresented || miniOpenDragTranslation != nil
+	            ? transitionProgress(openProgress)
+	            : 0
+	        let display = engine.current.map { TrackTitleFormatter.displayMetadata(for: $0, clean: true) }
 
-        HStack(spacing: lerp(7, 9, layoutProgress)) {
+	        HStack(spacing: lerp(7, 9, layoutProgress)) {
             HStack(spacing: lerp(7, 9, layoutProgress)) {
                 artwork(layoutProgress: layoutProgress)
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(engine.current?.title ?? "")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Text(engine.current?.artist ?? "")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+	                    Text(display?.title ?? "")
+	                        .font(.caption.weight(.semibold))
+	                        .foregroundStyle(.primary)
+	                        .lineLimit(1)
+	                        .frame(maxWidth: .infinity, alignment: .leading)
+	                    Text(display?.artist ?? "")
+	                        .font(.caption2)
+	                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .frame(height: 13, alignment: .top)
                         .clipped()
@@ -404,10 +428,10 @@ private struct SystemMiniPlayer: View {
         .frame(height: lerp(40, 48, layoutProgress))
         .contentShape(Rectangle())
         .highPriorityGesture(miniOpenDragGesture, including: .all)
-        .opacity(Double(max(0, 1 - max(0, (accessoryProgress - 0.14) / 0.86))))
+        .opacity(miniPlayerOpacity(accessoryProgress: accessoryProgress))
         .scaleEffect(1 - accessoryProgress * 0.03, anchor: .bottom)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(engine.current?.title ?? "正在播放")
+	        .accessibilityLabel(display?.title ?? "正在播放")
         .accessibilityIdentifier("miniPlayer")
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(.default, openFullPlayer)
@@ -424,21 +448,29 @@ private struct SystemMiniPlayer: View {
     }
 
     private func artwork(layoutProgress: CGFloat) -> some View {
-        Group {
-            if let url = thumbnailURL(engine.current?.coverURL, width: 150, height: 85) {
+        let currentTrack = engine.current
+        return Group {
+            if let url = thumbnailURL(currentTrack?.coverURL, width: 150, height: 85) {
                 CachedAsyncImage(
                     url: url,
-                    targetSize: CGSize(width: 44, height: 25)
+                    targetSize: CGSize(width: 44, height: 25),
+                    fallbackImage: engine.currentCoverImage,
+                    onImageLoaded: { image in
+                        engine.rememberCurrentCover(image, for: currentTrack)
+                    }
                 ) { image in
                     image.resizable().aspectRatio(contentMode: .fill)
                 } placeholder: {
                     artworkPlaceholder
                 }
+            } else if let currentCoverImage = engine.currentCoverImage {
+                Image(uiImage: currentCoverImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
             } else {
                 artworkPlaceholder
             }
         }
-        .matchedGeometryEffect(id: "playerCover", in: namespace)
         .frame(width: lerp(34, 44, layoutProgress), height: lerp(19, 25, layoutProgress))
         .clipShape(RoundedRectangle(cornerRadius: lerp(4, 5, layoutProgress), style: .continuous))
         .overlay {
@@ -486,6 +518,13 @@ private struct SystemMiniPlayer: View {
         .buttonStyle(MiniPlayerControlButtonStyle())
         .accessibilityLabel(accessibilityLabel)
         .sensoryFeedback(.impact(weight: .medium), trigger: trigger.wrappedValue)
+    }
+
+    private func miniPlayerOpacity(accessoryProgress: CGFloat) -> Double {
+        if isFullPlayerPresented {
+            return Double(max(0, 1 - accessoryProgress / 0.58))
+        }
+        return Double(max(0, 1 - max(0, (accessoryProgress - 0.14) / 0.86)))
     }
 
     private var miniOpenDragGesture: some Gesture {

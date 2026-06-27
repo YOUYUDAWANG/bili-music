@@ -67,6 +67,51 @@ struct Track: Identifiable, Equatable, Codable {
     }
 }
 
+enum TrackTitleFormatter {
+    static let cleanListTitlesDefaultsKey = "cleanListTitles"
+    struct DisplayMetadata: Equatable {
+        let title: String
+        let artist: String
+    }
+
+    static var shouldCleanListTitles: Bool {
+        if UserDefaults.standard.object(forKey: cleanListTitlesDefaultsKey) == nil {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: cleanListTitlesDefaultsKey)
+    }
+
+    static func cleanedTitle(_ rawTitle: String) -> String {
+        let parsed = LyricsClient.parseSongForDisplay(from: rawTitle, fallbackArtist: "")
+        let title = parsed.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? rawTitle : title
+    }
+
+    static func listTitle(_ rawTitle: String) -> String {
+        shouldCleanListTitles ? cleanedTitle(rawTitle) : rawTitle
+    }
+
+    static func displayMetadata(for track: Track, clean: Bool = shouldCleanListTitles) -> DisplayMetadata {
+        guard clean else {
+            return DisplayMetadata(title: track.title, artist: track.artist)
+        }
+        let parsed = LyricsClient.parseSongForDisplay(from: track.title, fallbackArtist: track.artist)
+        let parsedTitle = parsed.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parsedArtist = parsed.artist?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return DisplayMetadata(
+            title: parsedTitle.isEmpty ? track.title : parsedTitle,
+            artist: parsedArtist?.isEmpty == false ? parsedArtist! : track.artist)
+    }
+
+    static func listTitle(for track: Track, clean: Bool = shouldCleanListTitles) -> String {
+        displayMetadata(for: track, clean: clean).title
+    }
+
+    static func listArtist(for track: Track, clean: Bool = shouldCleanListTitles) -> String {
+        displayMetadata(for: track, clean: clean).artist
+    }
+}
+
 struct PlaybackSource {
     let track: Track
     let url: URL
@@ -188,6 +233,7 @@ final class PlayerEngine {
     private(set) var videoAvailable = false
     private(set) var currentAudioQuality: Int?
     private(set) var currentAudioBandwidth: Int?
+    private(set) var currentVideoQuality: Int?
     /// 队列推进策略:顺序、随机、单曲循环、电台。
     var queueMode: QueueMode = .sequential
     private(set) var playbackMode: PlaybackMode = .music
@@ -217,7 +263,20 @@ final class PlayerEngine {
     /// 用户意图:是否希望在播放。用来区分「用户主动暂停」与「缓冲断流导致的暂停」——
     /// 后者不该停住,缓冲恢复后要自动续播。
     private var wantsPlayback = false
-    private var coverImage: UIImage?
+    private(set) var coverImage: UIImage?
+    private var coverImageKey: TrackKey?
+    private(set) var artworkPalette = PlayerArtworkPalette.fallback
+    private var artworkPaletteKey: TrackKey?
+    var currentCoverImage: UIImage? {
+        guard let current,
+              coverImageKey?.matches(current) == true else { return nil }
+        return coverImage
+    }
+    var currentArtworkPalette: PlayerArtworkPalette {
+        guard let current,
+              artworkPaletteKey?.matches(current) == true else { return .fallback }
+        return artworkPalette
+    }
     private var playedKeys: Set<TrackKey> = []   // 电台去重
     private var prefetchTask: Task<Void, Never>?
     private var queuePrefetchTask: Task<Void, Never>?
@@ -240,6 +299,7 @@ final class PlayerEngine {
     private struct PreparedVideoStream {
         let url: URL
         let cid: Int
+        let quality: Int
         let fetchedAt: Date
     }
 
@@ -252,7 +312,7 @@ final class PlayerEngine {
         self.streamResolver = streamResolver ?? StreamResolver()
         self.startupTestHooks = startupTestHooks
         Task(priority: .userInitiated) {
-            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+            Self.configureAudioSession()
         }
         _ = NetworkMonitor.shared
         setUpRemoteCommands()
@@ -492,12 +552,22 @@ final class PlayerEngine {
         return raw > 0 ? raw : 30280
     }
 
+    static var mvQuality: Int {
+        UserDefaults.standard.integer(forKey: "mvQuality")
+    }
+
     /// 在播放器里切换音质:写入偏好并按当前进度重取流续播。本地缓存曲目无需切换。
     func setPlaybackQuality(_ id: Int) async {
         UserDefaults.standard.set(id, forKey: "playbackQuality")
         guard let track = current, CacheStore.shared.entry(for: track) == nil else { return }
         streamResolver.invalidateAudio(for: track)
         await startCurrent(resumeAt: currentTime)
+    }
+
+    func setMVQuality(_ id: Int) async {
+        UserDefaults.standard.set(id, forKey: "mvQuality")
+        guard playbackMode == .mv else { return }
+        await reloadCurrentMV(profile: .fullscreen, preferredQuality: id)
     }
 
     func beginScrub() {
@@ -517,6 +587,13 @@ final class PlayerEngine {
     }
 
     func upgradeMVForFullscreen() async {
+        await reloadCurrentMV(profile: .fullscreen, preferredQuality: Self.mvQuality)
+    }
+
+    private func reloadCurrentMV(
+        profile: BiliClient.VideoStreamProfile,
+        preferredQuality: Int = 0
+    ) async {
         guard playbackMode == .mv, var track = current else { return }
         let resumeAt = currentTime
         do {
@@ -527,9 +604,17 @@ final class PlayerEngine {
                 }
             }
             guard let cid = track.cid else { return }
-            let url = try await client.videoStream(bvid: track.bvid, cid: cid, profile: .fullscreen)
+            let stream = try await client.videoStreamResult(
+                bvid: track.bvid,
+                cid: cid,
+                profile: profile,
+                preferredQuality: preferredQuality)
             guard current.map({ track.key.matches($0) }) ?? false, playbackMode == .mv else { return }
-            preparedVideoStreams[track.key] = PreparedVideoStream(url: url, cid: cid, fetchedAt: Date())
+            preparedVideoStreams[track.key] = PreparedVideoStream(
+                url: stream.url,
+                cid: cid,
+                quality: stream.quality,
+                fetchedAt: Date())
             await startCurrent(resumeAt: resumeAt)
         } catch {
             // 全屏提质失败不影响当前 MV 播放。
@@ -537,11 +622,64 @@ final class PlayerEngine {
     }
 
     func handleScenePhase(isBackground: Bool) async {
-        guard isBackground else { return }
+        restoreCurrentArtworkFromImageCache()
+        guard isBackground else {
+            await ensureCurrentArtworkLoaded()
+            return
+        }
         autoMVTask?.cancel()
         guard playbackMode == .mv, state == .playing else { return }
         playbackMode = .music
         await startCurrent(resumeAt: currentTime)
+    }
+
+    func rememberCurrentCover(_ image: UIImage, for track: Track?) {
+        guard let current,
+              let track,
+              track.key.matches(current) else { return }
+        storeCurrentCover(image, for: current)
+    }
+
+    func restoreCurrentArtworkFromImageCache() {
+        guard let current,
+              currentCoverImageNeedsUpgrade,
+              let baseCoverURL = current.coverURL,
+              let coverURL = artworkURL(baseCoverURL) else { return }
+        if let cached = ImageMemoryCache.shared.bestImage(forAnyVariantOf: baseCoverURL)
+            ?? ImageMemoryCache.shared.bestImage(forAnyVariantOf: coverURL) {
+            storeCurrentCover(cached, for: current)
+            return
+        }
+        let targetPixelSize = CGSize(width: 960, height: 540)
+        guard let cached = ImageMemoryCache.shared.image(for: coverURL, targetPixelSize: targetPixelSize) else {
+            return
+        }
+        storeCurrentCover(cached, for: current)
+    }
+
+    private func storeCurrentCover(_ image: UIImage, for track: Track) {
+        let normalized = image.resized(maxDimension: 960)
+        if coverImageKey?.matches(track) == true,
+           let coverImage,
+           Self.pixelArea(of: coverImage) >= Self.pixelArea(of: normalized) {
+            return
+        }
+        coverImage = normalized
+        coverImageKey = track.key
+        artworkPalette = PlayerArtworkPalette.from(normalized)
+        artworkPaletteKey = track.key
+        updateNowPlayingInfo()
+    }
+
+    func ensureCurrentArtworkLoaded() async {
+        guard let track = current,
+              currentCoverImageNeedsUpgrade else { return }
+        await loadCover(for: track, generation: playbackGeneration)
+    }
+
+    private var currentCoverImageNeedsUpgrade: Bool {
+        guard let image = currentCoverImage else { return true }
+        return Self.pixelArea(of: image) < CGFloat(540 * 304)
     }
 
     // MARK: - 播放核心
@@ -562,6 +700,7 @@ final class PlayerEngine {
         videoAvailable = false
         currentAudioQuality = nil
         currentAudioBandwidth = nil
+        currentVideoQuality = nil
         autoMVTask?.cancel()
         postPlaybackTask?.cancel()
         queuePrefetchTask?.cancel()
@@ -580,7 +719,6 @@ final class PlayerEngine {
                 bandwidth: currentAudioBandwidth)
             startupTestHooks.record(.sourceResolved(source.kind))
             startPlayback(source: source, resumeAt: resumeAt, generation: generation)
-            try? AVAudioSession.sharedInstance().setActive(true)
         } catch {
             guard playbackGeneration == generation else { return }
             if playbackMode == .mv {
@@ -617,6 +755,7 @@ final class PlayerEngine {
         videoAvailable = !tracks.isEmpty
         currentAudioQuality = nil
         currentAudioBandwidth = nil
+        currentVideoQuality = nil
         activePlaybackSource = nil
         activePlaybackGeneration = nil
         isMiniPlayerHidden = false
@@ -661,14 +800,19 @@ final class PlayerEngine {
                 queue[queueIndex] = track
             }
             let url: URL
+            let quality: Int
             if let prepared = preparedVideoStream(for: track), prepared.cid == track.cid {
                 url = prepared.url
+                quality = prepared.quality
             } else {
-                url = try await client.videoStream(bvid: track.bvid, cid: track.cid!)
+                let stream = try await client.videoStreamResult(bvid: track.bvid, cid: track.cid!)
+                url = stream.url
+                quality = stream.quality
                 preparedVideoStreams[track.key] = PreparedVideoStream(
-                    url: url, cid: track.cid!, fetchedAt: Date())
+                    url: url, cid: track.cid!, quality: quality, fetchedAt: Date())
             }
             videoAvailable = true
+            currentVideoQuality = quality
             return PlaybackSource(
                 track: track,
                 url: url,
@@ -795,6 +939,7 @@ final class PlayerEngine {
 
     private func schedulePostPlaybackWork(for track: Track, generation: UUID, resumeAt: Double) {
         postPlaybackTask?.cancel()
+        autoMVTask?.cancel()
         let shouldRecordHistory = resumeAt < 1 || !playedKeys.contains(track.key)
         playedKeys.insert(track.key)
         if shouldRecordHistory {
@@ -816,6 +961,12 @@ final class PlayerEngine {
             try? await Task.sleep(for: .milliseconds(900))
             guard self.isCurrent(track, generation: generation) else { return }
             await self.loadLyrics(for: track, generation: generation)
+        }
+        autoMVTask = Task(priority: .utility) { [weak self, track, generation] in
+            try? await Task.sleep(for: .milliseconds(700))
+            guard !Task.isCancelled else { return }
+            self?.startupTestHooks.record(.mvPreparationScheduled)
+            await self?.prepareVideoIfUseful(for: track, generation: generation)
         }
     }
 
@@ -889,8 +1040,10 @@ final class PlayerEngine {
                     // 关键:区分「用户主动暂停」与「缓冲断流」。用户想播却变 paused = 断流,
                     // 显示 loading 而非 paused,等 bufferObserver 在缓冲恢复后续播。
                     self.state = self.wantsPlayback ? .loading : .paused
+                    self.updateNowPlayingInfo()
                 case .waitingToPlayAtSpecifiedRate:
                     self.state = .loading
+                    self.updateNowPlayingInfo()
                 @unknown default:
                     break
                 }
@@ -964,6 +1117,7 @@ final class PlayerEngine {
             player.seek(to: CMTime(seconds: resumeAt, preferredTimescale: 600))
         }
         recordPlayRequested(for: source)
+        Self.activateAudioSession()
         player.playImmediately(atRate: 1)
         scheduleRemoteStartupFallback(for: source, generation: generation, resumeAt: resumeAt)
         updateNowPlayingInfo()
@@ -1034,6 +1188,7 @@ final class PlayerEngine {
         guard playbackGeneration == generation,
               current.map({ source.track.key.matches($0) }) ?? false else { return }
         state = .playing
+        updateNowPlayingInfo()
         remoteStartupFallbackTask?.cancel()
         guard firstPlayingDiagnosticsGeneration != generation else { return }
         firstPlayingDiagnosticsGeneration = generation
@@ -1112,7 +1267,6 @@ final class PlayerEngine {
             startupTestHooks.record(.sourceResolved(retrySource.kind))
             startupTestHooks.record(.preparedStreamRetryRequested)
             startPlayback(source: retrySource, resumeAt: resumeAt.isFinite ? resumeAt : currentTime, generation: generation)
-            try? AVAudioSession.sharedInstance().setActive(true)
         } catch {
             guard playbackGeneration == generation else { return }
             startupTestHooks.record(.failureSurfaced)
@@ -1155,11 +1309,14 @@ final class PlayerEngine {
     }
 
     private func loadCover(for track: Track, generation: UUID) async {
-        coverImage = nil
-        guard let coverURL = artworkURL(track.coverURL) else { return }
-        let targetPixelSize = CGSize(width: 600, height: 600)
+        guard let coverURL = artworkURL(track.coverURL),
+              isCurrent(track, generation: generation) else { return }
+        let targetPixelSize = CGSize(width: 960, height: 540)
         if let cached = ImageMemoryCache.shared.image(for: coverURL, targetPixelSize: targetPixelSize) {
-            coverImage = cached.resized(maxDimension: 600)
+            coverImage = cached.resized(maxDimension: 960)
+            coverImageKey = track.key
+            artworkPalette = PlayerArtworkPalette.from(coverImage)
+            artworkPaletteKey = track.key
             updateNowPlayingInfo()
             return
         }
@@ -1170,7 +1327,10 @@ final class PlayerEngine {
         ) else { return }
         guard playbackGeneration == generation, current.map({ track.key.matches($0) }) ?? false else { return }
         ImageMemoryCache.shared.insert(decoded, for: coverURL, targetPixelSize: targetPixelSize)
-        coverImage = decoded.resized(maxDimension: 600)
+        coverImage = decoded.resized(maxDimension: 960)
+        coverImageKey = track.key
+        artworkPalette = PlayerArtworkPalette.from(coverImage)
+        artworkPaletteKey = track.key
         updateNowPlayingInfo()
     }
 
@@ -1178,7 +1338,11 @@ final class PlayerEngine {
         guard let url else { return nil }
         let raw = url.absoluteString
         guard raw.contains("hdslb.com"), !raw.contains("@") else { return url }
-        return URL(string: raw + "@600w_600h_1c.webp")
+        return URL(string: raw + "@960w_540h_1c.webp")
+    }
+
+    private static func pixelArea(of image: UIImage) -> CGFloat {
+        image.size.width * image.scale * image.size.height * image.scale
     }
 
     private func loadLyrics(for track: Track, generation: UUID) async {
@@ -1191,12 +1355,16 @@ final class PlayerEngine {
 
     private func prepareVideoIfUseful(for track: Track, generation: UUID) async {
         guard playbackMode == .music, let cid = track.cid else { return }
-        let videoURL = try? await client.videoStream(bvid: track.bvid, cid: cid)
+        let videoStream = try? await client.videoStreamResult(bvid: track.bvid, cid: cid)
         guard playbackGeneration == generation, current.map({ track.key.matches($0) }) ?? false else { return }
-        if let videoURL {
-            preparedVideoStreams[track.key] = PreparedVideoStream(url: videoURL, cid: cid, fetchedAt: Date())
+        if let videoStream {
+            preparedVideoStreams[track.key] = PreparedVideoStream(
+                url: videoStream.url,
+                cid: cid,
+                quality: videoStream.quality,
+                fetchedAt: Date())
         }
-        let available = videoURL != nil
+        let available = videoStream != nil
         videoAvailable = available
         if available, shouldAutoSwitchToMV(generation: generation, bvid: track.bvid) {
             playbackMode = .mv
@@ -1242,18 +1410,36 @@ final class PlayerEngine {
         }
     }
 
+    private static func configureAudioSession() {
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+    }
+
+    private static func activateAudioSession() {
+        configureAudioSession()
+        try? AVAudioSession.sharedInstance().setActive(true)
+    }
+
     private func updateNowPlayingInfo() {
         guard let track = current else { return }
+        let metadata = TrackTitleFormatter.displayMetadata(for: track)
         var info: [String: Any] = [
-            MPMediaItemPropertyTitle: track.title,
-            MPMediaItemPropertyArtist: track.artist,
+            MPMediaItemPropertyTitle: metadata.title,
+            MPMediaItemPropertyArtist: metadata.artist,
             MPMediaItemPropertyPlaybackDuration: Double(track.duration),
             MPNowPlayingInfoPropertyElapsedPlaybackTime: currentTime,
             MPNowPlayingInfoPropertyPlaybackRate: state == .playing ? 1.0 : 0.0,
+            MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0,
+            MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
+            MPNowPlayingInfoPropertyPlaybackQueueIndex: queueIndex,
+            MPNowPlayingInfoPropertyPlaybackQueueCount: queue.count,
         ]
         if let coverImage {
             info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: coverImage.size) { _ in coverImage }
         }
+        let center = MPRemoteCommandCenter.shared()
+        center.nextTrackCommand.isEnabled = hasNext
+        center.previousTrackCommand.isEnabled = hasPrevious || currentTime > 3
+        center.changePlaybackPositionCommand.isEnabled = duration > 0
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 }

@@ -160,6 +160,20 @@ enum PlayerGesturePolicy {
             width: width) != nil
     }
 
+    static func shouldSuppressListRowTap(
+        translation: CGSize,
+        predictedEndTranslation: CGSize
+    ) -> Bool {
+        let horizontalIntent = strongerIntent(
+            translation.width,
+            predictedEndTranslation.width)
+        let verticalIntent = strongerIntent(
+            translation.height,
+            predictedEndTranslation.height)
+        guard abs(horizontalIntent) > 10 else { return false }
+        return abs(horizontalIntent) > abs(verticalIntent) * 0.95
+    }
+
     private static func predictedTranslationY(translationY: CGFloat, velocityY: CGFloat) -> CGFloat {
         translationY + velocityY * velocityProjectionTime
     }

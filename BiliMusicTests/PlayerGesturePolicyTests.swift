@@ -143,6 +143,24 @@ final class PlayerGesturePolicyTests: XCTestCase {
             width: 390))
     }
 
+    func testHorizontalListDragSuppressesRowTapWithoutBlockingVerticalScroll() {
+        XCTAssertFalse(PlayerGesturePolicy.shouldSuppressListRowTap(
+            translation: CGSize(width: 6, height: 2),
+            predictedEndTranslation: CGSize(width: 8, height: 3)))
+        XCTAssertFalse(PlayerGesturePolicy.shouldSuppressListRowTap(
+            translation: CGSize(width: 18, height: 42),
+            predictedEndTranslation: CGSize(width: 24, height: 80)))
+        XCTAssertTrue(PlayerGesturePolicy.shouldSuppressListRowTap(
+            translation: CGSize(width: -24, height: 4),
+            predictedEndTranslation: CGSize(width: -58, height: 7)))
+        XCTAssertTrue(PlayerGesturePolicy.shouldSuppressListRowTap(
+            translation: CGSize(width: -12, height: 3),
+            predictedEndTranslation: CGSize(width: -18, height: 4)))
+        XCTAssertTrue(PlayerGesturePolicy.shouldSuppressListRowTap(
+            translation: CGSize(width: 30, height: 22),
+            predictedEndTranslation: CGSize(width: 64, height: 28)))
+    }
+
     func testFullPlayerDismissRequiresDeliberateTopDownDragOrPrediction() {
         XCTAssertEqual(PlayerGesturePolicy.dismissDragOffset(
             translation: CGSize(width: 0, height: 96),
