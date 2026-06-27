@@ -122,6 +122,8 @@ final class PlayerChromeUITests: XCTestCase {
 
         XCTAssertTrue(app.staticTexts["Fixture Song Ten"].waitForExistence(timeout: 2), "Queue side page should allow vertical scrolling to later rows.")
         XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 1), "Vertical queue scrolling should not minimize the full player.")
+        XCTAssertEqual(metadataElement().label, "Fixture Song One", "Vertical queue scrolling should not change the current track.")
+        XCTAssertTrue(waitForPlayerPage("队列"), "Vertical queue scrolling should keep the queue page selected.")
     }
 
     @MainActor
@@ -137,6 +139,26 @@ final class PlayerChromeUITests: XCTestCase {
         dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
 
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 1), "Dragging inside the recommendation list body should not minimize the full player.")
+    }
+
+    @MainActor
+    func testRecommendationSideListScrollsVerticallyWithoutChangingPageOrTrack() throws {
+        try openFullPlayerFromMini()
+        try swipeToPlayerPage(direction: .left)
+
+        let recommendationsPage = element("playerRecommendationsPage")
+        XCTAssertTrue(recommendationsPage.waitForExistence(timeout: 2), "Recommendations page should be visible before testing vertical scrolling.")
+
+        for _ in 0..<3 where !app.staticTexts["Fixture Song Ten"].exists {
+            let dragStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.76))
+            let dragEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.30))
+            dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
+        }
+
+        XCTAssertTrue(app.staticTexts["Fixture Song Ten"].waitForExistence(timeout: 2), "Recommendation side page should allow vertical scrolling to later rows.")
+        XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 1), "Vertical recommendation scrolling should not minimize the full player.")
+        XCTAssertEqual(metadataElement().label, "Fixture Song One", "Vertical recommendation scrolling should not change the current track.")
+        XCTAssertTrue(waitForPlayerPage("推荐"), "Vertical recommendation scrolling should keep the recommendations page selected.")
     }
 
     @MainActor
@@ -166,9 +188,10 @@ final class PlayerChromeUITests: XCTestCase {
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before testing horizontal page ownership.")
 
         try swipeToPlayerPage(direction: .left)
+        try swipeToPlayerPage(direction: .right)
 
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 1), "Horizontal page swipe should not minimize the full player.")
-        XCTAssertTrue(element("playerRecommendationsPage").exists, "Horizontal page swipe should land on the recommendations page.")
+        XCTAssertTrue(element("playerQueuePage").exists, "Horizontal page swipe back should land on the queue page.")
     }
 
     @MainActor
@@ -376,18 +399,18 @@ final class PlayerChromeUITests: XCTestCase {
 
         func leftSwipe() {
             let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
-                .withOffset(CGVector(dx: app.frame.width * 0.74, dy: screenPoint.y))
+                .withOffset(CGVector(dx: app.frame.width * 0.88, dy: screenPoint.y))
             let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
-                .withOffset(CGVector(dx: app.frame.width * 0.22, dy: screenPoint.y))
-            start.press(forDuration: 0.05, thenDragTo: end)
+                .withOffset(CGVector(dx: app.frame.width * 0.08, dy: screenPoint.y))
+            start.press(forDuration: 0.02, thenDragTo: end)
         }
 
         func rightSwipe() {
             let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
-                .withOffset(CGVector(dx: app.frame.width * 0.22, dy: screenPoint.y))
+                .withOffset(CGVector(dx: app.frame.width * 0.12, dy: screenPoint.y))
             let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
-                .withOffset(CGVector(dx: app.frame.width * 0.74, dy: screenPoint.y))
-            start.press(forDuration: 0.05, thenDragTo: end)
+                .withOffset(CGVector(dx: app.frame.width * 0.92, dy: screenPoint.y))
+            start.press(forDuration: 0.02, thenDragTo: end)
         }
     }
 

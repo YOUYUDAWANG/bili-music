@@ -133,6 +133,7 @@ struct NowPlayingView: View {
     }
 
     @State private var selectedPage = PlayerPage.nowPlaying.rawValue
+    @State private var pagedScrollPosition: Int? = PlayerPage.nowPlaying.rawValue
     @State private var recommendedTracks: [Track] = []
     @State private var recommendationsLoading = false
     @State private var recommendationsError: String?
@@ -161,7 +162,6 @@ struct NowPlayingView: View {
     @State private var downloadTrigger = 0
     @State private var isProgressScrubbing = false
     @State private var suppressPageSwipeForScrub = false
-    @State private var pageDragOffset: CGFloat = 0
     @State private var progressScrubGeneration = 0
     @State private var progressFrameInGlobal: CGRect = .null
     @State private var bottomContextFrameInGlobal: CGRect = .null
@@ -358,8 +358,6 @@ struct NowPlayingView: View {
     private func landscapeNowPlayingPage(coverSize: CGFloat) -> some View {
         HStack(spacing: 22) {
             mediaView(coverSize: coverSize)
-                .contentShape(Rectangle())
-                .highPriorityGesture(pageSwipeGesture(width: coverSize), including: .all)
 
             VStack(spacing: 8) {
                 playerMetadata(compact: true)
@@ -383,8 +381,6 @@ struct NowPlayingView: View {
 
             VStack(spacing: 0) {
                 mediaView(coverSize: coverSize)
-                    .contentShape(Rectangle())
-                    .highPriorityGesture(pageSwipeGesture(width: coverSize), including: .all)
                     .padding(.top, topPadding)
                     .padding(.bottom, coverBottomSpacing)
 
@@ -496,31 +492,37 @@ struct NowPlayingView: View {
     }
 
     private func playerPages(coverSize: CGFloat, width: CGFloat, safeAreaTop: CGFloat, isLandscape: Bool) -> some View {
-        HStack(spacing: 0) {
-            horizontalListPage(accessibilityIdentifier: "playerQueuePage") {
-                queueList
-            }
-            .frame(width: width)
+        ScrollView(.horizontal) {
+            LazyHStack(spacing: 0) {
+                horizontalListPage(accessibilityIdentifier: "playerQueuePage") {
+                    queueList
+                }
+                .containerRelativeFrame(.horizontal)
+                .id(PlayerPage.queue.rawValue)
 
-            nowPlayingPage(coverSize: coverSize, isLandscape: isLandscape)
-                .padding(.top, Layout.contentTopInset)
-                .contentShape(Rectangle())
-                .simultaneousGesture(centerBodyDismissDrag, including: .gesture)
-                .frame(width: width)
+                nowPlayingPage(coverSize: coverSize, isLandscape: isLandscape)
+                    .padding(.top, Layout.contentTopInset)
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(centerBodyDismissDrag, including: .gesture)
+                    .containerRelativeFrame(.horizontal)
+                    .id(PlayerPage.nowPlaying.rawValue)
 
-            horizontalListPage(accessibilityIdentifier: "playerRecommendationsPage") {
-                recommendationsList
+                horizontalListPage(accessibilityIdentifier: "playerRecommendationsPage") {
+                    recommendationsList
+                }
+                .containerRelativeFrame(.horizontal)
+                .id(PlayerPage.recommendations.rawValue)
             }
-            .frame(width: width)
+            .scrollTargetLayout()
         }
-        .frame(width: width * CGFloat(PlayerPage.allCases.count), alignment: .leading)
-        .frame(maxHeight: .infinity)
-        .offset(x: -CGFloat(selectedPage) * width + pageDragOffset)
         .frame(width: width, alignment: .leading)
         .frame(maxHeight: .infinity)
         .clipped()
         .contentShape(Rectangle())
-        .simultaneousGesture(pageSwipeGesture(width: width), including: .gesture)
+        .scrollIndicators(.hidden)
+        .scrollTargetBehavior(.paging)
+        .scrollPosition(id: $pagedScrollPosition)
+        .simultaneousGesture(pageSelectionGesture(width: width), including: .gesture)
         .animation(pageTransitionAnimation, value: selectedPage)
         .safeAreaInset(edge: .top, spacing: 0) {
             playerTopChrome(safeAreaTop: safeAreaTop)
@@ -530,6 +532,13 @@ struct NowPlayingView: View {
         }
         .onPreferenceChange(PlayerBottomContextFrameKey.self) { frame in
             bottomContextFrameInGlobal = frame
+        }
+        .onChange(of: pagedScrollPosition) { _, page in
+            selectedPage = page ?? PlayerPage.nowPlaying.rawValue
+        }
+        .onChange(of: selectedPage) { _, page in
+            guard pagedScrollPosition != page else { return }
+            pagedScrollPosition = page
         }
     }
 
@@ -1595,6 +1604,15 @@ struct NowPlayingView: View {
         let currentKey = current.key
         recommendationsLoading = selectedPage == PlayerPage.recommendations.rawValue && recommendedTracks.isEmpty
         defer { recommendationsLoading = false }
+#if DEBUG
+        if UITestFixtures.enabled {
+            let tracks = UITestFixtures.homeTracks.filter { !$0.key.matches(current) }
+            recommendationSeedKey = currentKey
+            recommendedTracks = tracks
+            recommendationsError = tracks.isEmpty ? "没有找到合适的推荐歌曲" : nil
+            return
+        }
+#endif
         let excluded = shownRecommendationKeys.union([currentKey])
         let tracks = await RecommendationEngine().recommendations(
             mode: .relatedPanel,
@@ -1745,55 +1763,12 @@ struct NowPlayingView: View {
         }
     }
 
-    private func pageSwipeGesture(width: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 12, coordinateSpace: .global)
-            .onChanged { value in
-                guard !isProgressGestureStart(value.startLocation) else { return }
-                guard !isProgressScrubbing, !suppressPageSwipeForScrub else { return }
-                guard let offset = pageDragTranslation(value.translation, width: width) else { return }
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) {
-                    pageDragOffset = offset
-                }
-            }
-            .onEnded { value in
-                defer {
-                    animate(pageTransitionAnimation) {
-                        pageDragOffset = 0
-                    }
-                }
-                guard !isProgressGestureStart(value.startLocation) else { return }
-                guard !isProgressScrubbing, !suppressPageSwipeForScrub else { return }
-                guard let horizontalIntent = PlayerGesturePolicy.horizontalPageSwipeIntent(
-                    translation: value.translation,
-                    predictedEndTranslation: value.predictedEndTranslation,
-                    width: width
-                ) else { return }
-
-                suppressListRowActionsBriefly()
-                animate(pageTransitionAnimation) {
-                    if horizontalIntent < 0 {
-                        selectedPage = min(PlayerPage.recommendations.rawValue, selectedPage + 1)
-                    } else {
-                        selectedPage = max(PlayerPage.queue.rawValue, selectedPage - 1)
-                    }
-                }
-            }
-    }
-
-    private func pageDragTranslation(_ translation: CGSize, width: CGFloat) -> CGFloat? {
-        guard width > 0 else { return nil }
-        let horizontal = translation.width
-        let vertical = translation.height
-        guard abs(horizontal) > 10, abs(horizontal) > abs(vertical) * 1.12 else { return nil }
-
-        let minPage = PlayerPage.queue.rawValue
-        let maxPage = PlayerPage.recommendations.rawValue
-        let atLeftEdge = selectedPage == minPage && horizontal > 0
-        let atRightEdge = selectedPage == maxPage && horizontal < 0
-        let resistance: CGFloat = (atLeftEdge || atRightEdge) ? 0.24 : 1
-        return max(-width * 0.86, min(width * 0.86, horizontal * resistance))
+    private func isBottomContextGestureStart(_ location: CGPoint) -> Bool {
+        guard selectedPage == PlayerPage.nowPlaying.rawValue else { return false }
+        guard !bottomContextFrameInGlobal.isNull, !bottomContextFrameInGlobal.isEmpty else { return false }
+        return bottomContextFrameInGlobal
+            .insetBy(dx: -10, dy: -8)
+            .contains(location)
     }
 
     private func isProgressGestureStart(_ location: CGPoint) -> Bool {
@@ -1801,14 +1776,6 @@ struct NowPlayingView: View {
         guard !progressFrameInGlobal.isNull, !progressFrameInGlobal.isEmpty else { return false }
         return progressFrameInGlobal
             .insetBy(dx: -28, dy: -18)
-            .contains(location)
-    }
-
-    private func isBottomContextGestureStart(_ location: CGPoint) -> Bool {
-        guard selectedPage == PlayerPage.nowPlaying.rawValue else { return false }
-        guard !bottomContextFrameInGlobal.isNull, !bottomContextFrameInGlobal.isEmpty else { return false }
-        return bottomContextFrameInGlobal
-            .insetBy(dx: -10, dy: -8)
             .contains(location)
     }
 
@@ -1824,6 +1791,26 @@ struct NowPlayingView: View {
             guard progressScrubGeneration == generation else { return }
             suppressPageSwipeForScrub = false
         }
+    }
+
+    private func pageSelectionGesture(width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 12, coordinateSpace: .global)
+            .onEnded { value in
+                guard !isProgressGestureStart(value.startLocation) else { return }
+                guard !isProgressScrubbing, !suppressPageSwipeForScrub else { return }
+                guard let horizontalIntent = PlayerGesturePolicy.horizontalPageSwipeIntent(
+                    translation: value.translation,
+                    predictedEndTranslation: value.predictedEndTranslation,
+                    width: width
+                ) else { return }
+
+                suppressListRowActionsBriefly()
+                if horizontalIntent < 0 {
+                    selectedPage = min(PlayerPage.recommendations.rawValue, selectedPage + 1)
+                } else {
+                    selectedPage = max(PlayerPage.queue.rawValue, selectedPage - 1)
+                }
+            }
     }
 
     private var centerBodyDismissDrag: some Gesture {
