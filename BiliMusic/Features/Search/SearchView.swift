@@ -9,6 +9,7 @@ import SwiftUI
 
 struct SearchView: View {
     @Environment(PlayerEngine.self) private var engine
+    @Environment(\.isSearching) private var isSearching
     @State private var query = ""
     @State private var store = SearchStore()
     @State private var preparingTrackKey: TrackKey?
@@ -33,16 +34,9 @@ struct SearchView: View {
             .searchable(
                 text: $query,
                 placement: .navigationBarDrawer(displayMode: .automatic),
-                prompt: "歌名或 UP 主"
+                prompt: "歌名或艺人"
             ) {
                 searchSuggestions
-            }
-            .searchScopes(searchModeBinding, activation: .onSearchPresentation) {
-                ForEach(SearchResultMode.allCases) { mode in
-                    Text(mode.title)
-                        .tag(mode)
-                        .accessibilityIdentifier("searchScope_\(mode.rawValue)")
-                }
             }
             .onSubmit(of: .search) {
                 submitSearch()
@@ -88,7 +82,9 @@ struct SearchView: View {
         LazyVStack(alignment: .leading, spacing: 22) {
             if trimmedQuery.isEmpty {
                 let content = localContent
-                if content.recentTracks.isEmpty && content.cachedTracks.isEmpty {
+                if isSearching {
+                    focusedSearchContent(content)
+                } else if content.recentTracks.isEmpty && content.cachedTracks.isEmpty {
                     MusicStatusBlock(
                         systemImage: "magnifyingglass",
                         title: "搜索音乐",
@@ -114,16 +110,6 @@ struct SearchView: View {
         }
     }
 
-    private var searchModeBinding: Binding<SearchResultMode> {
-        Binding {
-            store.mode
-        } set: { mode in
-            store.setMode(mode, query: query)
-            guard !trimmedQuery.isEmpty else { return }
-            submitSearch()
-        }
-    }
-
     @ViewBuilder
     private var searchSuggestions: some View {
         let content = localContent
@@ -137,6 +123,19 @@ struct SearchView: View {
             } label: {
                 Label("清空搜索历史", systemImage: "trash")
             }
+        }
+    }
+
+    @ViewBuilder
+    private func focusedSearchContent(_ content: SearchLocalContent) -> some View {
+        if !content.historyTerms.isEmpty {
+            historySection(content.historyTerms)
+        } else {
+            MusicStatusBlock(
+                systemImage: "clock",
+                title: "还没有搜索历史",
+                message: "输入歌名或艺人后按搜索，结果会从这里开始加载。"
+            )
         }
     }
 
@@ -216,8 +215,8 @@ struct SearchView: View {
         if let bestMatch = sections.bestMatch {
             trackSection(title: "最佳匹配", subtitle: nil, tracks: [bestMatch])
         }
-        trackSection(title: "歌曲", subtitle: "\(sections.songs.count) 首", tracks: sections.songs)
-        trackSection(title: "音乐视频", subtitle: "\(sections.mvs.count) 个", tracks: sections.mvs)
+        let remainingTracks = sections.songs + sections.mvs
+        trackSection(title: "音乐结果", subtitle: "\(remainingTracks.count) 首", tracks: remainingTracks)
     }
 
     @ViewBuilder
@@ -237,7 +236,8 @@ struct SearchView: View {
                         } label: {
                             searchResultRow(track: track)
                         }
-                        .buttonStyle(.plain)
+                        .contentShape(Rectangle())
+                        .buttonStyle(MusicRowButtonStyle())
                         .sensoryFeedback(.intent(.lightImpact), trigger: searchResultTapTrigger)
                     }
                 }

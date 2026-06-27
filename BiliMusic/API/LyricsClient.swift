@@ -40,7 +40,7 @@ struct LyricsClient {
         let confidence: Confidence
 
         var isDisplaySafe: Bool {
-            confidence != .low
+            confidence == .high
         }
     }
 
@@ -394,10 +394,10 @@ struct LyricsClient {
         let comparableFallback = comparableKey(fallback)
 
         if !comparableFallback.isEmpty, comparableBlock == comparableFallback, isSafeStandaloneTitle(rest) {
-            return ParsedSong(title: rest, artist: block, confidence: .medium)
+            return ParsedSong(title: rest, artist: block, confidence: .high)
         }
         if !comparableFallback.isEmpty, comparableRest == comparableFallback, isSafeStandaloneTitle(block) {
-            return ParsedSong(title: block, artist: fallback, confidence: .medium)
+            return ParsedSong(title: block, artist: fallback, confidence: .high)
         }
         return nil
     }

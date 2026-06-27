@@ -107,6 +107,15 @@ final class SearchModelsTests: XCTestCase {
             TrackTitleFormatter.DisplayMetadata(title: "MVP", artist: "Artist"))
     }
 
+    func testTrackTitleFormatterKeepsNoiseOnlyCleanupOutOfDisplay() {
+        let track = Track(typeID: 3, bvid: "BV11", title: "【4K修复】晴天 Official MV", artist: "音乐分享UP",
+                          coverURL: nil, duration: 269)
+
+        XCTAssertEqual(
+            TrackTitleFormatter.displayMetadata(for: track, clean: true),
+            TrackTitleFormatter.DisplayMetadata(title: "【4K修复】晴天 Official MV", artist: "音乐分享UP"))
+    }
+
     func testLyricsClientBuildsBroadDedupedSearchPlans() {
         let client = LyricsClient()
         let artists = client.artistCandidates(parsedArtist: "周杰伦", trackArtist: "音乐分享UP")

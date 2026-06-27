@@ -4,7 +4,7 @@
 
 Bilibili Music 是一个个人自用的 iPhone 音乐客户端，从 B 站内容里提取适合听歌的音频、MV、收藏夹和合集，用接近 Apple Music 的方式播放和管理。它不是完整的 B 站第三方客户端，重点是听歌、本地缓存、搜索音乐、收藏、歌词、队列和推荐。
 
-当前代码已经是一个可运行的 SwiftUI iOS app，接入了 Bilibili 私有 Web API、AVPlayer、本地缓存、收藏夹、歌词和播放器 UI。v1 稳定化已经覆盖首播、搜索、推荐刷新、图片内存、播放器滑动动画和主要手势冲突；下一步应先做最终审计和真机确认，再决定是否进入 v2 的 API/auth/cache/音乐功能打磨。
+当前代码已经是一个可运行的 SwiftUI iOS app，接入了 Bilibili 私有 Web API、AVPlayer、本地缓存、收藏夹、歌词和播放器 UI。v1 稳定化已经覆盖首播、搜索、推荐刷新、图片内存、播放器滑动动画和主要手势冲突；Phase 4 又完成了一轮窄范围 UI 收口，让搜索、列表、播放器工具栏和品牌色更统一。下一步应先做最终真机确认，再决定是否进入 v2 的 API/auth/cache/音乐功能打磨。
 
 ## Core Value
 
@@ -39,6 +39,11 @@ Bilibili Music 是一个个人自用的 iPhone 音乐客户端，从 B 站内容
 - [x] 搜索和推荐默认展示面会继续过滤明显非音乐内容。
 - [x] 播放器下滑最小化、列表滚动、进度条 scrub、左右翻页已有显式手势所有权规则和 compact/modern UI 回归保护。
 - [x] 播放器布局密度已有 `iPhone SE (3rd generation)` 与 `iPhone 16` 的元素存在、顺序、重叠和底部空白边界检查。
+- [x] 搜索页已移除可见 MV/扩展搜索 scope；聚焦空搜索框时只显示搜索历史或历史空状态。
+- [x] 搜索结果行扩大了点击反馈，结果展示合并为最佳匹配和音乐结果。
+- [x] 全局强调色已从粉色调整为更克制的 B 站蓝青，并统一行/卡片选中态。
+- [x] 列表标题清洗已改为高置信结构才展示清洗结果，避免纯噪声去除导致错标题。
+- [x] 播放器工具栏改为更接近 Apple Music 的紧凑分组动作区，MV/音乐切换保留在同一组内。
 
 ### Active
 
@@ -92,7 +97,8 @@ Bilibili Music 是一个个人自用的 iPhone 音乐客户端，从 B 站内容
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
 | 个人自用 iPhone app，而不是公开第三方客户端 | 降低审核、合规、后端和跨平台成本，聚焦真实使用体验 | Good so far |
-| UI 方向从 YouTube Music 转向 Apple Music | Apple Music 的结构更适合个人开发者复刻，也更贴近 iOS 原生音乐使用习惯 | Pending polish |
+| UI 方向从 YouTube Music 转向 Apple Music | Apple Music 的结构更适合个人开发者复刻，也更贴近 iOS 原生音乐使用习惯 | Improving |
+| 强调色从粉色换为 B 站蓝青 | 粉色在播放器和列表里过于跳，蓝青更安静、可长期使用，同时仍保留 B 站识别度 | Implemented |
 | 播放启动优先于所有增强体验 | 用户明确要求“让音乐响起来是第一优先级” | Good so far |
 | 复用 B 站收藏夹和合集，而不是先做自建歌单系统 | 减少数据模型复杂度，利用已有内容组织方式 | Pending stabilization |
 | 歌词优先用在线歌词 API，B 站字幕不作为可靠歌词源 | B 站自动字幕容易出现错误内容和非歌词标记 | Good so far |
@@ -117,4 +123,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state.
 
 ---
-*Last updated: 2026-06-27 after Phase 03 player interaction coverage*
+*Last updated: 2026-06-27 after Phase 04 interface cohesion polish*

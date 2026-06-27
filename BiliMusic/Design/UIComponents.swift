@@ -59,6 +59,15 @@ struct MiniPlayerControlButtonStyle: ButtonStyle {
     }
 }
 
+struct MusicRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .opacity(configuration.isPressed ? 0.78 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
 // MARK: - Music Page Components
 
 struct MusicSectionHeader: View {
@@ -208,7 +217,11 @@ struct FeaturedTrackCard: View {
             .padding(.horizontal, 2)
         }
         .padding(12)
-        .background(AppTheme.secondaryBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(AppTheme.rowBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(isPlaying ? AppTheme.accent.opacity(0.24) : Color.clear, lineWidth: 1)
+        }
         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
@@ -274,7 +287,14 @@ struct MusicTrackRow: View {
         .padding(.vertical, 8)
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
-        .background(AppTheme.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(
+            isPlaying ? AppTheme.accent.opacity(0.12) : AppTheme.rowBackground,
+            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(isPlaying ? AppTheme.accent.opacity(0.20) : Color.clear, lineWidth: 1)
+        }
         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 

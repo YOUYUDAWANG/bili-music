@@ -233,7 +233,7 @@ final class PlayerChromeUITests: XCTestCase {
     }
 
     @MainActor
-    func testSearchTabUsesSystemSearchChrome() throws {
+    func testSearchTabUsesFocusedHistoryWithoutModeScopes() throws {
         app.tabBars.buttons["搜索"].tap()
 
         let searchField = app.searchFields.firstMatch
@@ -241,14 +241,8 @@ final class PlayerChromeUITests: XCTestCase {
         searchField.tap()
         searchField.typeText("a")
 
-        let musicScopeVisible = element("searchScope_music").waitForExistence(timeout: 3)
-            || app.buttons["音乐"].exists
-            || app.staticTexts["音乐"].exists
-        let expandedScopeVisible = element("searchScope_expanded").waitForExistence(timeout: 3)
-            || app.buttons["更多"].exists
-            || app.staticTexts["更多"].exists
-        XCTAssertTrue(musicScopeVisible, "Search should expose a native Music scope.")
-        XCTAssertTrue(expandedScopeVisible, "Search should expose a native expanded-results scope.")
+        XCTAssertFalse(element("searchScope_music").exists, "Search should no longer expose a Music mode scope.")
+        XCTAssertFalse(element("searchScope_expanded").exists, "Search should no longer expose an expanded-results mode scope.")
     }
 
     private func element(_ identifier: String) -> XCUIElement {

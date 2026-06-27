@@ -81,7 +81,7 @@ Deferred items are important, but they should not block v1 stabilization.
 
 ### Visual Polish
 
-- **UI-01**: Full player, mini-player, search, library, favorites, and settings share a cohesive Apple Music-like visual language.
+- **UI-01**: Full player, mini-player, search, library, favorites, and settings share a cohesive Apple Music-like visual language. Phase 4 completed a first cohesion pass for theme color, search chrome, list rows, and player toolbar; deeper cross-page polish remains open.
 - **UI-02**: Lyrics unavailable, MV unavailable/loading, favorite, cache, download failure, and auth-expired states have distinct UI affordances.
 - **UI-03**: Queue and related recommendation pages are polished as left/right player pages with stable empty/loading/error states.
 
@@ -131,6 +131,7 @@ Roadmap mapping is filled during roadmap creation.
 | TEST-03 | Phase 2 | Complete |
 | TEST-04 | Phase 1 | Complete |
 | TEST-05 | Phase 3 | Complete |
+| UI-01 | Phase 4 | Partial |
 
 **Coverage:**
 
@@ -140,4 +141,4 @@ Roadmap mapping is filled during roadmap creation.
 
 ---
 *Requirements defined: 2026-06-26*
-*Last updated: 2026-06-27 after Phase 03 player interaction coverage*
+*Last updated: 2026-06-27 after Phase 04 interface cohesion polish*

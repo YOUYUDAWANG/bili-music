@@ -131,7 +131,7 @@ private struct PlayerToolbarActionVisual: View {
     var body: some View {
         ZStack {
             if isActive || isBusy {
-                Circle()
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(backgroundColor)
             }
 
@@ -141,14 +141,14 @@ private struct PlayerToolbarActionVisual: View {
                     .tint(foregroundColor)
             } else {
                 Image(systemName: systemName)
-                    .font(.system(size: 20, weight: isActive ? .semibold : .medium))
+                    .font(.system(size: 19, weight: isActive ? .semibold : .medium))
                     .contentTransition(.symbolEffect(.replace))
             }
         }
-        .frame(width: 44, height: 44)
+        .frame(width: 44, height: 38)
         .foregroundStyle(foregroundColor)
         .opacity(isEnabled ? 1 : 0.34)
-        .contentShape(Circle())
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private var backgroundColor: Color {

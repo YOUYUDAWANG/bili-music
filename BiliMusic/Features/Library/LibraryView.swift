@@ -168,7 +168,7 @@ private enum CacheSortOrder: String, CaseIterable, Identifiable {
         switch self {
         case .recentlyCached: "最近缓存"
         case .title: "标题"
-        case .artist: "UP 主"
+        case .artist: "艺人/来源"
         case .size: "文件大小"
         case .quality: "音质"
         }

@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 3
-current_phase_name: Player Interaction and Regression Coverage
+current_phase: 4
+current_phase_name: Interface Cohesion and Search Polish
 status: complete
-stopped_at: Completed 03-03-PLAN.md
-last_updated: "2026-06-27T00:23:46Z"
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-06-27T10:30:00Z"
 last_activity: 2026-06-27
-last_activity_desc: Completed 03-03-PLAN.md
+last_activity_desc: Completed 04-01-PLAN.md
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 9
-  completed_plans: 9
+  total_phases: 4
+  completed_phases: 4
+  total_plans: 10
+  completed_plans: 10
   percent: 100
 ---
 
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-27)
 
 **Core value:** 让音乐尽快、稳定地响起来；当功能冲突时，播放启动速度和不中断播放优先于推荐、歌词、MV、UI 动效和其他增强体验。
-**Current focus:** Phase 03 — Player Interaction and Regression Coverage
+**Current focus:** Phase 04 — Interface Cohesion and Search Polish
 
 ## Current Position
 
-Phase: 3 — Player Interaction and Regression Coverage
-Plan: 3 of 3 — 03-03
+Phase: 4 — Interface Cohesion and Search Polish
+Plan: 1 of 1 — 04-01
 Status: Complete
-Last activity: 2026-06-27 — Completed 03-03-PLAN.md
+Last activity: 2026-06-27 — Completed 04-01-PLAN.md
 
 Progress: [##########] 100%
 
@@ -39,7 +39,7 @@ Progress: [##########] 100%
 
 **Velocity:**
 
-- Total plans completed: 11
+- Total plans completed: 12
 - Average duration: 13 min
 - Total execution time: 1.30 hours
 
@@ -50,6 +50,7 @@ Progress: [##########] 100%
 | 1. Playback Critical Path and Responsiveness | 5 | 65 min | 13 min |
 | 2. Discovery Reliability and Music-Only Results | 1 | 13 min | 13 min |
 | 3. Player Interaction and Regression Coverage | 3 planned | - | - |
+| 4. Interface Cohesion and Search Polish | 1 | 30 min | 30 min |
 | 01 | 5 | - | - |
 
 **Recent Trend:**
@@ -94,6 +95,10 @@ Recent decisions affecting current work:
 - [Phase 03-03]: Queue and recommendation list bodies own vertical scroll; minimize is allowed from center body or top chrome only through region-aware `PlayerGesturePolicy`.
 - [Phase 03-03]: Progress scrub owns the full progress block, including label hit targets, so page swipes cannot steal scrub gestures.
 - [Phase 03-03]: Compact and modern player chrome UI suites plus preserved search/playback/recommendation/image regressions form the v1 stabilization gate.
+- [Phase 04-01]: Daily UI polish uses the calmer Bilibili blue-cyan accent instead of pink while keeping Apple Music-style structure.
+- [Phase 04-01]: Search focus shows only local history or an empty-history state; visible search scopes and separate MV search mode are removed from the search chrome.
+- [Phase 04-01]: Display title cleaning is conservative and only applies high-confidence structured parses; broader parsing remains available for lyrics matching.
+- [Phase 04-01]: Player toolbar actions sit in one compact grouped control with a text music/MV toggle and layout spacing protected by the modern bottom-gap UI test.
 
 ### Pending Todos
 
@@ -124,6 +129,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-26T22:42:36.090Z
-Stopped at: Completed 03-03-PLAN.md
-Resume file: .planning/phases/03-player-interaction-and-regression-coverage/03-03-SUMMARY.md
+Last session: 2026-06-27T10:30:00.000Z
+Stopped at: Completed 04-01-PLAN.md
+Resume file: .planning/phases/04-interface-cohesion-and-search-polish/04-01-SUMMARY.md

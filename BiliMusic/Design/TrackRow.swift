@@ -137,7 +137,7 @@ struct TrackRow: View {
     private var rowHighlightFill: Color {
         switch appearance {
         case .standard:
-            return AppTheme.biliPinkSoft
+            return AppTheme.brandSoft
         case .player:
             return AppTheme.accent.opacity(0.14)
         }

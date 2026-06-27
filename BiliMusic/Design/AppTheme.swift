@@ -1,16 +1,18 @@
 import SwiftUI
 import UIKit
 
-/// 全局主题。结构参考 Apple Music 的克制层级，品牌强调色使用 B 站粉。
+/// 全局主题。结构参考 Apple Music 的克制层级，品牌强调色使用更耐看的 B 站蓝青。
 enum AppTheme {
-    static let biliPink = Color(red: 0.984, green: 0.447, blue: 0.600)
-    static let biliPinkDeep = Color(red: 0.914, green: 0.208, blue: 0.408)
-    static let biliPinkSoft = Color(red: 1.000, green: 0.918, blue: 0.944)
-    static let accent = biliPink
+    static let brand = Color(red: 0.000, green: 0.631, blue: 0.839)
+    static let brandPressed = Color(red: 0.000, green: 0.541, blue: 0.753)
+    static let brandSoft = Color(red: 0.906, green: 0.973, blue: 1.000)
+    static let accent = brand
     static let background = Color(uiColor: .systemBackground)
     static let groupedBackground = Color(uiColor: .systemGroupedBackground)
     static let secondaryBackground = Color(uiColor: .secondarySystemGroupedBackground)
     static let elevatedBackground = Color(uiColor: .tertiarySystemGroupedBackground)
+    static let rowBackground = Color(uiColor: .secondarySystemGroupedBackground)
+    static let rowPressedBackground = Color(uiColor: .tertiarySystemGroupedBackground)
     static let separator = Color(uiColor: .separator)
     static let label = Color(uiColor: .label)
     static let secondaryLabel = Color(uiColor: .secondaryLabel)
@@ -30,10 +32,10 @@ enum AppTheme {
     static let miniCoverWidth: CGFloat = 52
     static let miniCoverHeight: CGFloat = 30
 
-    /// 没有封面时的中性兜底背景,带很轻的 B 站粉品牌感。
+    /// 没有封面时的中性兜底背景,带很轻的 B 站蓝青品牌感。
     static let playerGradient = LinearGradient(
         colors: [
-            biliPink.opacity(0.20),
+            brand.opacity(0.18),
             Color(uiColor: .secondarySystemBackground),
             Color(uiColor: .systemBackground)
         ],

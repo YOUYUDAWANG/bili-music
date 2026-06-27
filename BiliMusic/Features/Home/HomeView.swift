@@ -100,7 +100,7 @@ struct HomeView: View {
                     )
                 }
                 .accessibilityIdentifier("homeTrackRow0")
-                .buttonStyle(.plain)
+                .buttonStyle(MusicRowButtonStyle())
                 .sensoryFeedback(.intent(.lightImpact), trigger: trackTapTrigger)
             }
         }
@@ -143,7 +143,7 @@ struct HomeView: View {
                             )
                         }
                         .accessibilityIdentifier("homeTrackRow\(index)")
-                        .buttonStyle(.plain)
+                        .buttonStyle(MusicRowButtonStyle())
                         .sensoryFeedback(.intent(.lightImpact), trigger: trackTapTrigger)
                     }
                 }

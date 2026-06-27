@@ -402,7 +402,7 @@ struct NowPlayingView: View {
             trackedProgressView
 
             transportControls
-                .padding(.top, 34)
+                .padding(.top, 30)
 
             playerToolbar
                 .padding(.top, 42)
@@ -609,7 +609,7 @@ struct NowPlayingView: View {
     }
 
     private var playerToolbar: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 6) {
             lyricsButton
             favoriteButton
             queueModeMenu
@@ -617,7 +617,14 @@ struct NowPlayingView: View {
             mvSwitchButton
             moreMenu
         }
-        .frame(maxWidth: 356)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
+        .background(Color.black.opacity(0.12), in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(Color.white.opacity(0.10), lineWidth: 1)
+        }
+        .frame(maxWidth: 322)
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 18)
         .accessibilityElement(children: .contain)
@@ -732,18 +739,32 @@ struct NowPlayingView: View {
         let canSwitch = isMV || engine.videoAvailable
         let targetMode: PlayerEngine.PlaybackMode = isMV ? .music : .mv
 
-        return PlayerToolbarActionButton(
-            title: isMV ? "音乐" : "MV",
-            systemName: isMV ? "music.note" : "play.rectangle",
-            isActive: isMV,
-            isEnabled: canSwitch,
-            isBusy: switchingMode,
-            accessibilityLabel: canSwitch ? (isMV ? "切回音乐" : "切换 MV") : "暂无 MV",
-            accessibilityValue: mvSwitchAccessibilityValue(canSwitch: canSwitch, isMV: isMV),
-            accessibilityIdentifier: "playerModeSwitchButton"
-        ) {
+        return Button {
+            guard canSwitch, !switchingMode else { return }
             setPlaybackMode(targetMode)
+        } label: {
+            ZStack {
+                Capsule()
+                    .fill(isMV ? Color.white.opacity(0.18) : Color.white.opacity(0.08))
+                if switchingMode {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(Color.white.opacity(0.82))
+                } else {
+                    Text(isMV ? "MV" : "音乐")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(canSwitch ? Color.white.opacity(isMV ? 0.96 : 0.78) : Color.white.opacity(0.36))
+                }
+            }
+            .frame(width: 50, height: 38)
+            .contentShape(Capsule())
         }
+        .buttonStyle(.plain)
+        .disabled(!canSwitch || switchingMode)
+        .opacity(canSwitch ? 1 : 0.45)
+        .accessibilityLabel(canSwitch ? (isMV ? "切回音乐" : "切换 MV") : "暂无 MV")
+        .accessibilityValue(mvSwitchAccessibilityValue(canSwitch: canSwitch, isMV: isMV))
+        .accessibilityIdentifier("playerModeSwitchButton")
     }
 
     private var audioQualityAccessibilityValue: String {
