@@ -287,11 +287,12 @@ struct SearchView: View {
     }
 
     private func searchResultRow(track: Track) -> some View {
-        MusicTrackRow(
+        TrackRow(
             track: track,
             isPlaying: engine.current.map { track.key.matches($0) } ?? false,
-            showsMenu: false,
-            isLoading: isPreparing(track)
+            showsTrailingIcon: false,
+            isLoading: isPreparing(track),
+            appearance: .prominent
         )
     }
 

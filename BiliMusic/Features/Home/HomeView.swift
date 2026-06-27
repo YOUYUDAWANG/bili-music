@@ -137,9 +137,10 @@ struct HomeView: View {
                             trackTapTrigger += 1
                             Task { await engine.play(tracks: tracks, startAt: index) }
                         } label: {
-                            MusicTrackRow(
+                            TrackRow(
                                 track: track,
-                                isPlaying: engine.current.map { track.key.matches($0) } ?? false
+                                isPlaying: engine.current.map { track.key.matches($0) } ?? false,
+                                appearance: .prominent
                             )
                         }
                         .accessibilityIdentifier("homeTrackRow\(index)")

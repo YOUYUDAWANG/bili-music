@@ -320,6 +320,7 @@ struct NowPlayingView: View {
 
             engine.currentArtworkPalette.gradient
                 .opacity(0.92)
+                .animation(.easeInOut(duration: 0.25), value: engine.currentArtworkPalette)
 
             RadialGradient(
                 colors: [

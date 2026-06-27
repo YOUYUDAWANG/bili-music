@@ -230,109 +230,19 @@ struct FeaturedTrackCard: View {
 }
 
 struct MusicTrackRow: View {
-    @Environment(PlayerEngine.self) private var engine
-    @AppStorage(TrackTitleFormatter.cleanListTitlesDefaultsKey) private var cleanListTitles = true
     let track: Track
     var isPlaying = false
     var showsMenu = true
     var isLoading = false
 
     var body: some View {
-        let display = TrackTitleFormatter.displayMetadata(for: track, clean: cleanListTitles)
-        HStack(spacing: 12) {
-            CachedAsyncImage(
-                url: thumbnailURL(track.coverURL, width: 192, height: 108),
-                targetSize: CGSize(width: 72, height: 40.5)
-            ) { image in
-                image.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: {
-                ZStack {
-                    AppTheme.secondaryBackground
-                    Image(systemName: "music.note")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(width: 72, height: 40.5)
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    if isPlaying {
-                        Image(systemName: "waveform")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(AppTheme.accent)
-                    }
-                    Text(display.title)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(2)
-                        .foregroundStyle(isPlaying ? AppTheme.accent : .primary)
-                }
-
-                Text("\(display.artist) · \(MusicFormatters.duration(track.duration))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 8)
-
-            trailingControl
-        }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 10)
-        .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
-        .background {
-            if isPlaying {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(AppTheme.accent.opacity(0.12))
-            }
-        }
-        .contentShape(Rectangle())
-    }
-
-    @ViewBuilder
-    private var trailingControl: some View {
-        if isLoading {
-            ProgressView()
-                .scaleEffect(0.74)
-                .frame(width: 36, height: 36)
-        } else if showsMenu {
-            if isPlaying {
-                Image(systemName: "speaker.wave.2.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(AppTheme.accent)
-                    .frame(width: 36, height: 36)
-            } else {
-                Menu {
-                    Button {
-                        engine.appendToQueue([track])
-                    } label: {
-                        Label("添加到队列", systemImage: "text.badge.plus")
-                    }
-                    Button {
-                        Task { await engine.playRadio(seed: track) }
-                    } label: {
-                        Label("电台播放", systemImage: "antenna.radiowaves.left.and.right")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 36, height: 36)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    private func thumbnailURL(_ url: URL?, width: Int, height: Int) -> URL? {
-        guard let url else { return nil }
-        let raw = url.absoluteString
-        guard !raw.localizedCaseInsensitiveContains("transparent.png") else { return nil }
-        guard raw.contains("hdslb.com"), !raw.contains("@") else { return url }
-        return URL(string: raw + "@\(width)w_\(height)h_1c.webp")
+        TrackRow(
+            track: track,
+            isPlaying: isPlaying,
+            showsTrailingIcon: showsMenu,
+            isLoading: isLoading,
+            appearance: .prominent
+        )
     }
 }
 

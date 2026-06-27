@@ -74,6 +74,13 @@ enum TrackTitleFormatter {
         let artist: String
     }
 
+    struct DisplayMetadataCacheKey: Hashable {
+        let trackKey: TrackKey
+        let clean: Bool
+    }
+
+    private static let displayMetadataCache = DisplayMetadataCache()
+
     static var shouldCleanListTitles: Bool {
         if UserDefaults.standard.object(forKey: cleanListTitlesDefaultsKey) == nil {
             return false
@@ -92,15 +99,23 @@ enum TrackTitleFormatter {
     }
 
     static func displayMetadata(for track: Track, clean: Bool = shouldCleanListTitles) -> DisplayMetadata {
-        guard clean else {
-            return DisplayMetadata(title: track.title, artist: track.artist)
+        let cacheKey = DisplayMetadataCacheKey(trackKey: track.key, clean: clean)
+        if let cached = displayMetadataCache.value(for: cacheKey) {
+            return cached
         }
-        let parsed = LyricsClient.parseSongForDisplay(from: track.title, fallbackArtist: track.artist)
-        let parsedTitle = parsed.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let parsedArtist = parsed.artist?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return DisplayMetadata(
-            title: parsedTitle.isEmpty ? track.title : parsedTitle,
-            artist: parsedArtist?.isEmpty == false ? parsedArtist! : track.artist)
+        let metadata: DisplayMetadata
+        if clean {
+            let parsed = LyricsClient.parseSongForDisplay(from: track.title, fallbackArtist: track.artist)
+            let parsedTitle = parsed.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let parsedArtist = parsed.artist?.trimmingCharacters(in: .whitespacesAndNewlines)
+            metadata = DisplayMetadata(
+                title: parsedTitle.isEmpty ? track.title : parsedTitle,
+                artist: parsedArtist?.isEmpty == false ? parsedArtist! : track.artist)
+        } else {
+            metadata = DisplayMetadata(title: track.title, artist: track.artist)
+        }
+        displayMetadataCache.insert(metadata, for: cacheKey)
+        return metadata
     }
 
     static func listTitle(for track: Track, clean: Bool = shouldCleanListTitles) -> String {
@@ -110,6 +125,67 @@ enum TrackTitleFormatter {
     static func listArtist(for track: Track, clean: Bool = shouldCleanListTitles) -> String {
         displayMetadata(for: track, clean: clean).artist
     }
+
+#if DEBUG
+    static func resetDisplayMetadataCacheForTesting() {
+        displayMetadataCache.reset()
+    }
+
+    static var displayMetadataCacheCountForTesting: Int {
+        displayMetadataCache.count
+    }
+
+    static var displayMetadataCacheMissesForTesting: Int {
+        displayMetadataCache.misses
+    }
+#endif
+}
+
+private final class DisplayMetadataCache {
+    private let lock = NSLock()
+    private var storage: [TrackTitleFormatter.DisplayMetadataCacheKey: TrackTitleFormatter.DisplayMetadata] = [:]
+    private var order: [TrackTitleFormatter.DisplayMetadataCacheKey] = []
+    private let capacity = 256
+    #if DEBUG
+    private(set) var misses = 0
+    #endif
+
+    func value(for key: TrackTitleFormatter.DisplayMetadataCacheKey) -> TrackTitleFormatter.DisplayMetadata? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage[key]
+    }
+
+    func insert(_ value: TrackTitleFormatter.DisplayMetadata, for key: TrackTitleFormatter.DisplayMetadataCacheKey) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard storage[key] == nil else { return }
+        storage[key] = value
+        order.append(key)
+        #if DEBUG
+        misses += 1
+        #endif
+        if order.count > capacity, let oldest = order.first {
+            order.removeFirst()
+            storage.removeValue(forKey: oldest)
+        }
+    }
+
+    #if DEBUG
+    func reset() {
+        lock.lock()
+        defer { lock.unlock() }
+        storage.removeAll(keepingCapacity: true)
+        order.removeAll(keepingCapacity: true)
+        misses = 0
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage.count
+    }
+    #endif
 }
 
 struct PlaybackSource {
@@ -672,6 +748,7 @@ final class PlayerEngine {
     }
 
     private func storeCurrentCover(_ image: UIImage, for track: Track) {
+        guard current.map({ track.key.matches($0) }) ?? false else { return }
         let normalized = image.resized(maxDimension: 960)
         if coverImageKey?.matches(track) == true,
            let coverImage,
@@ -1327,11 +1404,8 @@ final class PlayerEngine {
               isCurrent(track, generation: generation) else { return }
         let targetPixelSize = CGSize(width: 960, height: 540)
         if let cached = ImageMemoryCache.shared.image(for: coverURL, targetPixelSize: targetPixelSize) {
-            coverImage = cached.resized(maxDimension: 960)
-            coverImageKey = track.key
-            artworkPalette = PlayerArtworkPalette.from(coverImage)
-            artworkPaletteKey = track.key
-            updateNowPlayingInfo()
+            guard isCurrent(track, generation: generation) else { return }
+            storeCurrentCover(cached, for: track)
             return
         }
         guard let decoded = await ImageLoadCoordinator.shared.image(
@@ -1339,13 +1413,9 @@ final class PlayerEngine {
             targetPixelSize: targetPixelSize,
             scale: 1
         ) else { return }
-        guard playbackGeneration == generation, current.map({ track.key.matches($0) }) ?? false else { return }
+        guard isCurrent(track, generation: generation) else { return }
         ImageMemoryCache.shared.insert(decoded, for: coverURL, targetPixelSize: targetPixelSize)
-        coverImage = decoded.resized(maxDimension: 960)
-        coverImageKey = track.key
-        artworkPalette = PlayerArtworkPalette.from(coverImage)
-        artworkPaletteKey = track.key
-        updateNowPlayingInfo()
+        storeCurrentCover(decoded, for: track)
     }
 
     private func artworkURL(_ url: URL?) -> URL? {

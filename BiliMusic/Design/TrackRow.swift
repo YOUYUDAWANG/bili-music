@@ -5,6 +5,7 @@ import SwiftUI
 struct TrackRow: View {
     enum Appearance {
         case standard
+        case prominent
         case player
     }
 
@@ -13,14 +14,15 @@ struct TrackRow: View {
     let track: Track
     var isPlaying = false
     var showsTrailingIcon = true
+    var isLoading = false
     var appearance: Appearance = .standard
 
     var body: some View {
         let display = TrackTitleFormatter.displayMetadata(for: track, clean: cleanListTitles)
-        HStack(spacing: 14) {
+        HStack(spacing: metrics.horizontalSpacing) {
             CachedAsyncImage(
-                url: thumbnailURL(track.coverURL, size: 160),
-                targetSize: CGSize(width: 64, height: 36)
+                url: thumbnailURL(track.coverURL, size: metrics.thumbnailWidth),
+                targetSize: CGSize(width: metrics.coverWidth, height: metrics.coverHeight)
             ) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
@@ -31,16 +33,19 @@ struct TrackRow: View {
                         .foregroundStyle(secondaryForeground)
                 }
             }
-            .frame(width: 64, height: 36)
-            .clipShape(RoundedRectangle(cornerRadius: 5))
-            VStack(alignment: .leading, spacing: 4) {
+            .frame(width: metrics.coverWidth, height: metrics.coverHeight)
+            .clipShape(RoundedRectangle(cornerRadius: metrics.coverCornerRadius, style: .continuous))
+
+            VStack(alignment: .leading, spacing: metrics.textSpacing) {
                 Text(displayTitle)
-                    .font(.subheadline)
+                    .font(metrics.titleFont)
                     .lineLimit(2)
                     .foregroundStyle(titleForeground)
                 HStack(spacing: 6) {
                     if isPlaying {
-                        Image(systemName: "waveform").font(.caption2).foregroundStyle(AppTheme.accent)
+                        Image(systemName: "waveform")
+                            .font(metrics.waveformFont)
+                            .foregroundStyle(AppTheme.accent)
                     }
                     Text(display.artist)
                         .lineLimit(1)
@@ -49,16 +54,22 @@ struct TrackRow: View {
                         .font(.caption.monospacedDigit())
                         .fixedSize(horizontal: true, vertical: false)
                 }
-                .font(.caption)
+                .font(metrics.metadataFont)
                 .foregroundStyle(secondaryForeground)
             }
-            Spacer()
+
+            Spacer(minLength: metrics.trailingSpacing)
+
             if showsTrailingIcon {
-                if isPlaying {
+                if isLoading {
+                    ProgressView()
+                        .scaleEffect(metrics.progressScale)
+                        .frame(width: metrics.trailingControlSize, height: metrics.trailingControlSize)
+                } else if isPlaying {
                     Image(systemName: "speaker.wave.2.fill")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(AppTheme.accent)
-                        .frame(width: 44, height: 44)
+                        .frame(width: metrics.trailingControlSize, height: metrics.trailingControlSize)
                 } else {
                     Menu {
                         Button {
@@ -75,18 +86,19 @@ struct TrackRow: View {
                         Image(systemName: "ellipsis")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(trailingForeground)
-                            .frame(width: 44, height: 44)
+                            .frame(width: metrics.trailingControlSize, height: metrics.trailingControlSize)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
             }
         }
-        .padding(.vertical, 5)
-        .padding(.horizontal, 8)
+        .padding(.vertical, metrics.verticalPadding)
+        .padding(.horizontal, metrics.horizontalPadding)
+        .frame(maxWidth: .infinity, minHeight: metrics.minHeight, alignment: .leading)
         .background {
             if isPlaying {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: metrics.highlightCornerRadius, style: .continuous)
                     .fill(rowHighlightFill)
             }
         }
@@ -97,6 +109,8 @@ struct TrackRow: View {
         if isPlaying { return AppTheme.accent }
         switch appearance {
         case .standard:
+            return .primary
+        case .prominent:
             return .primary
         case .player:
             return Color.white.opacity(0.90)
@@ -111,6 +125,8 @@ struct TrackRow: View {
         switch appearance {
         case .standard:
             return .secondary
+        case .prominent:
+            return .secondary
         case .player:
             return Color.white.opacity(0.48)
         }
@@ -119,6 +135,8 @@ struct TrackRow: View {
     private var trailingForeground: Color {
         switch appearance {
         case .standard:
+            return .secondary
+        case .prominent:
             return .secondary
         case .player:
             return Color.white.opacity(0.34)
@@ -129,6 +147,8 @@ struct TrackRow: View {
         switch appearance {
         case .standard:
             return AppTheme.secondaryBackground
+        case .prominent:
+            return AppTheme.secondaryBackground
         case .player:
             return Color.white.opacity(0.08)
         }
@@ -138,8 +158,69 @@ struct TrackRow: View {
         switch appearance {
         case .standard:
             return AppTheme.brandSoft
+        case .prominent:
+            return AppTheme.accent.opacity(0.12)
         case .player:
             return AppTheme.accent.opacity(0.14)
+        }
+    }
+
+    private var metrics: Metrics {
+        switch appearance {
+        case .standard:
+            return Metrics(
+                horizontalSpacing: 14,
+                thumbnailWidth: 160,
+                coverWidth: 64,
+                coverHeight: 36,
+                coverCornerRadius: 5,
+                textSpacing: 4,
+                titleFont: .subheadline,
+                metadataFont: .caption,
+                waveformFont: .caption2,
+                trailingSpacing: 8,
+                trailingControlSize: 44,
+                progressScale: 0.84,
+                verticalPadding: 5,
+                horizontalPadding: 8,
+                minHeight: nil,
+                highlightCornerRadius: 8)
+        case .prominent:
+            return Metrics(
+                horizontalSpacing: 12,
+                thumbnailWidth: 192,
+                coverWidth: 72,
+                coverHeight: 40.5,
+                coverCornerRadius: 6,
+                textSpacing: 4,
+                titleFont: .subheadline.weight(.semibold),
+                metadataFont: .caption,
+                waveformFont: .caption2.weight(.semibold),
+                trailingSpacing: 8,
+                trailingControlSize: 36,
+                progressScale: 0.74,
+                verticalPadding: 8,
+                horizontalPadding: 10,
+                minHeight: 58,
+                highlightCornerRadius: 7)
+        case .player:
+            return Metrics(
+                horizontalSpacing: 14,
+                thumbnailWidth: 160,
+                coverWidth: 64,
+                coverHeight: 36,
+                coverCornerRadius: 5,
+                textSpacing: 4,
+                titleFont: .subheadline,
+                metadataFont: .caption,
+                waveformFont: .caption2,
+                trailingSpacing: 8,
+                trailingControlSize: 44,
+                progressScale: 0.84,
+                verticalPadding: 5,
+                horizontalPadding: 8,
+                minHeight: nil,
+                highlightCornerRadius: 8)
         }
     }
 
@@ -157,4 +238,23 @@ struct TrackRow: View {
         let height = max(1, Int(Double(size) * 9.0 / 16.0))
         return URL(string: raw + "@\(size)w_\(height)h_1c.webp")
     }
+}
+
+private struct Metrics {
+    let horizontalSpacing: CGFloat
+    let thumbnailWidth: Int
+    let coverWidth: CGFloat
+    let coverHeight: CGFloat
+    let coverCornerRadius: CGFloat
+    let textSpacing: CGFloat
+    let titleFont: Font
+    let metadataFont: Font
+    let waveformFont: Font
+    let trailingSpacing: CGFloat
+    let trailingControlSize: CGFloat
+    let progressScale: CGFloat
+    let verticalPadding: CGFloat
+    let horizontalPadding: CGFloat
+    let minHeight: CGFloat?
+    let highlightCornerRadius: CGFloat
 }

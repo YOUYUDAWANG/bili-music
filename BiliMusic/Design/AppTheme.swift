@@ -64,12 +64,13 @@ struct PlayerArtworkPalette: Equatable {
     static func from(_ image: UIImage?) -> PlayerArtworkPalette {
         guard let base = image?.averageColor else { return .fallback }
         let readable = base
-            .boostedSaturation(1.22)
-            .limitedBrightness(maximum: 0.44)
+            .limitedSaturation(maximum: 0.58)
+            .limitedBrightness(maximum: 0.40)
+            .mixed(with: UIColor(red: 0.18, green: 0.20, blue: 0.24, alpha: 1), amount: 0.10)
         return PlayerArtworkPalette(
-            top: readable.mixed(with: .white, amount: 0.10),
-            middle: readable.mixed(with: .black, amount: 0.18),
-            bottom: readable.mixed(with: .black, amount: 0.76)
+            top: readable.mixed(with: .white, amount: 0.14),
+            middle: readable.mixed(with: .black, amount: 0.24),
+            bottom: readable.mixed(with: .black, amount: 0.80)
         )
     }
 
@@ -156,6 +157,22 @@ private extension UIColor {
         return UIColor(
             hue: hue,
             saturation: min(1, saturation * multiplier),
+            brightness: brightness,
+            alpha: alpha
+        )
+    }
+
+    func limitedSaturation(maximum: CGFloat) -> UIColor {
+        var hue: CGFloat = 0
+        var saturation: CGFloat = 0
+        var brightness: CGFloat = 0
+        var alpha: CGFloat = 0
+        guard getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha) else {
+            return self
+        }
+        return UIColor(
+            hue: hue,
+            saturation: min(maximum, max(0.16, saturation)),
             brightness: brightness,
             alpha: alpha
         )
