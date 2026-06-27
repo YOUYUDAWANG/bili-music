@@ -48,6 +48,13 @@ struct SearchView: View {
         }
         .onChange(of: searchHistoryData) {
             store.reloadHistoryIfNeeded()
+            store.refreshLocalContent(history: history, cache: cache)
+        }
+        .onChange(of: history.entries.count) {
+            store.refreshLocalContent(history: history, cache: cache)
+        }
+        .onChange(of: cache.entries.count) {
+            store.refreshLocalContent(history: history, cache: cache)
         }
         .onChange(of: query) { _, newValue in
             store.queryDidChange(newValue)

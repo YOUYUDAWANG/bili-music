@@ -49,3 +49,31 @@ Results:
 
 - `project.pbxproj` needed a minimal update so the new `SearchStoreTests.swift` file is actually part of the test target; otherwise the requested `-only-testing:BiliMusicTests/SearchStoreTests` selector executed zero tests.
 - `localContent` is now a prepared snapshot, so recent/cached sections refresh on explicit load rather than by directly observing the shared stores in the view body. This matches the task goal of keeping first focus local and cheap, but it is less live than the old computed view path.
+
+## Task 5 Fix Report
+
+### Files changed
+
+- `BiliMusic/Features/Search/SearchStore.swift`
+- `BiliMusic/Features/Search/SearchView.swift`
+- `BiliMusicTests/SearchStoreTests.swift`
+- `.superpowers/sdd/task-5-report.md`
+
+### Commands run
+
+```bash
+xcodebuild test -project BiliMusic.xcodeproj -scheme BiliMusic -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:BiliMusicTests/SearchStoreTests
+xcodebuild test -project BiliMusic.xcodeproj -scheme BiliMusic -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:BiliMusicTests/SearchModelsTests
+xcodebuild test -project BiliMusic.xcodeproj -scheme BiliMusic -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:BiliMusicTests/SearchStoreTests
+```
+
+### Results
+
+- `SearchStoreTests`: initial requested run failed before the bundle connected to the simulator (`Early unexpected exit, operation never finished bootstrapping`); immediate rerun passed `4/4`.
+- `SearchModelsTests`: passed `22/22`.
+
+### Self-review
+
+- `SearchStore.localContent` is still precomputed and local, but now refreshes recent-playback and cached-track snapshots through explicit store refreshes and cheap count-based view triggers instead of staying stale for the lifetime of `SearchView`.
+- `queryDidChange("")` no longer clears prepared results or sections, so focusing or returning to an empty query stays local and does not destroy already-loaded search state.
+- The search-field focus path still avoids synchronous recent/cache scans in the SwiftUI body and still does not trigger Bilibili search work outside explicit submit/retry/pagination flows.

@@ -99,18 +99,22 @@ final class SearchStore {
         await loadHistory()
         await history.loadIfNeeded()
         await cache.loadIfNeeded()
+        refreshLocalContent(history: history, cache: cache)
+    }
+
+    func refreshLocalContent(history: PlaybackHistoryStore, cache: CacheStore) {
         localContent = SearchLocalContent(
             historyTerms: searchHistory,
-            recentTracks: Array(history.entries.prefix(6).map(\.track)),
-            cachedTracks: Array(cache.entries.prefix(6).map(\.track)))
+            recentTracks: history.entries.map(\.track),
+            cachedTracks: cache.entries.map(\.track))
     }
 
     func queryDidChange(_ query: String) {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty {
-            guard mode != .music || !resultsQuery.isEmpty || !results.isEmpty || !activeQuery.isEmpty else { return }
-            mode = .music
-            resetTransientState(cancelTask: true)
+            if mode != .music {
+                mode = .music
+            }
         } else if text != resultsQuery {
             let shouldReset = !resultsQuery.isEmpty || !results.isEmpty || !activeQuery.isEmpty
             if mode != .music {

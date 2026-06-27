@@ -66,7 +66,7 @@ final class SearchStoreTests: XCTestCase {
     }
 
     @MainActor
-    func testEmptyQueryReadsPreparedLocalSnapshotWithoutStartingSearch() async {
+    func testRefreshLocalContentUpdatesRecentAndCachedTracksAfterStoreChanges() async {
         let previousHistory = UserDefaults.standard.string(forKey: historyKey)
         let history = PlaybackHistoryStore.shared
         let cache = CacheStore.shared
@@ -80,21 +80,51 @@ final class SearchStoreTests: XCTestCase {
         history.record(makeTrack(bvid: "BVRECENT001", title: "最近播放"))
         cache.add(makeCachedEntry(track: makeTrack(bvid: "BVCACHE001", title: "已缓存")))
 
+        let store = SearchStore()
+        await store.loadLocalContent(history: history, cache: cache)
+
+        history.record(makeTrack(bvid: "BVRECENT002", title: "新的最近播放"))
+        cache.add(makeCachedEntry(track: makeTrack(bvid: "BVCACHE002", title: "新的已缓存")))
+
+        store.refreshLocalContent(history: history, cache: cache)
+
+        XCTAssertEqual(store.localContent.historyTerms, ["晴天"])
+        XCTAssertEqual(store.localContent.recentTracks.map(\.bvid), ["BVRECENT002", "BVRECENT001"])
+        XCTAssertEqual(store.localContent.cachedTracks.map(\.bvid), ["BVCACHE002", "BVCACHE001"])
+    }
+
+    @MainActor
+    func testEmptyQueryDoesNotClearPreparedResultsOrStartSearch() async {
+        let previousHistory = UserDefaults.standard.string(forKey: historyKey)
+        let history = PlaybackHistoryStore.shared
+        let cache = CacheStore.shared
+        await prepareSharedLocalStores(history: history, cache: cache)
+        defer {
+            restoreSearchHistory(previousHistory)
+            resetSharedLocalStores(history: history, cache: cache)
+        }
+
+        UserDefaults.standard.set(#"["晴天"]"#, forKey: historyKey)
+        history.record(makeTrack(bvid: "BVRECENT001", title: "最近播放"))
+        cache.add(makeCachedEntry(track: makeTrack(bvid: "BVCACHE001", title: "已缓存")))
+
+        let expected = makeTrack(bvid: "BVRESULT001", title: "已准备结果")
         let store = SearchStore(searchPageForTesting: { _, _, _ in
             XCTFail("queryDidChange on an empty query should stay local and idle")
             return []
         })
         await store.loadLocalContent(history: history, cache: cache)
+        restoreSearch(store, query: "晴天", tracks: [expected], nextPage: 4, hasMoreResults: true)
         let prepared = store.localContent
 
         store.queryDidChange("")
 
         XCTAssertEqual(store.localContent, prepared)
         XCTAssertFalse(store.searching)
-        XCTAssertTrue(store.results.isEmpty)
-        XCTAssertNil(store.sections)
-        XCTAssertEqual(store.resultsQuery, "")
-        XCTAssertEqual(store.activeQuery, "")
+        XCTAssertEqual(store.results.map(\.bvid), ["BVRESULT001"])
+        XCTAssertNotNil(store.sections)
+        XCTAssertEqual(store.resultsQuery, "晴天")
+        XCTAssertEqual(store.activeQuery, "晴天")
     }
 
     @MainActor
