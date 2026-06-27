@@ -76,7 +76,7 @@ enum TrackTitleFormatter {
 
     static var shouldCleanListTitles: Bool {
         if UserDefaults.standard.object(forKey: cleanListTitlesDefaultsKey) == nil {
-            return true
+            return false
         }
         return UserDefaults.standard.bool(forKey: cleanListTitlesDefaultsKey)
     }

@@ -61,6 +61,28 @@ final class SearchModelsTests: XCTestCase {
             TrackTitleFormatter.DisplayMetadata(title: "【4K修复】周杰伦《晴天》Official MV", artist: "音乐UP"))
     }
 
+    func testTrackTitleFormatterDefaultsToOriginalTitles() {
+        let defaults = UserDefaults.standard
+        let key = TrackTitleFormatter.cleanListTitlesDefaultsKey
+        let previous = defaults.object(forKey: key)
+        defaults.removeObject(forKey: key)
+        defer {
+            if let previous {
+                defaults.set(previous, forKey: key)
+            } else {
+                defaults.removeObject(forKey: key)
+            }
+        }
+
+        let track = Track(typeID: 193, bvid: "BV12", title: "【4K修复】周杰伦《晴天》Official MV", artist: "音乐UP",
+                          coverURL: nil, duration: 269)
+
+        XCTAssertFalse(TrackTitleFormatter.shouldCleanListTitles)
+        XCTAssertEqual(
+            TrackTitleFormatter.displayMetadata(for: track),
+            TrackTitleFormatter.DisplayMetadata(title: "【4K修复】周杰伦《晴天》Official MV", artist: "音乐UP"))
+    }
+
     func testTrackTitleFormatterKeepsAmbiguousTitlesUnchanged() {
         let commentary = Track(typeID: 3, bvid: "BV5", title: "【乐评】周杰伦晴天到底好在哪里", artist: "音乐杂谈UP",
                                coverURL: nil, duration: 360)
