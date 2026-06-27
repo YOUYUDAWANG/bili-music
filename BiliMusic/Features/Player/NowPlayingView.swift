@@ -409,11 +409,15 @@ struct NowPlayingView: View {
             transportControls
                 .padding(.top, isCompact ? 24 : 28)
 
-            playerToolbar
-                .padding(.top, isCompact ? 20 : 24)
+            VStack(spacing: 0) {
+                playerToolbarButtons
+                    .padding(.top, isCompact ? 20 : 24)
 
-            bottomContextListPanel(maxRows: isCompact ? 3 : 5)
-                .padding(.top, isCompact ? 12 : 16)
+                bottomContextListPanel(maxRows: isCompact ? 3 : 5)
+                    .padding(.top, isCompact ? 12 : 16)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("playerToolbar")
         }
     }
 
@@ -424,8 +428,10 @@ struct NowPlayingView: View {
             transportControls
                 .padding(.top, compact ? -6 : -2)
 
-            playerToolbar
+            playerToolbarButtons
                 .padding(.top, compact ? -2 : 2)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("playerToolbar")
         }
         .padding(.bottom, 2)
     }
@@ -619,7 +625,7 @@ struct NowPlayingView: View {
         .foregroundStyle(Color.white.opacity(0.94))
     }
 
-    private var playerToolbar: some View {
+    private var playerToolbarButtons: some View {
         HStack(spacing: 22) {
             favoriteButton
             downloadButton
@@ -629,8 +635,6 @@ struct NowPlayingView: View {
         .frame(maxWidth: 262)
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 18)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("playerToolbar")
     }
 
     private var favoriteButton: some View {
@@ -1196,12 +1200,14 @@ struct NowPlayingView: View {
                         .foregroundStyle(PlayerSurface.secondaryText)
                 }
 
-                VStack(spacing: 0) {
-                    ForEach(previewItems) { item in
-                        guardedPlayerRowButton {
-                            Task { await playCurrentPlaylistTrack(at: item.index) }
-                        } label: {
-                            compactPlaylistRow(track: item.track, index: item.index)
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(spacing: 0) {
+                        ForEach(previewItems) { item in
+                            guardedPlayerRowButton {
+                                Task { await playCurrentPlaylistTrack(at: item.index) }
+                            } label: {
+                                compactPlaylistRow(track: item.track, index: item.index)
+                            }
                         }
                     }
                 }
@@ -1270,16 +1276,18 @@ struct NowPlayingView: View {
                     .accessibilityLabel("查看完整合集")
                 }
 
-                VStack(spacing: 0) {
-                    ForEach(previewItems) { item in
-                        guardedPlayerRowButton {
-                            Task { await playCurrentPlaylistTrack(at: item.index) }
-                        } label: {
-                            compactPlaylistRow(track: item.track, index: item.index)
-                        }
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(spacing: 0) {
+                        ForEach(previewItems) { item in
+                            guardedPlayerRowButton {
+                                Task { await playCurrentPlaylistTrack(at: item.index) }
+                            } label: {
+                                compactPlaylistRow(track: item.track, index: item.index)
+                            }
 
-                        if item.index != previewItems.last?.index {
-                            playerDivider.padding(.leading, 34)
+                            if item.index != previewItems.last?.index {
+                                playerDivider.padding(.leading, 34)
+                            }
                         }
                     }
                 }
@@ -1644,16 +1652,6 @@ struct NowPlayingView: View {
     private func playCurrentPlaylistTrack(at index: Int) async {
         guard currentPlaylistTracks.indices.contains(index) else { return }
         await engine.play(tracks: currentPlaylistTracks, startAt: index, queueMode: .sequential)
-    }
-
-    private func scrollCurrentPlaylist(_ proxy: ScrollViewProxy) {
-        guard let currentId = engine.current?.id,
-              currentPlaylistTracks.contains(where: { $0.id == currentId }) else { return }
-        DispatchQueue.main.async {
-            animate(.easeInOut(duration: 0.2)) {
-                proxy.scrollTo(currentId, anchor: .center)
-            }
-        }
     }
 
     private func scrollCurrentQueue(_ proxy: ScrollViewProxy) {
