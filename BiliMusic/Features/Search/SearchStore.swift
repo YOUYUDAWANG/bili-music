@@ -52,6 +52,7 @@ final class SearchStore {
     private(set) var loadingMore = false
     private(set) var mode: SearchResultMode = .music
     private(set) var activeQuery = ""
+    private(set) var localContent = SearchLocalContent(historyTerms: [], recentTracks: [], cachedTracks: [])
 
     private var searchTask: Task<Void, Never>?
     private var activeSearchID = UUID()
@@ -76,6 +77,7 @@ final class SearchStore {
         let raw = UserDefaults.standard.string(forKey: historyKey) ?? "[]"
         searchHistory = await Self.decodeSearchHistory(raw)
         historyLoaded = true
+        refreshLocalContentHistory()
     }
 
     func reloadHistoryIfNeeded() {
@@ -83,12 +85,24 @@ final class SearchStore {
         let raw = UserDefaults.standard.string(forKey: historyKey) ?? "[]"
         Task {
             searchHistory = await Self.decodeSearchHistory(raw)
+            refreshLocalContentHistory()
         }
     }
 
     func clearHistory() {
         searchHistory = []
+        refreshLocalContentHistory()
         UserDefaults.standard.set("[]", forKey: historyKey)
+    }
+
+    func loadLocalContent(history: PlaybackHistoryStore, cache: CacheStore) async {
+        await loadHistory()
+        await history.loadIfNeeded()
+        await cache.loadIfNeeded()
+        localContent = SearchLocalContent(
+            historyTerms: searchHistory,
+            recentTracks: Array(history.entries.prefix(6).map(\.track)),
+            cachedTracks: Array(cache.entries.prefix(6).map(\.track)))
     }
 
     func queryDidChange(_ query: String) {
@@ -295,10 +309,18 @@ final class SearchStore {
         items.insert(text, at: 0)
         items = Array(items.prefix(20))
         searchHistory = items
+        refreshLocalContentHistory()
         if let data = try? JSONEncoder().encode(items),
            let string = String(data: data, encoding: .utf8) {
             UserDefaults.standard.set(string, forKey: historyKey)
         }
+    }
+
+    private func refreshLocalContentHistory() {
+        localContent = SearchLocalContent(
+            historyTerms: searchHistory,
+            recentTracks: localContent.recentTracks,
+            cachedTracks: localContent.cachedTracks)
     }
 
     private func search(text: String, mode requestMode: SearchResultMode, searchID: UUID, preload: @escaping @MainActor ([Track]) -> Void) async {

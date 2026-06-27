@@ -44,11 +44,7 @@ struct SearchView: View {
             .scrollDismissesKeyboard(.immediately)
         }
         .task {
-            await store.loadHistory()
-            Task(priority: .background) {
-                await history.loadIfNeeded()
-                await cache.loadIfNeeded()
-            }
+            await store.loadLocalContent(history: history, cache: cache)
         }
         .onChange(of: searchHistoryData) {
             store.reloadHistoryIfNeeded()
@@ -62,26 +58,11 @@ struct SearchView: View {
         query.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var recentTracks: [Track] {
-        Array(history.entries.prefix(6).map(\.track))
-    }
-
-    private var cachedTracks: [Track] {
-        Array(cache.entries.prefix(6).map(\.track))
-    }
-
-    private var localContent: SearchLocalContent {
-        SearchLocalContent(
-            historyTerms: store.searchHistory,
-            recentTracks: recentTracks,
-            cachedTracks: cachedTracks)
-    }
-
     @ViewBuilder
     private var searchContent: some View {
         LazyVStack(alignment: .leading, spacing: 22) {
             if trimmedQuery.isEmpty {
-                let content = localContent
+                let content = store.localContent
                 if isSearching {
                     focusedSearchContent(content)
                 } else if content.recentTracks.isEmpty && content.cachedTracks.isEmpty {
@@ -112,7 +93,7 @@ struct SearchView: View {
 
     @ViewBuilder
     private var searchSuggestions: some View {
-        let content = localContent
+        let content = store.localContent
         if store.historyLoaded, !content.historyTerms.isEmpty {
             ForEach(content.historyTerms, id: \.self) { term in
                 Label(term, systemImage: "clock")
