@@ -31,7 +31,9 @@ struct CachedEntry: Codable, Identifiable, Equatable {
 @MainActor
 final class CacheStore {
     static let shared = CacheStore()
-    private static let searchVisibleTrackLimit = 6
+    /// Search 的本地缓存投影要覆盖“最近 6 条 + 缓存 6 条”的合并窗口,
+    /// 所以比最终渲染出来的缓存行数更宽,避免 recent 排除后第 7-12 条缓存被漏掉。
+    private static let searchLocalContentProjectionLimit = 12
 
     private(set) var entries: [CachedEntry] = [] {
         didSet { rebuildIndex() }
@@ -246,6 +248,6 @@ final class CacheStore {
     }
 
     private func searchVisibleTracks(from entries: [CachedEntry]) -> [Track] {
-        Array(entries.prefix(Self.searchVisibleTrackLimit).map(\.track))
+        Array(entries.prefix(Self.searchLocalContentProjectionLimit).map(\.track))
     }
 }

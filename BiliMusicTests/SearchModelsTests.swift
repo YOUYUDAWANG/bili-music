@@ -229,6 +229,24 @@ final class SearchModelsTests: XCTestCase {
         XCTAssertTrue(store.hasMoreResults)
     }
 
+    func testSearchLocalContentSurfacesCachedEntriesBeyondFirstSixWhenEarlierEntriesAreExcluded() {
+        let recentTracks = (1...6).map { index in
+            makeTrack(bvid: String(format: "BVCACHE%03d", index), title: "最近 \(index)")
+        }
+        let cachedTracks = (1...12).map { index in
+            makeTrack(bvid: String(format: "BVCACHE%03d", index), title: "缓存 \(index)")
+        }
+
+        let content = SearchLocalContent(
+            historyTerms: ["晴天"],
+            recentTracks: recentTracks,
+            cachedTracks: cachedTracks)
+
+        XCTAssertEqual(
+            content.cachedTracks.map(\.bvid),
+            ["BVCACHE007", "BVCACHE008", "BVCACHE009", "BVCACHE010", "BVCACHE011", "BVCACHE012"])
+    }
+
     @MainActor
     func testChangingModeClearsTransientResultsForSameQuery() {
         let store = SearchStore()

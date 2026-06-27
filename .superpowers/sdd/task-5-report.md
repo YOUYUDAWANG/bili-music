@@ -134,3 +134,28 @@ xcodebuild test -project BiliMusic.xcodeproj -scheme BiliMusic -destination 'pla
 ### Concerns
 
 - `contentRevision` is now intentionally scoped to the top six ordered `Track` projections that Search can render from each store. Non-visible entry mutations still persist and update store state, but they no longer trigger Search refreshes by themselves.
+
+## Task 5 Fourth Fix Report
+
+### Files changed
+
+- `BiliMusic/Cache/CacheStore.swift`
+- `BiliMusicTests/SearchStoreTests.swift`
+- `BiliMusicTests/SearchModelsTests.swift`
+- `.superpowers/sdd/task-5-report.md`
+
+### Commands run
+
+```bash
+xcodebuild test -project BiliMusic.xcodeproj -scheme BiliMusic -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:BiliMusicTests/SearchStoreTests
+xcodebuild test -project BiliMusic.xcodeproj -scheme BiliMusic -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:BiliMusicTests/SearchModelsTests
+```
+
+### Results
+
+- `SearchStoreTests`: passed `8/8`, including the new beyond-top-six cache revision regression and the existing no-op identical-projection case.
+- `SearchModelsTests`: passed `23/23`, including the new `SearchLocalContent` coverage showing cache entries 7-12 survive recent-entry exclusion.
+
+### Concerns
+
+- None. The revision window is now intentionally wider than the rendered cache row count so Search stays cheap while still observing cache mutations that can become visible after recent-track filtering.

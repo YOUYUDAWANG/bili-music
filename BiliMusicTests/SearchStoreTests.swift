@@ -154,6 +154,47 @@ final class SearchStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testCacheEntryBeyondTopSixStillBumpsRevisionWhenRecentTracksExposeIt() async {
+        let previousHistory = UserDefaults.standard.string(forKey: historyKey)
+        let history = PlaybackHistoryStore.shared
+        let cache = CacheStore.shared
+        await prepareSharedLocalStores(history: history, cache: cache)
+        defer {
+            restoreSearchHistory(previousHistory)
+            resetSharedLocalStores(history: history, cache: cache)
+        }
+
+        let recentTracks = (1...6).map { index in
+            makeTrack(bvid: String(format: "BVCACHE%03d", index), title: "最近 \(index)")
+        }
+        recentTracks.forEach { history.record($0) }
+
+        let visibleCacheTracks = (7...12).map { index in
+            makeTrack(bvid: String(format: "BVCACHE%03d", index), title: "缓存 \(index)")
+        }
+        let hiddenCacheTracks = (1...6).map { index in
+            makeTrack(bvid: String(format: "BVCACHE%03d", index), title: "缓存 \(index)")
+        }
+
+        visibleCacheTracks.forEach { cache.add(makeCachedEntry(track: $0)) }
+        hiddenCacheTracks.forEach { cache.add(makeCachedEntry(track: $0)) }
+
+        let store = SearchStore()
+        await store.loadLocalContent(history: history, cache: cache)
+        let initialRevision = cache.contentRevision
+
+        cache.add(makeCachedEntry(track: makeTrack(bvid: "BVCACHE007", title: "缓存 7 改版")))
+
+        store.refreshLocalContent(history: history, cache: cache)
+
+        XCTAssertGreaterThan(cache.contentRevision, initialRevision)
+        XCTAssertEqual(
+            store.localContent.cachedTracks.map(\.bvid),
+            ["BVCACHE007", "BVCACHE012", "BVCACHE011", "BVCACHE010", "BVCACHE009", "BVCACHE008"])
+        XCTAssertEqual(store.localContent.cachedTracks.first?.title, "缓存 7 改版")
+    }
+
+    @MainActor
     func testReplacingCacheEntryWithChangedTrackProjectionBumpsContentRevision() async {
         let previousHistory = UserDefaults.standard.string(forKey: historyKey)
         let history = PlaybackHistoryStore.shared
