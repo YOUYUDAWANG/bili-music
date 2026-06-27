@@ -83,9 +83,7 @@ final class PlayerChromeUITests: XCTestCase {
         let nowPlaying = element("nowPlayingView")
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before testing center-page dismiss.")
 
-        let dragStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.32))
-        let dragEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.70))
-        dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
+        centerPlayerCoverArea().dragDownToDismiss()
 
         XCTAssertTrue(nowPlaying.waitForNonExistence(timeout: 3), "Dragging down on the center player body should minimize the full player.")
         XCTAssertTrue(element("miniPlayer").waitForExistence(timeout: 3), "The mini player should reappear after center-page minimize.")
@@ -366,12 +364,11 @@ final class PlayerChromeUITests: XCTestCase {
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before swiping pages.")
         let currentTitle = currentPlayerPageTitle(timeout: 1) ?? "正在播放"
         let expectedPage = expectedPageTitle(afterSwiping: direction, from: currentTitle)
-        let pager = element("playerHorizontalPager")
-        XCTAssertTrue(pager.waitForExistence(timeout: 2), "The native horizontal pager should be available before swiping pages.")
+        let coverArea = centerPlayerCoverArea()
         if direction == .left {
-            pager.swipeLeft()
+            coverArea.leftSwipe()
         } else {
-            pager.swipeRight()
+            coverArea.rightSwipe()
         }
 
         XCTAssertTrue(waitForPlayerPage(expectedPage), "Horizontal swipe should switch the player page to \(expectedPage).")
@@ -432,20 +429,28 @@ final class PlayerChromeUITests: XCTestCase {
         let app: XCUIApplication
         let screenPoint: CGPoint
 
+        private func absoluteCoordinate(x: CGFloat) -> XCUICoordinate {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+                .withOffset(CGVector(dx: x, dy: screenPoint.y))
+        }
+
         func leftSwipe() {
-            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
-                .withOffset(CGVector(dx: app.frame.width * 0.88, dy: screenPoint.y))
-            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
-                .withOffset(CGVector(dx: app.frame.width * 0.08, dy: screenPoint.y))
+            let start = absoluteCoordinate(x: app.frame.width * 0.88)
+            let end = absoluteCoordinate(x: app.frame.width * 0.08)
             start.press(forDuration: 0.02, thenDragTo: end)
         }
 
         func rightSwipe() {
-            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
-                .withOffset(CGVector(dx: app.frame.width * 0.12, dy: screenPoint.y))
-            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
-                .withOffset(CGVector(dx: app.frame.width * 0.92, dy: screenPoint.y))
+            let start = absoluteCoordinate(x: app.frame.width * 0.12)
+            let end = absoluteCoordinate(x: app.frame.width * 0.92)
             start.press(forDuration: 0.02, thenDragTo: end)
+        }
+
+        func dragDownToDismiss() {
+            let start = absoluteCoordinate(x: screenPoint.x)
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+                .withOffset(CGVector(dx: screenPoint.x, dy: app.frame.height * 0.76))
+            start.press(forDuration: 0.05, thenDragTo: end)
         }
     }
 

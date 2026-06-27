@@ -160,7 +160,6 @@ struct NowPlayingView: View {
     @State private var favoriteWasAdded = false
     @State private var downloadTrigger = 0
     @State private var isProgressScrubbing = false
-    @State private var suppressPageSwipeForScrub = false
     @State private var progressScrubGeneration = 0
     @State private var progressFrameInGlobal: CGRect = .null
     @State private var bottomContextFrameInGlobal: CGRect = .null
@@ -181,7 +180,6 @@ struct NowPlayingView: View {
         static let sidePanelPreviewLimit = 5
         static let compactRowHeight: CGFloat = 34
         static let dismissGrabZoneHeight: CGFloat = PlayerGesturePolicy.dismissGrabZoneHeight
-        static let centerDismissSurfaceHeight: CGFloat = 320
     }
 
     private enum PlayerSurface {
@@ -503,12 +501,7 @@ struct NowPlayingView: View {
                 nowPlayingPage(coverSize: coverSize, isLandscape: isLandscape)
                     .padding(.top, Layout.contentTopInset)
                     .contentShape(Rectangle())
-                    .overlay(alignment: .top) {
-                        Color.clear
-                            .frame(height: Layout.centerDismissSurfaceHeight)
-                            .contentShape(Rectangle())
-                            .gesture(centerBodyDismissDrag, including: .gesture)
-                    }
+                    .simultaneousGesture(centerBodyDismissDrag, including: .gesture)
                     .frame(width: width)
                     .id(PlayerPage.nowPlaying.rawValue)
 
@@ -1783,16 +1776,7 @@ struct NowPlayingView: View {
 
     private func setProgressScrubbing(_ scrubbing: Bool) {
         progressScrubGeneration += 1
-        let generation = progressScrubGeneration
         isProgressScrubbing = scrubbing
-        suppressPageSwipeForScrub = true
-
-        guard !scrubbing else { return }
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(220))
-            guard progressScrubGeneration == generation else { return }
-            suppressPageSwipeForScrub = false
-        }
     }
 
     private var centerBodyDismissDrag: some Gesture {
