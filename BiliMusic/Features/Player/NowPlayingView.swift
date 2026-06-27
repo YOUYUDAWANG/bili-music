@@ -1016,13 +1016,14 @@ struct NowPlayingView: View {
             )
             .accessibilityIdentifier("playerQueueEmptyState")
         } else {
+            let shouldShowQueueList = !queueMatchesCurrentPlaylist
             VStack(alignment: .leading, spacing: 16) {
                 if hasPlaylistContext {
                     currentPlaylistPanel
                 }
 
-                if !engine.queue.isEmpty {
-                    VStack(spacing: 0) {
+                if !engine.queue.isEmpty && shouldShowQueueList {
+                    LazyVStack(spacing: 0) {
                         ForEach(Array(engine.queue.enumerated()), id: \.element.id) { index, track in
                             guardedPlayerRowButton {
                                 Task { await engine.jump(to: index) }
@@ -1171,7 +1172,10 @@ struct NowPlayingView: View {
             .padding(14)
             .playerPanelBackground(cornerRadius: 16)
         } else if let currentPlaylist, !currentPlaylistTracks.isEmpty {
-            let visibleRows = min(currentPlaylistTracks.count, Layout.sidePanelPreviewLimit)
+            let previewItems = PlayerListWindow.items(
+                tracks: currentPlaylistTracks,
+                current: engine.current,
+                maxRows: Layout.sidePanelPreviewLimit)
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     Image(systemName: "rectangle.stack.fill")
@@ -1192,25 +1196,16 @@ struct NowPlayingView: View {
                         .foregroundStyle(PlayerSurface.secondaryText)
                 }
 
-                ScrollViewReader { proxy in
-                    ScrollView(.vertical, showsIndicators: false) {
-                        LazyVStack(spacing: 0) {
-                            ForEach(Array(currentPlaylistTracks.enumerated()), id: \.element.id) { index, track in
-                                guardedPlayerRowButton {
-                                    Task { await playCurrentPlaylistTrack(at: index) }
-                                } label: {
-                                    compactPlaylistRow(track: track, index: index)
-                                        .id(track.id)
-                                }
-                            }
+                VStack(spacing: 0) {
+                    ForEach(previewItems) { item in
+                        guardedPlayerRowButton {
+                            Task { await playCurrentPlaylistTrack(at: item.index) }
+                        } label: {
+                            compactPlaylistRow(track: item.track, index: item.index)
                         }
                     }
-                    .frame(maxHeight: CGFloat(visibleRows) * Layout.compactRowHeight)
-                    .onAppear { scrollCurrentPlaylist(proxy) }
-                    .onChange(of: engine.current?.id) { _, _ in
-                        scrollCurrentPlaylist(proxy)
-                    }
                 }
+                .frame(height: CGFloat(previewItems.count) * Layout.compactRowHeight)
             }
             .padding(14)
             .playerPanelBackground(cornerRadius: 18)
@@ -1235,7 +1230,10 @@ struct NowPlayingView: View {
     @ViewBuilder
     private func currentPlaylistBottomPanel(maxRows: Int) -> some View {
         if let currentPlaylist, !currentPlaylistTracks.isEmpty {
-            let visibleRows = min(currentPlaylistTracks.count, maxRows)
+            let previewItems = PlayerListWindow.items(
+                tracks: currentPlaylistTracks,
+                current: engine.current,
+                maxRows: maxRows)
             VStack(alignment: .leading, spacing: 8) {
                 playerDivider
 
@@ -1272,29 +1270,20 @@ struct NowPlayingView: View {
                     .accessibilityLabel("查看完整合集")
                 }
 
-                ScrollViewReader { proxy in
-                    ScrollView(.vertical, showsIndicators: currentPlaylistTracks.count > visibleRows) {
-                        LazyVStack(spacing: 0) {
-                            ForEach(Array(currentPlaylistTracks.enumerated()), id: \.element.id) { index, track in
-                                guardedPlayerRowButton {
-                                    Task { await playCurrentPlaylistTrack(at: index) }
-                                } label: {
-                                    compactPlaylistRow(track: track, index: index)
-                                        .id(track.id)
-                                }
+                VStack(spacing: 0) {
+                    ForEach(previewItems) { item in
+                        guardedPlayerRowButton {
+                            Task { await playCurrentPlaylistTrack(at: item.index) }
+                        } label: {
+                            compactPlaylistRow(track: item.track, index: item.index)
+                        }
 
-                                if index != currentPlaylistTracks.count - 1 {
-                                    playerDivider.padding(.leading, 34)
-                                }
-                            }
+                        if item.index != previewItems.last?.index {
+                            playerDivider.padding(.leading, 34)
                         }
                     }
-                    .frame(maxHeight: CGFloat(visibleRows) * Layout.compactRowHeight)
-                    .onAppear { scrollCurrentPlaylist(proxy) }
-                    .onChange(of: engine.current?.id) { _, _ in
-                        scrollCurrentPlaylist(proxy)
-                    }
                 }
+                .frame(height: CGFloat(previewItems.count) * Layout.compactRowHeight)
             }
             .padding(.horizontal, 28)
             .background(bottomContextFrameReader)
@@ -1637,15 +1626,19 @@ struct NowPlayingView: View {
     }
 
     private var currentPlaylistPositionText: String {
-        guard let bvid = engine.current?.bvid,
-              let index = currentPlaylistTracks.firstIndex(where: { $0.bvid == bvid }) else {
-            return "\(currentPlaylistTracks.count) 首"
-        }
-        return "\(index + 1)/\(currentPlaylistTracks.count)"
+        PlayerListWindow.positionText(tracks: currentPlaylistTracks, current: engine.current)
     }
 
     private var hasPlaylistContext: Bool {
         currentPlaylistLoading || currentPlaylist != nil || !currentPlaylistTracks.isEmpty || currentPlaylistError != nil
+    }
+
+    private var queueMatchesCurrentPlaylist: Bool {
+        !currentPlaylistTracks.isEmpty
+            && engine.queue.count == currentPlaylistTracks.count
+            && zip(engine.queue, currentPlaylistTracks).allSatisfy { queueTrack, playlistTrack in
+                queueTrack.key == playlistTrack.key
+            }
     }
 
     private func playCurrentPlaylistTrack(at index: Int) async {
