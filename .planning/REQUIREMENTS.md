@@ -40,9 +40,9 @@ v1 聚焦当前用户已经反复遇到的卡顿和稳定性问题。目标不�
 ### Player Interaction
 
 - [x] **PLYR-01**: User can expand the mini-player with an upward drag that visually tracks the finger and feels like the full player is being pulled up from the bottom.
-- [ ] **PLYR-02**: User can minimize the full player with a deliberate downward gesture outside scrollable queue/recommendation lists.
+- [x] **PLYR-02**: User can minimize the full player with a deliberate downward gesture outside scrollable queue/recommendation lists.
 - [x] **PLYR-03**: User can scroll queue and recommendation lists without accidentally triggering player minimize.
-- [ ] **PLYR-04**: User can scrub the progress bar and swipe between player pages without those gestures fighting the minimize gesture.
+- [x] **PLYR-04**: User can scrub the progress bar and swipe between player pages without those gestures fighting the minimize gesture.
 - [x] **PLYR-05**: Full player layout uses denser Apple Music-like spacing with no excessive bottom void on supported iPhone sizes.
 
 ### Regression Coverage
@@ -122,9 +122,9 @@ Roadmap mapping is filled during roadmap creation.
 | MEM-02 | Phase 1 | Complete |
 | MEM-03 | Phase 1 | Complete |
 | PLYR-01 | Phase 3 | Complete |
-| PLYR-02 | Phase 3 | Pending |
+| PLYR-02 | Phase 3 | Complete |
 | PLYR-03 | Phase 3 | Complete |
-| PLYR-04 | Phase 3 | Pending |
+| PLYR-04 | Phase 3 | Complete |
 | PLYR-05 | Phase 3 | Complete |
 | TEST-01 | Phase 2 | Complete |
 | TEST-02 | Phase 3 | Complete |
@@ -140,4 +140,4 @@ Roadmap mapping is filled during roadmap creation.
 
 ---
 *Requirements defined: 2026-06-26*
-*Last updated: 2026-06-27 after Phase 02 discovery reliability*
+*Last updated: 2026-06-27 after Phase 03 player interaction coverage*
