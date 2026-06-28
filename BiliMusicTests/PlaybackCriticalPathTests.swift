@@ -1,4 +1,5 @@
 import MediaPlayer
+import UIKit
 import XCTest
 @testable import BiliMusic
 
@@ -6,6 +7,7 @@ import XCTest
 final class PlaybackCriticalPathTests: XCTestCase {
     override func tearDown() {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        ImageMemoryCache.shared.removeAll()
         super.tearDown()
     }
 
@@ -33,6 +35,43 @@ final class PlaybackCriticalPathTests: XCTestCase {
 
         XCTAssertEqual(currentDuringResolution?.bvid, track.bvid)
         XCTAssertEqual(engine.current?.bvid, track.bvid)
+    }
+
+    func testPlayBindsCachedArtworkBeforeAwaitedSourceResolutionCompletes() async {
+        let coverURL = URL(string: "https://example.invalid/cover.jpg")!
+        ImageMemoryCache.shared.insert(
+            Self.image(),
+            for: coverURL,
+            targetPixelSize: CGSize(width: 960, height: 540))
+        let track = Self.track(coverURL: coverURL)
+        let resolver = CriticalPathAudioResolver(
+            prepared: Self.stream(
+                url: URL(string: "https://example.invalid/prepared.m4a")!,
+                cid: 1001,
+                duration: 211,
+                quality: 30280,
+                bandwidth: 192_000))
+        var artworkDuringResolution: UIImage?
+        var events: [PlayerEngine.PlaybackStartupTestEvent] = []
+        resolver.onPrepare = { (engine: PlayerEngine) in
+            artworkDuringResolution = engine.currentCoverImage
+        }
+        let engine = PlayerEngine(
+            streamResolver: resolver,
+            startupTestHooks: .init(
+                record: { events.append($0) },
+                startPlaybackOverride: { _, _, _ in },
+                reportFirstPlayingImmediately: false))
+        resolver.engineProvider = { return engine }
+
+        await engine.play(tracks: [track], startAt: 0)
+
+        XCTAssertNotNil(artworkDuringResolution)
+        XCTAssertEqual(Array(events.prefix(3)), [
+            .currentAssigned,
+            .artworkPrefetchScheduled,
+            .sourceResolutionStarted
+        ])
     }
 
     func testPlaybackRequestUsesOnlyOneFreshAudioResolutionBeforePlay() async {
@@ -194,6 +233,23 @@ final class PlaybackCriticalPathTests: XCTestCase {
             duration: cid == nil ? 0 : 211)
     }
 
+    private static func track(
+        bvid: String = "BVPATH001",
+        cid: Int? = 1001,
+        title: String = "Critical Path Song",
+        artist: String = "Fixture Artist",
+        coverURL: URL?
+    ) -> Track {
+        Track(
+            typeID: 3,
+            bvid: bvid,
+            cid: cid,
+            title: title,
+            artist: artist,
+            coverURL: coverURL,
+            duration: cid == nil ? 0 : 211)
+    }
+
     private static func stream(
         url: URL,
         cid: Int,
@@ -208,6 +264,13 @@ final class PlaybackCriticalPathTests: XCTestCase {
             quality: quality,
             bandwidth: bandwidth,
             fetchedAt: Date())
+    }
+
+    private static func image() -> UIImage {
+        UIGraphicsImageRenderer(size: CGSize(width: 960, height: 540)).image { context in
+            UIColor.systemPink.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 960, height: 540))
+        }
     }
 }
 

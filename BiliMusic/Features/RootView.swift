@@ -11,6 +11,7 @@ struct RootView: View {
     @State private var miniOpenDragTranslation: CGFloat?
     @State private var isTrackingMiniOpenDrag = false
     @State private var sharedPlayerTransitionActive = false
+    @State private var isClosingFullPlayer = false
     @State private var showSettings = false
     @State private var selectedTab = 0
     @Namespace private var playerTransition
@@ -39,17 +40,19 @@ struct RootView: View {
                         onDismiss: { closeFullPlayer() },
                         namespace: playerTransition,
                         usesSharedTransition: usesSharedPlayerTransition,
-                        isCoverTransitionSource: showFullPlayer,
+                        isCoverTransitionSource: fullPlayerOwnsArtwork,
                         coverRevealProgress: renderedPlayerOpenProgress,
                         contentRevealProgress: renderedPlayerOpenProgress,
                         safeAreaTop: proxy.safeAreaInsets.top
                     )
                         .offset(y: fullPlayerOffset(height: proxy.size.height, safeAreaInsets: proxy.safeAreaInsets))
+                        .opacity(fullPlayerOpacity)
                         .scaleEffect(
                             x: fullPlayerScaleX,
                             y: fullPlayerScaleY,
                             anchor: .bottom
                         )
+                        .clipShape(RoundedRectangle(cornerRadius: fullPlayerCornerRadius, style: .continuous))
                         .ignoresSafeArea()
                         .zIndex(10)
                         .allowsHitTesting(showFullPlayer)
@@ -137,6 +140,8 @@ struct RootView: View {
                     SystemMiniPlayer(
                         miniOpenDragTranslation: $miniOpenDragTranslation,
                         isFullPlayerPresented: showFullPlayer,
+                        isFullPlayerClosing: isClosingFullPlayer,
+                        isArtworkTransitionSource: miniPlayerOwnsArtwork,
                         namespace: playerTransition,
                         usesSharedTransition: usesSharedPlayerTransition,
                         openProgress: renderedPlayerOpenProgress,
@@ -194,6 +199,9 @@ struct RootView: View {
         guard showFullPlayer || isMiniOpening || fullPlayerOpenProgress > 0 else {
             return height
         }
+        if isClosingFullPlayer {
+            return closeCollapseOffset * (1 - transitionProgress(renderedPlayerOpenProgress))
+        }
         let offscreenOffset = height + safeAreaInsets.bottom + 24
         return offscreenOffset * (1 - renderedPlayerOpenProgress)
     }
@@ -220,17 +228,51 @@ struct RootView: View {
         sharedPlayerTransitionActive || isMiniOpening
     }
 
+    private var fullPlayerOwnsArtwork: Bool {
+        PlayerGesturePolicy.fullPlayerArtworkIsSource(
+            isFullPlayerPresented: showFullPlayer,
+            isClosing: isClosingFullPlayer)
+    }
+
+    private var miniPlayerOwnsArtwork: Bool {
+        PlayerGesturePolicy.miniPlayerArtworkIsSource(
+            isFullPlayerPresented: showFullPlayer,
+            isClosing: isClosingFullPlayer)
+    }
+
     private var fullPlayerScrimOpacity: Double {
         Double(min(0.58, max(0, renderedPlayerOpenProgress * 0.58)))
     }
 
+    private var fullPlayerOpacity: Double {
+        PlayerGesturePolicy.fullPlayerContainerOpacity(
+            openProgress: renderedPlayerOpenProgress,
+            isClosing: isClosingFullPlayer,
+            fullPlayerOwnsArtwork: fullPlayerOwnsArtwork)
+    }
+
+    private var closeCollapseOffset: CGFloat {
+        reduceMotion ? 0 : 72
+    }
+
+    private var fullPlayerCornerRadius: CGFloat {
+        guard !reduceMotion else { return 0 }
+        return max(0, 26 * (1 - transitionProgress(renderedPlayerOpenProgress)))
+    }
+
     private var fullPlayerScaleX: CGFloat {
         guard !reduceMotion else { return 1 }
+        if isClosingFullPlayer {
+            return 0.976 + renderedPlayerOpenProgress * 0.024
+        }
         return 0.985 + renderedPlayerOpenProgress * 0.015
     }
 
     private var fullPlayerScaleY: CGFloat {
         guard !reduceMotion else { return 1 }
+        if isClosingFullPlayer {
+            return 0.982 + renderedPlayerOpenProgress * 0.018
+        }
         return 0.992 + renderedPlayerOpenProgress * 0.008
     }
 
@@ -242,6 +284,7 @@ struct RootView: View {
         var transaction = Transaction()
         transaction.animation = nil
         withTransaction(transaction) {
+            isClosingFullPlayer = false
             sharedPlayerTransitionActive = true
             showFullPlayer = true
             miniOpenDragTranslation = nil
@@ -262,20 +305,23 @@ struct RootView: View {
             showFullPlayer = false
             fullPlayerOpenProgress = 0
             sharedPlayerTransitionActive = false
+            isClosingFullPlayer = false
         }
     }
 
     private func closeFullPlayer() {
         sharedPlayerTransitionActive = true
+        isClosingFullPlayer = true
         withAnimation(closeAnimation) {
             miniOpenDragTranslation = nil
             isTrackingMiniOpenDrag = false
             fullPlayerOpenProgress = 0
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + closeRemovalDelay) {
-            guard fullPlayerOpenProgress <= 0.01 else { return }
+            guard isClosingFullPlayer, fullPlayerOpenProgress <= 0.01 else { return }
             showFullPlayer = false
             sharedPlayerTransitionActive = false
+            isClosingFullPlayer = false
         }
     }
 
@@ -285,12 +331,18 @@ struct RootView: View {
         isTrackingMiniOpenDrag = false
         fullPlayerOpenProgress = 0
         sharedPlayerTransitionActive = false
+        isClosingFullPlayer = false
     }
 
     private func finishSharedPlayerTransitionAfterOpen() {
-        let delay: TimeInterval = reduceMotion ? 0.16 : 0.56
+        let delay: TimeInterval = reduceMotion ? 0.18 : 0.72
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            guard showFullPlayer, fullPlayerOpenProgress >= 0.99, !isMiniOpening else { return }
+            guard PlayerGesturePolicy.shouldFinishOpenTransition(
+                isFullPlayerPresented: showFullPlayer,
+                isMiniOpening: isMiniOpening,
+                isClosing: isClosingFullPlayer)
+            else { return }
+            fullPlayerOpenProgress = 1
             sharedPlayerTransitionActive = false
         }
     }
@@ -376,6 +428,8 @@ private struct SystemMiniPlayer: View {
     @AppStorage(TrackTitleFormatter.cleanListTitlesDefaultsKey) private var cleanListTitles = false
     @Binding var miniOpenDragTranslation: CGFloat?
     let isFullPlayerPresented: Bool
+    let isFullPlayerClosing: Bool
+    let isArtworkTransitionSource: Bool
     var namespace: Namespace.ID
     let usesSharedTransition: Bool
     let openProgress: CGFloat
@@ -477,6 +531,7 @@ private struct SystemMiniPlayer: View {
                     url: url,
                     targetSize: CGSize(width: 44, height: 25),
                     fallbackImage: engine.currentCoverImage,
+                    debugIdentifier: "miniPlayerArtwork",
                     onImageLoaded: { image in
                         engine.rememberCurrentCover(image, for: currentTrack)
                     }
@@ -493,8 +548,12 @@ private struct SystemMiniPlayer: View {
                 artworkPlaceholder
             }
         }
-        .miniPlayerSharedGeometry(id: "playerArtwork", in: namespace, active: usesSharedTransition)
         .frame(width: lerp(34, 44, layoutProgress), height: lerp(19, 25, layoutProgress))
+        .miniPlayerSharedGeometry(
+            id: "playerArtwork",
+            in: namespace,
+            active: usesSharedTransition,
+            isSource: isArtworkTransitionSource)
         .clipShape(RoundedRectangle(cornerRadius: lerp(4, 5, layoutProgress), style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: lerp(4, 5, layoutProgress), style: .continuous)
@@ -546,7 +605,10 @@ private struct SystemMiniPlayer: View {
 
     private func miniPlayerOpacity(accessoryProgress: CGFloat) -> Double {
         if isFullPlayerPresented {
-            return 0
+            if isFullPlayerClosing {
+                return Double(max(0, 1 - accessoryProgress / 0.84))
+            }
+            return Double(max(0, 1 - accessoryProgress / 0.58))
         }
         return Double(max(0, 1 - max(0, (accessoryProgress - 0.14) / 0.86)))
     }
@@ -602,9 +664,19 @@ private func transitionProgress(_ progress: CGFloat) -> CGFloat {
 
 private extension View {
     @ViewBuilder
-    func miniPlayerSharedGeometry(id: String, in namespace: Namespace.ID, active: Bool) -> some View {
+    func miniPlayerSharedGeometry(
+        id: String,
+        in namespace: Namespace.ID,
+        active: Bool,
+        isSource: Bool
+    ) -> some View {
         if active {
-            matchedGeometryEffect(id: id, in: namespace)
+            matchedGeometryEffect(
+                id: id,
+                in: namespace,
+                properties: .frame,
+                anchor: .center,
+                isSource: isSource)
         } else {
             self
         }

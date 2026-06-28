@@ -83,19 +83,76 @@ final class PlayerChromeUITests: XCTestCase {
     }
 
     @MainActor
-    func testBottomContextDrawerStartsCollapsedAndExpandsWithUpwardDrag() throws {
+    func testBottomContextUsesYouTubeMusicStyleQueueStates() throws {
         try openFullPlayerFromMini()
 
         let collapsedDrawer = element("playerBottomContextCollapsed")
-        XCTAssertTrue(collapsedDrawer.waitForExistence(timeout: 2), "Bottom queue context should start collapsed.")
+        XCTAssertTrue(collapsedDrawer.waitForExistence(timeout: 2), "Bottom queue context should start as a collapsed Up Next surface.")
         XCTAssertFalse(element("playerBottomQueuePanel").exists, "The queue list should not be expanded by default.")
 
         let start = collapsedDrawer.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.82))
         let end = start.withOffset(CGVector(dx: 0, dy: -92))
         start.press(forDuration: 0.05, thenDragTo: end)
 
-        XCTAssertTrue(element("playerBottomQueuePanel").waitForExistence(timeout: 2), "Dragging upward on the collapsed queue context should expand the list.")
-        XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 1), "Expanding the bottom queue context should not close the player.")
+        let splitHeader = element("playerQueueSplitHeader")
+        XCTAssertTrue(splitHeader.waitForExistence(timeout: 2), "First upward drag should reveal the split Up Next state.")
+        XCTAssertTrue(element("playerBottomQueuePanel").waitForExistence(timeout: 2), "Split state should show the queue list.")
+
+        let splitStart = splitHeader.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72))
+        let splitEnd = splitStart.withOffset(CGVector(dx: 0, dy: -116))
+        splitStart.press(forDuration: 0.05, thenDragTo: splitEnd)
+
+        XCTAssertTrue(element("playerQueueFullHeader").waitForExistence(timeout: 2), "Second upward drag should promote the queue into the full queue state.")
+        let fullQueueDrawer = element("playerBottomContextDrawer")
+        XCTAssertTrue(fullQueueDrawer.waitForExistence(timeout: 2), "Full queue should keep the bottom context drawer visible.")
+        let fullQueuePanel = element("playerBottomQueuePanel")
+        XCTAssertTrue(fullQueuePanel.waitForExistence(timeout: 2), "Full queue should keep the queue panel visible.")
+        XCTAssertLessThan(fullQueueDrawer.frame.minY, app.frame.height * 0.30, "Full queue drawer should start near the upper player area like a queue sheet, not near the bottom.")
+        XCTAssertGreaterThan(fullQueuePanel.frame.height, app.frame.height * 0.55, "Full queue should allocate a queue-dominant area instead of a small bottom drawer.")
+        XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 1), "Promoting the queue context should not close the player.")
+    }
+
+    @MainActor
+    func testDraggingDownInsideFullQueueListDoesNotDismissPlayer() throws {
+        try openFullPlayerFromMini()
+        try expandBottomContextToFullQueue()
+
+        let fullQueuePanel = element("playerBottomQueuePanel")
+        XCTAssertTrue(fullQueuePanel.waitForExistence(timeout: 2), "Full queue panel should be visible before testing list drag ownership.")
+
+        let dragStart = fullQueuePanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.28))
+        let dragEnd = fullQueuePanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.78))
+        dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
+
+        XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 1), "Dragging down inside the full queue list should scroll or bounce the list, not minimize the player.")
+        XCTAssertTrue(element("playerQueueFullHeader").waitForExistence(timeout: 1), "Dragging down inside the list body should keep the full queue state.")
+    }
+
+    @MainActor
+    func testDraggingDownInsideSplitQueueListDoesNotDismissPlayer() throws {
+        try openFullPlayerFromMini()
+        try expandBottomContextToSplit()
+
+        let splitQueuePanel = element("playerBottomQueuePanel")
+        XCTAssertTrue(splitQueuePanel.waitForExistence(timeout: 2), "Split queue panel should be visible before testing list drag ownership.")
+
+        let dragStart = splitQueuePanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.30))
+        let dragEnd = splitQueuePanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.88))
+        dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
+
+        XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 1), "Dragging down inside the split queue list should scroll or bounce the list, not minimize the player.")
+        XCTAssertTrue(element("playerQueueSplitHeader").waitForExistence(timeout: 1), "Dragging down inside the split list body should keep the split queue state.")
+    }
+
+    @MainActor
+    func testCenterBodyDragDoesNotDismissWhileSplitQueueIsOpen() throws {
+        try openFullPlayerFromMini()
+        try expandBottomContextToSplit()
+
+        centerPlayerCoverArea().dragDownToDismiss()
+
+        XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 1), "The center dismiss gesture should not minimize the player while the split queue owns vertical gestures.")
+        XCTAssertTrue(element("playerQueueSplitHeader").waitForExistence(timeout: 1), "The split queue should remain open after a center-body downward drag.")
     }
 
     @MainActor
@@ -154,75 +211,81 @@ final class PlayerChromeUITests: XCTestCase {
     @MainActor
     func testDraggingQueueListBodyDoesNotDismissFullPlayer() throws {
         try openFullPlayerFromMini()
-        try swipeToPlayerPage(direction: .right)
+        try expandBottomContextToFullQueue()
 
         let nowPlaying = element("nowPlayingView")
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should stay open before testing queue-list drag.")
+        let queuePanel = element("playerBottomQueuePanel")
+        XCTAssertTrue(queuePanel.waitForExistence(timeout: 2), "Bottom queue panel should be visible before testing list drag.")
 
-        let dragStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.38))
-        let dragEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.76))
+        let dragStart = queuePanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.28))
+        let dragEnd = queuePanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.78))
         dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
 
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 1), "Dragging inside the queue list body should not minimize the full player.")
     }
 
     @MainActor
-    func testQueueSideListScrollsVertically() throws {
+    func testBottomQueueListScrollsVertically() throws {
         try openFullPlayerFromMini()
-        try swipeToPlayerPage(direction: .right)
+        try expandBottomContextToFullQueue()
 
-        let queuePage = element("playerQueuePage")
-        XCTAssertTrue(queuePage.waitForExistence(timeout: 2), "Queue page should be visible before testing vertical scrolling.")
+        let queuePanel = element("playerBottomQueuePanel")
+        XCTAssertTrue(queuePanel.waitForExistence(timeout: 2), "Bottom queue panel should be visible before testing vertical scrolling.")
 
-        for _ in 0..<3 where !app.staticTexts["Fixture Song Ten"].exists {
-            let dragStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.76))
-            let dragEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.30))
+        let tenthSong = staticText(containing: "Fixture Song Ten")
+        for _ in 0..<3 where !tenthSong.exists {
+            let dragStart = queuePanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.78))
+            let dragEnd = queuePanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.24))
             dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
         }
 
-        XCTAssertTrue(app.staticTexts["Fixture Song Ten"].waitForExistence(timeout: 2), "Queue side page should allow vertical scrolling to later rows.")
+        XCTAssertTrue(tenthSong.waitForExistence(timeout: 2), "Bottom queue should expose later rows in the expanded list.")
         XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 1), "Vertical queue scrolling should not minimize the full player.")
         XCTAssertEqual(nowPlayingTitleLabel(), "Fixture Song One", "Vertical queue scrolling should not change the current track.")
-        XCTAssertTrue(waitForPlayerPage("队列"), "Vertical queue scrolling should keep the queue page selected.")
     }
 
     @MainActor
     func testDraggingRecommendationListBodyDoesNotDismissFullPlayer() throws {
         try openFullPlayerFromMini()
-        try swipeToPlayerPage(direction: .left)
+        try expandBottomContextToFullQueue()
+        selectBottomContextTab("recommendations")
 
         let nowPlaying = element("nowPlayingView")
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should stay open before testing recommendation-list drag.")
+        let recommendationsPanel = element("playerBottomRecommendationsPanel")
+        XCTAssertTrue(recommendationsPanel.waitForExistence(timeout: 5), "Bottom recommendations panel should be visible before testing list drag.")
 
-        let dragStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.38))
-        let dragEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.76))
+        let dragStart = recommendationsPanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.28))
+        let dragEnd = recommendationsPanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.78))
         dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
 
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 1), "Dragging inside the recommendation list body should not minimize the full player.")
     }
 
     @MainActor
-    func testRecommendationSideListScrollsVerticallyWithoutChangingPageOrTrack() throws {
+    func testBottomRecommendationListScrollsVerticallyWithoutChangingTrack() throws {
         try openFullPlayerFromMini()
-        try swipeToPlayerPage(direction: .left)
+        try expandBottomContextToFullQueue()
+        selectBottomContextTab("recommendations")
 
-        let recommendationsPage = element("playerRecommendationsPage")
-        XCTAssertTrue(recommendationsPage.waitForExistence(timeout: 2), "Recommendations page should be visible before testing vertical scrolling.")
+        let recommendationsPanel = element("playerBottomRecommendationsPanel")
+        XCTAssertTrue(recommendationsPanel.waitForExistence(timeout: 5), "Bottom recommendations panel should be visible before testing vertical scrolling.")
 
-        for _ in 0..<3 where !app.staticTexts["Fixture Song Ten"].exists {
-            let dragStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.76))
-            let dragEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.30))
+        let tenthSong = staticText(containing: "Fixture Song Ten")
+        for _ in 0..<3 where !tenthSong.exists {
+            let dragStart = recommendationsPanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.78))
+            let dragEnd = recommendationsPanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.24))
             dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
         }
 
-        XCTAssertTrue(app.staticTexts["Fixture Song Ten"].waitForExistence(timeout: 2), "Recommendation side page should allow vertical scrolling to later rows.")
+        XCTAssertTrue(tenthSong.waitForExistence(timeout: 2), "Bottom recommendations should expose later rows in the expanded list.")
         XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 1), "Vertical recommendation scrolling should not minimize the full player.")
         XCTAssertEqual(nowPlayingTitleLabel(), "Fixture Song One", "Vertical recommendation scrolling should not change the current track.")
-        XCTAssertTrue(waitForPlayerPage("推荐"), "Vertical recommendation scrolling should keep the recommendations page selected.")
     }
 
     @MainActor
-    func testProgressScrubDoesNotDismissOrChangePlayerPage() throws {
+    func testProgressScrubDoesNotDismissPlayer() throws {
         try openFullPlayerFromMini()
 
         let nowPlaying = element("nowPlayingView")
@@ -236,36 +299,38 @@ final class PlayerChromeUITests: XCTestCase {
         start.press(forDuration: 0.05, thenDragTo: end)
 
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 1), "Scrubbing progress should not minimize the full player.")
-        XCTAssertFalse(element("playerQueuePage").isHittable, "Scrubbing progress should not swipe to the queue page.")
-        XCTAssertFalse(element("playerRecommendationsPage").isHittable, "Scrubbing progress should not swipe to the recommendations page.")
+        XCTAssertFalse(element("playerBottomQueuePanel").isHittable, "Scrubbing progress should not open the queue panel.")
+        XCTAssertFalse(element("playerBottomRecommendationsPanel").isHittable, "Scrubbing progress should not open recommendations.")
     }
 
     @MainActor
-    func testHorizontalPageSwipeChangesPageWithoutDismissing() throws {
+    func testHorizontalLeftSwipeDoesNotChangeSinglePlayerPageOrDismiss() throws {
         try openFullPlayerFromMini()
 
         let nowPlaying = element("nowPlayingView")
-        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before testing horizontal page ownership.")
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before testing horizontal gesture ownership.")
+        let titleBefore = nowPlayingTitleLabel()
 
-        try swipeToPlayerPage(direction: .left)
-        XCTAssertTrue(waitForPlayerPage("推荐"), "A left swipe from the center page should land on recommendations.")
+        centerPlayerCoverArea().leftSwipe()
 
-        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 1), "Horizontal page swipe should not minimize the full player.")
-        XCTAssertTrue(element("playerRecommendationsPage").exists, "Horizontal page swipe should expose the recommendations page.")
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 1), "Horizontal swipe should not minimize the single-page player.")
+        XCTAssertTrue(waitForSingleNowPlayingSurface(), "The player should remain on the single now-playing surface.")
+        XCTAssertEqual(nowPlayingTitleLabel(), titleBefore, "Horizontal swipe should not change the current track.")
     }
 
     @MainActor
-    func testHorizontalRightSwipeFromCenterShowsQueueWithoutDismissing() throws {
+    func testHorizontalRightSwipeDoesNotChangeSinglePlayerPageOrDismiss() throws {
         try openFullPlayerFromMini()
 
         let nowPlaying = element("nowPlayingView")
-        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before testing horizontal page ownership.")
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before testing horizontal gesture ownership.")
+        let titleBefore = nowPlayingTitleLabel()
 
-        try swipeToPlayerPage(direction: .right)
-        XCTAssertTrue(waitForPlayerPage("队列"), "A right swipe from the center page should land on the queue.")
+        centerPlayerCoverArea().rightSwipe()
 
-        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 1), "Horizontal page swipe should not minimize the full player.")
-        XCTAssertTrue(element("playerQueuePage").exists, "Horizontal page swipe should expose the queue page.")
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 1), "Horizontal swipe should not minimize the single-page player.")
+        XCTAssertTrue(waitForSingleNowPlayingSurface(), "The player should remain on the single now-playing surface.")
+        XCTAssertEqual(nowPlayingTitleLabel(), titleBefore, "Horizontal swipe should not change the current track.")
     }
 
     @MainActor
@@ -273,11 +338,11 @@ final class PlayerChromeUITests: XCTestCase {
         try openFullPlayerFromMini()
         XCTAssertEqual(nowPlayingTitleLabel(), "Fixture Song One")
 
-        try swipeToPlayerPage(direction: .right)
+        try expandBottomContextToFullQueue()
 
-        let queuePage = element("playerQueuePage")
-        XCTAssertTrue(queuePage.waitForExistence(timeout: 2), "Queue page should be visible before dragging a queue row.")
-        let secondRowTitle = queuePage.descendants(matching: .staticText)
+        let queuePanel = element("playerBottomQueuePanel")
+        XCTAssertTrue(queuePanel.waitForExistence(timeout: 2), "Bottom queue should be visible before dragging a queue row.")
+        let secondRowTitle = queuePanel.descendants(matching: .staticText)
             .matching(NSPredicate(format: "label == %@", "Fixture Song Two"))
             .firstMatch
         XCTAssertTrue(secondRowTitle.waitForExistence(timeout: 2), "Queue should expose the second fixture row before dragging.")
@@ -291,7 +356,7 @@ final class PlayerChromeUITests: XCTestCase {
             XCTAssertTrue(currentRow.label.contains("Fixture Song One"), "A horizontal row drag should not be treated as tapping the second queue item.")
         } else {
             let metadata = element("nowPlayingMetadata")
-            XCTAssertTrue(metadata.waitForExistence(timeout: 2), "If the horizontal row drag changes player pages, the center metadata should be visible.")
+            XCTAssertTrue(metadata.waitForExistence(timeout: 2), "The center metadata should remain visible after a horizontal row drag.")
             XCTAssertEqual(metadata.label, "Fixture Song One", "A horizontal row drag should not be treated as tapping the second queue item.")
         }
     }
@@ -350,30 +415,36 @@ final class PlayerChromeUITests: XCTestCase {
         app.descendants(matching: .any).matching(identifier: identifier).allElementsBoundByIndex
     }
 
+    private func staticText(containing text: String) -> XCUIElement {
+        app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+    }
+
     @MainActor
     private func assertDensePlayerLayout() throws {
         let nowPlaying = element("nowPlayingView")
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before dense layout verification.")
 
-        let pageHint = element("playerPageHint")
+        let topChrome = element("playerTopChrome")
         let metadata = metadataElement()
         let progress = element("nowPlayingProgress")
         let transport = element("playerTransportControls")
         let toolbar = element("playerToolbar")
+        let bottomContext = element("playerBottomContextCollapsed")
 
-        let elements = [pageHint, metadata, progress, transport, toolbar]
+        let elements = [topChrome, metadata, progress, transport, toolbar, bottomContext]
         for element in elements {
             XCTAssertTrue(element.waitForExistence(timeout: 2), "Dense player layout element should exist: \(element)")
             XCTAssertFalse(element.frame.isEmpty, "Dense player layout element should have a measurable frame: \(element)")
         }
 
         let coverArea = centerPlayerCoverArea()
-        XCTAssertGreaterThanOrEqual(coverArea.screenPoint.y, pageHint.frame.maxY + 80, "Cover area should stay below the page hint.")
+        XCTAssertGreaterThanOrEqual(coverArea.screenPoint.y, topChrome.frame.maxY + 36, "Cover area should stay below the top chrome.")
         XCTAssertLessThanOrEqual(coverArea.screenPoint.y, metadata.frame.minY - 24, "Cover area should stay above title metadata.")
-        XCTAssertGreaterThanOrEqual(metadata.frame.minY - pageHint.frame.maxY, 210, "Dense player layout should preserve room for visible cover art.")
+        XCTAssertGreaterThanOrEqual(metadata.frame.minY - topChrome.frame.maxY, 178, "Dense player layout should preserve room for visible cover art.")
         assertVerticalOrder(metadata, progress, "Title metadata should stay above progress.")
         assertVerticalOrder(progress, transport, "Progress should stay above transport controls.")
         assertVerticalOrder(transport, toolbar, "Transport controls should stay above the player toolbar.")
+        assertVerticalOrder(toolbar, bottomContext, "The bottom queue drawer should sit below the player toolbar.")
 
         let layoutElements = [metadata, progress, transport, toolbar]
         for firstIndex in 0..<layoutElements.count {
@@ -382,9 +453,10 @@ final class PlayerChromeUITests: XCTestCase {
             }
         }
 
-        let maxBottomGap: CGFloat = app.frame.height <= 700 ? 96 : 128
-        let bottomGap = app.frame.maxY - toolbar.frame.maxY
-        XCTAssertLessThanOrEqual(bottomGap, maxBottomGap, "Dense player layout should not leave excessive empty space below the toolbar.")
+        let maxToolbarToDrawerGap: CGFloat = app.frame.height <= 700 ? 60 : 84
+        let toolbarToDrawerGap = bottomContext.frame.minY - toolbar.frame.maxY
+        XCTAssertLessThanOrEqual(toolbarToDrawerGap, maxToolbarToDrawerGap, "Collapsed queue should sit under the toolbar instead of leaving a large empty lower half.")
+        XCTAssertGreaterThanOrEqual(toolbarToDrawerGap, 12, "Collapsed queue should keep enough breathing room below the toolbar.")
     }
 
     private func assertVerticalOrder(_ upper: XCUIElement, _ lower: XCUIElement, _ message: String) {
@@ -419,71 +491,50 @@ final class PlayerChromeUITests: XCTestCase {
         openStart.press(forDuration: 0.35, thenDragTo: openEnd)
     }
 
-    private enum PlayerPageSwipeDirection {
-        case left
-        case right
+    @MainActor
+    private func expandBottomContextToSplit() throws {
+        let collapsedDrawer = element("playerBottomContextCollapsed")
+        XCTAssertTrue(collapsedDrawer.waitForExistence(timeout: 2), "Bottom queue context should start collapsed before expanding.")
+
+        let start = collapsedDrawer.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.82))
+        let end = start.withOffset(CGVector(dx: 0, dy: -92))
+        start.press(forDuration: 0.05, thenDragTo: end)
+
+        XCTAssertTrue(element("playerQueueSplitHeader").waitForExistence(timeout: 2), "First upward drag should reveal the split queue state.")
     }
 
     @MainActor
-    private func swipeToPlayerPage(direction: PlayerPageSwipeDirection) throws {
-        let nowPlaying = element("nowPlayingView")
-        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before swiping pages.")
-        let currentTitle = currentPlayerPageTitle(timeout: 1) ?? "正在播放"
-        let expectedPage = expectedPageTitle(afterSwiping: direction, from: currentTitle)
+    private func expandBottomContextToFullQueue() throws {
+        try expandBottomContextToSplit()
 
-        let coverArea = centerPlayerCoverArea()
-        performPagerSwipe(direction: direction, in: coverArea)
-        if !waitForPlayerPage(expectedPage, timeout: 1.2) {
-            performPagerSwipe(direction: direction, in: coverArea)
-        }
+        let splitHeader = element("playerQueueSplitHeader")
+        let splitStart = splitHeader.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72))
+        let splitEnd = splitStart.withOffset(CGVector(dx: 0, dy: -116))
+        splitStart.press(forDuration: 0.05, thenDragTo: splitEnd)
 
-        XCTAssertTrue(waitForPlayerPage(expectedPage), "Horizontal swipe should switch the player page to \(expectedPage).")
+        XCTAssertTrue(element("playerQueueFullHeader").waitForExistence(timeout: 2), "Second upward drag should reveal the full queue state.")
     }
 
     @MainActor
-    private func performPagerSwipe(direction: PlayerPageSwipeDirection, in coverArea: CoverArea) {
-        switch direction {
-        case .left:
-            coverArea.leftSwipe()
-        case .right:
-            coverArea.rightSwipe()
-        }
-    }
-
-    @MainActor
-    private func currentPlayerPageTitle(timeout: TimeInterval = 2) -> String? {
-        let hint = element("playerPageHint")
-        guard hint.waitForExistence(timeout: timeout) else { return nil }
-        return hint.value as? String
-    }
-
-    private func expectedPageTitle(afterSwiping direction: PlayerPageSwipeDirection, from currentTitle: String) -> String {
-        let pages = ["队列", "正在播放", "推荐"]
-        guard let currentIndex = pages.firstIndex(of: currentTitle) else {
-            return direction == .left ? "推荐" : "队列"
-        }
-
-        switch direction {
-        case .left:
-            return pages[min(pages.count - 1, currentIndex + 1)]
-        case .right:
-            return pages[max(0, currentIndex - 1)]
-        }
+    private func selectBottomContextTab(_ rawValue: String) {
+        let tab = element("playerBottomTab-\(rawValue)")
+        XCTAssertTrue(tab.waitForExistence(timeout: 2), "Bottom context tab should exist: \(rawValue)")
+        tab.tap()
     }
 
     @MainActor
     private func centerPlayerCoverArea() -> CoverArea {
         let nowPlaying = element("nowPlayingView")
         let artwork = element("nowPlayingArtwork")
-        let pageHint = element("playerPageHint")
+        let topChrome = element("playerTopChrome")
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 2), "Full player should exist before deriving the cover area.")
         if artwork.waitForExistence(timeout: 2), !artwork.frame.isEmpty {
             return CoverArea(app: app, screenPoint: CGPoint(x: artwork.frame.midX, y: artwork.frame.midY))
         }
 
-        XCTAssertTrue(pageHint.waitForExistence(timeout: 2), "Page hint should exist before deriving the cover area.")
+        XCTAssertTrue(topChrome.waitForExistence(timeout: 2), "Top chrome should exist before deriving the cover area.")
 
-        let top = max(pageHint.frame.maxY, nowPlaying.frame.minY + 96)
+        let top = max(topChrome.frame.maxY, nowPlaying.frame.minY + 96)
         let y = min(max(top + 170, app.frame.minY + 160), app.frame.maxY * 0.54)
         return CoverArea(app: app, screenPoint: CGPoint(x: app.frame.midX, y: y))
     }
@@ -694,26 +745,14 @@ final class PlayerChromeUITests: XCTestCase {
     }
 
     @MainActor
-    private func waitForPlayerPage(_ title: String, timeout: TimeInterval = 2) -> Bool {
-        if title != "正在播放" {
-            let expectedPageIdentifier = title == "队列" ? "playerQueuePage" : "playerRecommendationsPage"
-            let expectedPage = element(expectedPageIdentifier)
-            if expectedPage.waitForExistence(timeout: timeout), expectedPage.isHittable {
-                return true
-            }
-        }
+    private func waitForSingleNowPlayingSurface(timeout: TimeInterval = 2) -> Bool {
+        let nowPlaying = element("nowPlayingView")
+        guard nowPlaying.waitForExistence(timeout: timeout) else { return false }
 
-        let hint = element("playerPageHint")
-        guard hint.waitForExistence(timeout: timeout) else { return false }
+        let topChrome = element("playerTopChrome")
+        guard topChrome.waitForExistence(timeout: timeout) else { return false }
 
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if hint.value as? String == title {
-                return true
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
-        }
-        return hint.value as? String == title
+        return true
     }
 
 }

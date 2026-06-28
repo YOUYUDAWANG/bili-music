@@ -50,9 +50,9 @@ struct PlayerArtworkPalette: Equatable {
     let bottom: UIColor
 
     static let fallback = PlayerArtworkPalette(
-        top: UIColor(red: 0.19, green: 0.20, blue: 0.23, alpha: 1),
-        middle: UIColor(red: 0.10, green: 0.11, blue: 0.13, alpha: 1),
-        bottom: UIColor(red: 0.02, green: 0.02, blue: 0.03, alpha: 1)
+        top: UIColor(red: 0.42, green: 0.53, blue: 0.60, alpha: 1),
+        middle: UIColor(red: 0.24, green: 0.32, blue: 0.39, alpha: 1),
+        bottom: UIColor(red: 0.13, green: 0.17, blue: 0.22, alpha: 1)
     )
 
     static func == (lhs: PlayerArtworkPalette, rhs: PlayerArtworkPalette) -> Bool {
@@ -63,14 +63,14 @@ struct PlayerArtworkPalette: Equatable {
 
     static func from(_ image: UIImage?) -> PlayerArtworkPalette {
         guard let base = image?.averageColor else { return .fallback }
-        let readable = base
-            .limitedSaturation(maximum: 0.58)
-            .limitedBrightness(maximum: 0.40)
-            .mixed(with: UIColor(red: 0.18, green: 0.20, blue: 0.24, alpha: 1), amount: 0.10)
+        let ambient = base
+            .boostedSaturation(1.16)
+            .limitedSaturation(minimum: 0.18, maximum: 0.72)
+            .limitedBrightness(minimum: 0.34, maximum: 0.68)
         return PlayerArtworkPalette(
-            top: readable.mixed(with: .white, amount: 0.14),
-            middle: readable.mixed(with: .black, amount: 0.24),
-            bottom: readable.mixed(with: .black, amount: 0.80)
+            top: ambient.mixed(with: .white, amount: 0.24),
+            middle: ambient.mixed(with: UIColor(red: 0.28, green: 0.30, blue: 0.34, alpha: 1), amount: 0.18),
+            bottom: ambient.mixed(with: .black, amount: 0.46)
         )
     }
 
@@ -83,6 +83,19 @@ struct PlayerArtworkPalette: Equatable {
             ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
+        )
+    }
+
+    var glow: RadialGradient {
+        RadialGradient(
+            colors: [
+                Color(uiColor: top).opacity(0.92),
+                Color(uiColor: middle).opacity(0.50),
+                Color.clear
+            ],
+            center: .topLeading,
+            startRadius: 24,
+            endRadius: 520
         )
     }
 }
@@ -162,7 +175,7 @@ private extension UIColor {
         )
     }
 
-    func limitedSaturation(maximum: CGFloat) -> UIColor {
+    func limitedSaturation(minimum: CGFloat = 0.16, maximum: CGFloat) -> UIColor {
         var hue: CGFloat = 0
         var saturation: CGFloat = 0
         var brightness: CGFloat = 0
@@ -172,13 +185,13 @@ private extension UIColor {
         }
         return UIColor(
             hue: hue,
-            saturation: min(maximum, max(0.16, saturation)),
+            saturation: min(maximum, max(minimum, saturation)),
             brightness: brightness,
             alpha: alpha
         )
     }
 
-    func limitedBrightness(maximum: CGFloat) -> UIColor {
+    func limitedBrightness(minimum: CGFloat = 0.18, maximum: CGFloat) -> UIColor {
         var hue: CGFloat = 0
         var saturation: CGFloat = 0
         var brightness: CGFloat = 0
@@ -189,7 +202,7 @@ private extension UIColor {
         return UIColor(
             hue: hue,
             saturation: saturation,
-            brightness: min(maximum, max(0.18, brightness)),
+            brightness: min(maximum, max(minimum, brightness)),
             alpha: alpha
         )
     }

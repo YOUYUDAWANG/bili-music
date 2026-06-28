@@ -12,8 +12,6 @@ enum PlayerGesturePolicy {
     static let dismissPredictedThreshold: CGFloat = 260
     static let topChromeDismissTranslationThreshold: CGFloat = 90
     static let topChromeDismissPredictedThreshold: CGFloat = 180
-    private static let horizontalPageIntentRatio: CGFloat = 1.12
-
     enum DismissRegion {
         case centerBody
         case topChrome
@@ -34,6 +32,50 @@ enum PlayerGesturePolicy {
             return 1 - CGFloat(pow(Double(1 - clamped), 1.08))
         }
         return clamped
+    }
+
+    static func artworkRevealOpacity(
+        openProgress: CGFloat,
+        isTransitionSource: Bool,
+        isSharedTransitionActive: Bool
+    ) -> CGFloat {
+        guard isTransitionSource else { return 0 }
+        return 1
+    }
+
+    static func fullPlayerArtworkIsSource(
+        isFullPlayerPresented: Bool,
+        isClosing: Bool
+    ) -> Bool {
+        isFullPlayerPresented && !isClosing
+    }
+
+    static func miniPlayerArtworkIsSource(
+        isFullPlayerPresented: Bool,
+        isClosing: Bool
+    ) -> Bool {
+        !isFullPlayerPresented || isClosing
+    }
+
+    static func fullPlayerContainerOpacity(
+        openProgress: CGFloat,
+        isClosing: Bool,
+        fullPlayerOwnsArtwork: Bool
+    ) -> Double {
+        // If the full player owns the shared artwork source, fading the whole
+        // container hides the artwork before the mini target can take over.
+        // During close, ownership switches to the mini player, so the full
+        // container may fade out without leaving a cover-only residual screen.
+        guard isClosing, !fullPlayerOwnsArtwork else { return 1 }
+        return Double(clamp(openProgress))
+    }
+
+    static func shouldFinishOpenTransition(
+        isFullPlayerPresented: Bool,
+        isMiniOpening: Bool,
+        isClosing: Bool
+    ) -> Bool {
+        isFullPlayerPresented && !isMiniOpening && !isClosing
     }
 
     static func shouldBeginMiniOpenDrag(translation: CGSize) -> Bool {
@@ -129,35 +171,6 @@ enum PlayerGesturePolicy {
             startY: 0,
             region: .topChrome,
             isProgressScrubbing: false)
-    }
-
-    static func horizontalPageSwipeIntent(
-        translation: CGSize,
-        predictedEndTranslation: CGSize,
-        width: CGFloat
-    ) -> CGFloat? {
-        let horizontalIntent = strongerIntent(
-            translation.width,
-            predictedEndTranslation.width)
-        let verticalIntent = strongerIntent(
-            translation.height,
-            predictedEndTranslation.height)
-        let horizontalThreshold = max(28, width * 0.07)
-        guard abs(horizontalIntent) > horizontalThreshold,
-              abs(horizontalIntent) > abs(verticalIntent) * horizontalPageIntentRatio
-        else { return nil }
-        return horizontalIntent
-    }
-
-    static func isHorizontalPageSwipe(
-        translation: CGSize,
-        predictedEndTranslation: CGSize,
-        width: CGFloat
-    ) -> Bool {
-        horizontalPageSwipeIntent(
-            translation: translation,
-            predictedEndTranslation: predictedEndTranslation,
-            width: width) != nil
     }
 
     static func shouldSuppressListRowTap(

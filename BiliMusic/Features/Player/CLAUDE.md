@@ -2,7 +2,7 @@
 
 ## 模块职责
 
-全屏正在播放页的 UI 实现。包括当前播放页、进度条、歌词页、MV 全屏、收藏夹选择器、UP 主合集视图。
+全屏正在播放页的 UI 实现。包括当前歌曲、进度条、底部队列/合集/推荐抽屉、歌词页、MV 全屏、收藏夹选择器、UP 主合集视图。
 
 ## 入口与启动
 
@@ -25,8 +25,8 @@
 | 曲目信息 | 标题、歌手、错误信息 |
 | PlayerProgressBar | 进度条（独立子视图限制 currentTime 订阅范围） |
 | 控制按钮 | 上一曲、播放/暂停、下一曲 |
-| 操作栏 | 收藏（短按/长按）、下载、歌词、播放模式、音质、合集 |
-| 底部面板 | 合集列表 / 队列预览 |
+| 操作栏 | 收藏（短按/长按）、下载、音乐/MV 切换、更多 |
+| 底部抽屉 | 当前列表 / 合集 / 推荐，支持 collapsed → split → full 两段式展开 |
 | 歌词页 | LyricSheetView（滚动高亮、自动居中） |
 | MV 全屏 | MVFullscreenView（全屏视频播放） |
 
@@ -43,7 +43,8 @@
 
 所有使用的模型在 PlayerEngine 或其他模块中定义。本模块内：
 - `PlaylistLookupResult` — 合集查找结果（private struct）
-- `PlayerPage` — 推荐/队列辅助状态枚举（不再驱动顶部滑动分页 UI）
+- `QueuePresentationState` — 底部抽屉 collapsed/split/full 展开状态
+- `BottomContextTab` — 底部抽屉内的当前列表、合集、推荐切换状态
 
 ## 相关文件清单
 

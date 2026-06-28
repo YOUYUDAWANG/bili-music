@@ -21,6 +21,102 @@ final class PlayerGesturePolicyTests: XCTestCase {
         XCTAssertEqual(PlayerGesturePolicy.miniOpenProgress(for: -PlayerGesturePolicy.miniOpeningDragRange * 1.5), 1)
     }
 
+    func testArtworkRevealKeepsSourceVisibleDuringSharedTransition() {
+        XCTAssertEqual(PlayerGesturePolicy.artworkRevealOpacity(
+            openProgress: 0.04,
+            isTransitionSource: true,
+            isSharedTransitionActive: true), 1)
+
+        XCTAssertEqual(PlayerGesturePolicy.artworkRevealOpacity(
+            openProgress: 0.20,
+            isTransitionSource: true,
+            isSharedTransitionActive: true), 1)
+
+        XCTAssertEqual(PlayerGesturePolicy.artworkRevealOpacity(
+            openProgress: PlayerGesturePolicy.miniOpeningActivationProgress,
+            isTransitionSource: true,
+            isSharedTransitionActive: true), 1)
+    }
+
+    func testArtworkRevealDoesNotHideStableFullPlayerArtwork() {
+        XCTAssertEqual(PlayerGesturePolicy.artworkRevealOpacity(
+            openProgress: 0,
+            isTransitionSource: true,
+            isSharedTransitionActive: false), 1)
+
+        XCTAssertEqual(PlayerGesturePolicy.artworkRevealOpacity(
+            openProgress: 1,
+            isTransitionSource: false,
+            isSharedTransitionActive: false), 0)
+    }
+
+    func testArtworkSourceOwnershipSwapsToMiniDuringClosing() {
+        XCTAssertTrue(PlayerGesturePolicy.fullPlayerArtworkIsSource(
+            isFullPlayerPresented: true,
+            isClosing: false))
+        XCTAssertFalse(PlayerGesturePolicy.miniPlayerArtworkIsSource(
+            isFullPlayerPresented: true,
+            isClosing: false))
+
+        XCTAssertFalse(PlayerGesturePolicy.fullPlayerArtworkIsSource(
+            isFullPlayerPresented: true,
+            isClosing: true))
+        XCTAssertTrue(PlayerGesturePolicy.miniPlayerArtworkIsSource(
+            isFullPlayerPresented: true,
+            isClosing: true))
+    }
+
+    func testFullPlayerContainerStaysVisibleWhileOwningSharedArtwork() {
+        XCTAssertEqual(PlayerGesturePolicy.fullPlayerContainerOpacity(
+            openProgress: 1,
+            isClosing: true,
+            fullPlayerOwnsArtwork: true), 1)
+
+        XCTAssertEqual(PlayerGesturePolicy.fullPlayerContainerOpacity(
+            openProgress: 0.35,
+            isClosing: true,
+            fullPlayerOwnsArtwork: true), 1)
+    }
+
+    func testFullPlayerContainerCanFadeAfterMiniOwnsSharedArtwork() {
+        XCTAssertEqual(PlayerGesturePolicy.fullPlayerContainerOpacity(
+            openProgress: 1,
+            isClosing: true,
+            fullPlayerOwnsArtwork: false), 1)
+
+        XCTAssertEqual(PlayerGesturePolicy.fullPlayerContainerOpacity(
+            openProgress: 0.35,
+            isClosing: true,
+            fullPlayerOwnsArtwork: false), 0.35)
+
+        XCTAssertEqual(PlayerGesturePolicy.fullPlayerContainerOpacity(
+            openProgress: 0,
+            isClosing: true,
+            fullPlayerOwnsArtwork: false), 0)
+    }
+
+    func testStaleOpenCompletionDoesNotRunWhileClosing() {
+        XCTAssertTrue(PlayerGesturePolicy.shouldFinishOpenTransition(
+            isFullPlayerPresented: true,
+            isMiniOpening: false,
+            isClosing: false))
+
+        XCTAssertFalse(PlayerGesturePolicy.shouldFinishOpenTransition(
+            isFullPlayerPresented: true,
+            isMiniOpening: false,
+            isClosing: true))
+
+        XCTAssertFalse(PlayerGesturePolicy.shouldFinishOpenTransition(
+            isFullPlayerPresented: true,
+            isMiniOpening: true,
+            isClosing: false))
+
+        XCTAssertFalse(PlayerGesturePolicy.shouldFinishOpenTransition(
+            isFullPlayerPresented: false,
+            isMiniOpening: false,
+            isClosing: false))
+    }
+
     func testMiniPlayerOpenRequiresIntentionalVerticalUpwardDrag() {
         XCTAssertFalse(PlayerGesturePolicy.shouldBeginMiniOpenDrag(
             translation: CGSize(width: 0, height: -16)))
@@ -121,7 +217,7 @@ final class PlayerGesturePolicyTests: XCTestCase {
             isProgressScrubbing: false))
     }
 
-    func testHorizontalIntentAndScrubSuppressVerticalDismiss() {
+    func testProgressScrubSuppressesVerticalDismiss() {
         XCTAssertNil(PlayerGesturePolicy.dismissDragOffset(
             translation: CGSize(width: 0, height: 180),
             startY: 60,
@@ -133,14 +229,6 @@ final class PlayerGesturePolicyTests: XCTestCase {
             startY: 60,
             region: .topChrome,
             isProgressScrubbing: true))
-        XCTAssertFalse(PlayerGesturePolicy.isHorizontalPageSwipe(
-            translation: CGSize(width: 52, height: 88),
-            predictedEndTranslation: CGSize(width: 64, height: 124),
-            width: 390))
-        XCTAssertTrue(PlayerGesturePolicy.isHorizontalPageSwipe(
-            translation: CGSize(width: -86, height: 12),
-            predictedEndTranslation: CGSize(width: -116, height: 18),
-            width: 390))
     }
 
     func testProgressScrubMathUsesVisibleTrackCoordinates() {

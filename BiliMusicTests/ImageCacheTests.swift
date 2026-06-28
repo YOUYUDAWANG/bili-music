@@ -273,6 +273,35 @@ final class ImageCacheTests: XCTestCase {
         XCTAssertTrue(displayed === currentFallback)
     }
 
+    @MainActor
+    func testCachedAsyncImageUsesReusableCachedImageWhenFallbackIsMissing() {
+        let reusable = makeImage(size: CGSize(width: 150, height: 85), color: .green)
+
+        let displayed = CachedImageDisplayState.preferredImage(
+            loadedImage: nil,
+            loadedIdentifier: nil,
+            currentIdentifier: "cover#960x540",
+            fallbackImage: nil,
+            reusableImage: reusable)
+
+        XCTAssertTrue(displayed === reusable)
+    }
+
+    @MainActor
+    func testCachedAsyncImagePrefersLargerReusableImageOverSmallFallback() {
+        let fallback = makeImage(size: CGSize(width: 44, height: 25), color: .green)
+        let reusable = makeImage(size: CGSize(width: 150, height: 85), color: .blue)
+
+        let displayed = CachedImageDisplayState.preferredImage(
+            loadedImage: nil,
+            loadedIdentifier: nil,
+            currentIdentifier: "cover#960x540",
+            fallbackImage: fallback,
+            reusableImage: reusable)
+
+        XCTAssertTrue(displayed === reusable)
+    }
+
     private func makeImage(size: CGSize, color: UIColor) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1

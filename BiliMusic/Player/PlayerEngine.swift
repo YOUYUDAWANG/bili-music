@@ -270,6 +270,7 @@ final class PlayerEngine {
         case playRequested(PlaybackDiagnosticEvent.SourceKind)
         case firstPlaying(PlaybackDiagnosticEvent.SourceKind)
         case historyScheduled
+        case artworkPrefetchScheduled
         case artworkScheduled
         case lyricsScheduled
         case mvPreparationScheduled
@@ -371,6 +372,7 @@ final class PlayerEngine {
     private var prefetchTask: Task<Void, Never>?
     private var queuePrefetchTask: Task<Void, Never>?
     private var preloadTask: Task<Void, Never>?
+    private var startupArtworkTask: Task<Void, Never>?
     private var autoMVTask: Task<Void, Never>?
     private var postPlaybackTask: Task<Void, Never>?
     private var remoteStartupFallbackTask: Task<Void, Never>?
@@ -731,34 +733,72 @@ final class PlayerEngine {
     }
 
     func restoreCurrentArtworkFromImageCache() {
-        guard let current,
-              currentCoverImageNeedsUpgrade,
-              let baseCoverURL = current.coverURL,
-              let coverURL = artworkURL(baseCoverURL) else { return }
+        guard let current else {
+#if DEBUG
+            artworkDiag("restore.skip.noCurrent")
+#endif
+            return
+        }
+        guard currentCoverImageNeedsUpgrade else {
+#if DEBUG
+            artworkDiag("restore.skip.coverAlreadyUsable", track: current)
+#endif
+            return
+        }
+        guard let baseCoverURL = current.coverURL,
+              let coverURL = artworkURL(baseCoverURL) else {
+#if DEBUG
+            artworkDiag("restore.skip.noCoverURL", track: current)
+#endif
+            return
+        }
         if let cached = ImageMemoryCache.shared.bestImage(forAnyVariantOf: baseCoverURL)
             ?? ImageMemoryCache.shared.bestImage(forAnyVariantOf: coverURL) {
+#if DEBUG
+            artworkDiag("restore.hit.bestVariant", track: current, extra: "image=\(Self.debugImageDescription(cached))")
+#endif
             storeCurrentCover(cached, for: current)
             return
         }
         let targetPixelSize = CGSize(width: 960, height: 540)
         guard let cached = ImageMemoryCache.shared.image(for: coverURL, targetPixelSize: targetPixelSize) else {
+#if DEBUG
+            artworkDiag("restore.miss", track: current, extra: "url=\(coverURL.absoluteString)")
+#endif
             return
         }
+#if DEBUG
+        artworkDiag("restore.hit.exact", track: current, extra: "image=\(Self.debugImageDescription(cached))")
+#endif
         storeCurrentCover(cached, for: current)
     }
 
     private func storeCurrentCover(_ image: UIImage, for track: Track) {
-        guard current.map({ track.key.matches($0) }) ?? false else { return }
+        guard current.map({ track.key.matches($0) }) ?? false else {
+#if DEBUG
+            artworkDiag("store.skip.staleTrack", track: track, extra: "image=\(Self.debugImageDescription(image))")
+#endif
+            return
+        }
         let normalized = image.resized(maxDimension: 960)
         if coverImageKey?.matches(track) == true,
            let coverImage,
            Self.pixelArea(of: coverImage) >= Self.pixelArea(of: normalized) {
+#if DEBUG
+            artworkDiag(
+                "store.skip.existingLarger",
+                track: track,
+                extra: "existing=\(Self.debugImageDescription(coverImage)) incoming=\(Self.debugImageDescription(normalized))")
+#endif
             return
         }
         coverImage = normalized
         coverImageKey = track.key
         artworkPalette = PlayerArtworkPalette.from(normalized)
         artworkPaletteKey = track.key
+#if DEBUG
+        artworkDiag("store.done", track: track, extra: "image=\(Self.debugImageDescription(normalized))")
+#endif
         updateNowPlayingInfo()
     }
 
@@ -786,6 +826,9 @@ final class PlayerEngine {
         playbackDiagnostics.record(.currentAssigned, track: track)
         startupTestHooks.record(.currentAssigned)
         state = .loading
+#if DEBUG
+        artworkDiag("startCurrent.assigned", track: track, extra: "resumeAt=\(String(format: "%.2f", resumeAt))")
+#endif
         currentTime = resumeAt
         lyrics = []
         videoAvailable = false
@@ -793,9 +836,11 @@ final class PlayerEngine {
         currentAudioBandwidth = nil
         currentVideoQuality = nil
         autoMVTask?.cancel()
+        startupArtworkTask?.cancel()
         postPlaybackTask?.cancel()
         queuePrefetchTask?.cancel()
         remoteStartupFallbackTask?.cancel()
+        scheduleStartupArtworkPrefetch(for: track, generation: generation)
         do {
             let source = try await resolvePlaybackSource(for: track)
             track = source.track
@@ -1058,6 +1103,44 @@ final class PlayerEngine {
             guard !Task.isCancelled else { return }
             self?.startupTestHooks.record(.mvPreparationScheduled)
             await self?.prepareVideoIfUseful(for: track, generation: generation)
+        }
+    }
+
+    private func scheduleStartupArtworkPrefetch(for track: Track, generation: UUID) {
+#if DEBUG
+        artworkDiag(
+            "startupPrefetch.enter",
+            track: track,
+            extra: "hasCoverURL=\(track.coverURL != nil)")
+#endif
+        guard track.coverURL != nil else {
+#if DEBUG
+            artworkDiag("startupPrefetch.skip.noCoverURL", track: track)
+#endif
+            return
+        }
+        startupTestHooks.record(.artworkPrefetchScheduled)
+        restoreCurrentArtworkFromImageCache()
+#if DEBUG
+        artworkDiag(
+            "startupPrefetch.afterRestore",
+            track: track,
+            extra: "needsUpgrade=\(currentCoverImageNeedsUpgrade)")
+#endif
+        guard currentCoverImageNeedsUpgrade else {
+#if DEBUG
+            artworkDiag("startupPrefetch.skip.coverReady", track: track)
+#endif
+            return
+        }
+
+        startupArtworkTask = Task(priority: .userInitiated) { [weak self, track, generation] in
+            await self?.loadCover(
+                for: track,
+                generation: generation,
+                width: 320,
+                height: 180,
+                priority: .userInitiated)
         }
     }
 
@@ -1399,35 +1482,123 @@ final class PlayerEngine {
             errorDescription: message)
     }
 
-    private func loadCover(for track: Track, generation: UUID) async {
-        guard let coverURL = artworkURL(track.coverURL),
-              isCurrent(track, generation: generation) else { return }
-        let targetPixelSize = CGSize(width: 960, height: 540)
+    private func loadCover(
+        for track: Track,
+        generation: UUID,
+        width: Int = 960,
+        height: Int = 540,
+        priority: TaskPriority = .utility
+    ) async {
+        let startedAt = CFAbsoluteTimeGetCurrent()
+        guard let coverURL = artworkURL(track.coverURL, width: width, height: height) else {
+#if DEBUG
+            artworkDiag("loadCover.skip.noURL", track: track, extra: "target=\(width)x\(height)")
+#endif
+            return
+        }
+        guard isCurrent(track, generation: generation) else {
+#if DEBUG
+            artworkDiag("loadCover.skip.notCurrentBeforeLoad", track: track, extra: "target=\(width)x\(height)")
+#endif
+            return
+        }
+#if DEBUG
+        artworkDiag("loadCover.start", track: track, extra: "target=\(width)x\(height) url=\(coverURL.absoluteString)")
+#endif
+        let targetPixelSize = CGSize(width: width, height: height)
         if let cached = ImageMemoryCache.shared.image(for: coverURL, targetPixelSize: targetPixelSize) {
             guard isCurrent(track, generation: generation) else { return }
+#if DEBUG
+            artworkDiag(
+                "loadCover.cacheHit",
+                track: track,
+                extra: "target=\(width)x\(height) elapsed=\(Self.debugElapsedMS(since: startedAt)) image=\(Self.debugImageDescription(cached))")
+#endif
             storeCurrentCover(cached, for: track)
             return
         }
         guard let decoded = await ImageLoadCoordinator.shared.image(
             for: coverURL,
             targetPixelSize: targetPixelSize,
-            scale: 1
-        ) else { return }
-        guard isCurrent(track, generation: generation) else { return }
+            scale: 1,
+            priority: priority
+        ) else {
+#if DEBUG
+            artworkDiag(
+                "loadCover.downloadNil",
+                track: track,
+                extra: "target=\(width)x\(height) elapsed=\(Self.debugElapsedMS(since: startedAt))")
+#endif
+            return
+        }
+        guard isCurrent(track, generation: generation) else {
+#if DEBUG
+            artworkDiag(
+                "loadCover.skip.notCurrentAfterLoad",
+                track: track,
+                extra: "target=\(width)x\(height) elapsed=\(Self.debugElapsedMS(since: startedAt)) image=\(Self.debugImageDescription(decoded))")
+#endif
+            return
+        }
         ImageMemoryCache.shared.insert(decoded, for: coverURL, targetPixelSize: targetPixelSize)
+#if DEBUG
+        artworkDiag(
+            "loadCover.downloadDone",
+            track: track,
+            extra: "target=\(width)x\(height) elapsed=\(Self.debugElapsedMS(since: startedAt)) image=\(Self.debugImageDescription(decoded))")
+#endif
         storeCurrentCover(decoded, for: track)
     }
 
     private func artworkURL(_ url: URL?) -> URL? {
+        artworkURL(url, width: 960, height: 540)
+    }
+
+    private func artworkURL(_ url: URL?, width: Int, height: Int) -> URL? {
         guard let url else { return nil }
         let raw = url.absoluteString
         guard raw.contains("hdslb.com"), !raw.contains("@") else { return url }
-        return URL(string: raw + "@960w_540h_1c.webp")
+        return URL(string: raw + "@\(width)w_\(height)h_1c.webp")
     }
 
     private static func pixelArea(of image: UIImage) -> CGFloat {
         image.size.width * image.scale * image.size.height * image.scale
     }
+
+#if DEBUG
+    private func artworkDiag(_ message: String, track: Track? = nil, extra: String = "") {
+        let track = track ?? current
+        let trackKey = track?.key.description ?? "nil"
+        let currentKey = current?.key.description ?? "nil"
+        let storedKey = coverImageKey?.description ?? "nil"
+        let hasMatchingImage = track.map { coverImageKey?.matches($0) == true && coverImage != nil } ?? false
+        let coverURLState = track?.coverURL == nil ? "nil" : "set"
+        let stateText = String(describing: state)
+        let suffix = extra.isEmpty ? "" : " \(extra)"
+        NSLog(
+            "ARTWORK_DIAG engine %@ track=%@ current=%@ coverURL=%@ storedKey=%@ hasMatchingImage=%@ state=%@%@",
+            message,
+            trackKey,
+            currentKey,
+            coverURLState,
+            storedKey,
+            hasMatchingImage ? "true" : "false",
+            stateText,
+            suffix
+        )
+    }
+
+    private static func debugImageDescription(_ image: UIImage?) -> String {
+        guard let image else { return "nil" }
+        let width = Int((image.size.width * image.scale).rounded())
+        let height = Int((image.size.height * image.scale).rounded())
+        return "\(width)x\(height)@\(String(format: "%.1f", image.scale))"
+    }
+
+    private static func debugElapsedMS(since start: CFAbsoluteTime) -> String {
+        String(format: "%.1fms", (CFAbsoluteTimeGetCurrent() - start) * 1000)
+    }
+#endif
 
     private func loadLyrics(for track: Track, generation: UUID) async {
         // 只用 LRCLIB 在线歌词。不再 fallback 到 B 站字幕——音乐区"字幕"多是自动生成的 CC,

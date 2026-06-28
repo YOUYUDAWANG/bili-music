@@ -66,7 +66,7 @@ final class RecommendationSchedulingTests: XCTestCase {
 
     func testPlayingDoesNotLoadRecommendationsWhenPanelIsHidden() {
         let policy = RecommendationVisibleLoadPolicy.playbackStarted(
-            recommendationsPageSelected: false,
+            recommendationContextVisible: false,
             recommendationsStale: true,
             recommendationsEmpty: true,
             recommendationsMismatched: true)
@@ -76,7 +76,7 @@ final class RecommendationSchedulingTests: XCTestCase {
 
     func testPlayingLoadsRecommendationsWhenVisibleAndStale() {
         let policy = RecommendationVisibleLoadPolicy.playbackStarted(
-            recommendationsPageSelected: true,
+            recommendationContextVisible: true,
             recommendationsStale: true,
             recommendationsEmpty: false,
             recommendationsMismatched: false)
@@ -84,9 +84,9 @@ final class RecommendationSchedulingTests: XCTestCase {
         XCTAssertTrue(policy.shouldLoad)
     }
 
-    func testPageSelectionLoadsRecommendationsWhenVisibleAndEmpty() {
-        let policy = RecommendationVisibleLoadPolicy.selectedPageChanged(
-            recommendationsPageSelected: true,
+    func testVisibleContextLoadsRecommendationsWhenVisibleAndEmpty() {
+        let policy = RecommendationVisibleLoadPolicy.visibleContextChanged(
+            recommendationContextVisible: true,
             recommendationsStale: false,
             recommendationsEmpty: true,
             recommendationsMismatched: false)
@@ -94,9 +94,9 @@ final class RecommendationSchedulingTests: XCTestCase {
         XCTAssertTrue(policy.shouldLoad)
     }
 
-    func testPageSelectionLoadsRecommendationsWhenVisibleAndMismatched() {
-        let policy = RecommendationVisibleLoadPolicy.selectedPageChanged(
-            recommendationsPageSelected: true,
+    func testVisibleContextLoadsRecommendationsWhenVisibleAndMismatched() {
+        let policy = RecommendationVisibleLoadPolicy.visibleContextChanged(
+            recommendationContextVisible: true,
             recommendationsStale: false,
             recommendationsEmpty: false,
             recommendationsMismatched: true)
@@ -104,9 +104,9 @@ final class RecommendationSchedulingTests: XCTestCase {
         XCTAssertTrue(policy.shouldLoad)
     }
 
-    func testPageSelectionDoesNotLoadRecommendationsWhenHiddenEvenIfStale() {
-        let policy = RecommendationVisibleLoadPolicy.selectedPageChanged(
-            recommendationsPageSelected: false,
+    func testVisibleContextDoesNotLoadRecommendationsWhenHiddenEvenIfStale() {
+        let policy = RecommendationVisibleLoadPolicy.visibleContextChanged(
+            recommendationContextVisible: false,
             recommendationsStale: true,
             recommendationsEmpty: false,
             recommendationsMismatched: false)

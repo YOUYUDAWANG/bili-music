@@ -115,7 +115,8 @@ actor ImageLoadCoordinator {
         for url: URL,
         targetPixelSize: CGSize?,
         headers: [String: String] = BiliClient.headers,
-        scale: CGFloat = 1
+        scale: CGFloat = 1,
+        priority: TaskPriority = .utility
     ) async -> UIImage? {
         let normalizedTarget = Self.normalizedTargetPixelSize(targetPixelSize)
         let key = ImageLoadKey(url: url, targetPixelSize: normalizedTarget)
@@ -127,13 +128,13 @@ actor ImageLoadCoordinator {
         headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
         let session = session
         let target = normalizedTarget
-        let task = Task<UIImage?, Never>(priority: .utility) {
+        let task = Task<UIImage?, Never>(priority: priority) {
             do {
                 let (data, response) = try await session.data(for: request)
                 if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
                     return nil
                 }
-                return await Task.detached(priority: .utility) {
+                return await Task.detached(priority: priority) {
                     Self.downsample(data: data, targetPixelSize: target, scale: scale)
                 }.value
             } catch {
@@ -210,12 +211,23 @@ enum CachedImageDisplayState {
         loadedImage: UIImage?,
         loadedIdentifier: String?,
         currentIdentifier: String,
-        fallbackImage: UIImage?
+        fallbackImage: UIImage?,
+        reusableImage: UIImage? = nil
     ) -> UIImage? {
         if loadedIdentifier == currentIdentifier, let loadedImage {
             return loadedImage
         }
-        return fallbackImage
+        return largestImage(fallbackImage, reusableImage)
+    }
+
+    private static func largestImage(_ lhs: UIImage?, _ rhs: UIImage?) -> UIImage? {
+        guard let lhs else { return rhs }
+        guard let rhs else { return lhs }
+        return pixelArea(lhs) >= pixelArea(rhs) ? lhs : rhs
+    }
+
+    private static func pixelArea(_ image: UIImage) -> CGFloat {
+        image.size.width * image.scale * image.size.height * image.scale
     }
 }
 
@@ -224,6 +236,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     var headers: [String: String] = BiliClient.headers
     var targetSize: CGSize?
     var fallbackImage: UIImage?
+    var debugIdentifier: String?
     var onImageLoaded: @MainActor (UIImage) -> Void = { _ in }
     @ViewBuilder var content: (Image) -> Content
     @ViewBuilder var placeholder: () -> Placeholder
@@ -233,9 +246,34 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     @State private var loadedIdentifier: String?
 
     var body: some View {
+        let resolvedDisplayImage = displayImage
+        let hasDisplayImage = resolvedDisplayImage != nil
+        let identifier = loadIdentifier
+
+#if DEBUG
         Group {
-            if let displayImage {
-                content(Image(uiImage: displayImage))
+            if let resolvedDisplayImage {
+                content(Image(uiImage: resolvedDisplayImage))
+            } else {
+                placeholder()
+            }
+        }
+        .onAppear {
+            debugLog("body.appear hasDisplay=\(hasDisplayImage) identifier=\(identifier)")
+        }
+        .onChange(of: hasDisplayImage) { _, hasDisplayImage in
+            debugLog("body.displayChanged hasDisplay=\(hasDisplayImage) identifier=\(loadIdentifier)")
+        }
+        .onChange(of: identifier) { _, identifier in
+            debugLog("body.identifierChanged identifier=\(identifier)")
+        }
+        .task(id: loadIdentifier) {
+            await load()
+        }
+#else
+        Group {
+            if let resolvedDisplayImage {
+                content(Image(uiImage: resolvedDisplayImage))
             } else {
                 placeholder()
             }
@@ -243,6 +281,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         .task(id: loadIdentifier) {
             await load()
         }
+#endif
     }
 
     @MainActor
@@ -255,10 +294,17 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         let identifier = loadIdentifier
         let scale = max(displayScale, 1)
         let targetPixelSize = ImageMemoryCache.targetPixelSize(for: targetSize, scale: scale)
+#if DEBUG
+        let startedAt = CFAbsoluteTimeGetCurrent()
+        debugLog("load.start identifier=\(identifier) target=\(debugTargetDescription(targetPixelSize))")
+#endif
         if let cached = ImageMemoryCache.shared.image(for: url, targetPixelSize: targetPixelSize) {
             guard identifier == loadIdentifier else { return }
             image = cached
             loadedIdentifier = identifier
+#if DEBUG
+            debugLog("load.exactCacheHit elapsed=\(debugElapsedMS(since: startedAt)) image=\(debugImageDescription(cached))")
+#endif
             onImageLoaded(cached)
             return
         }
@@ -266,6 +312,9 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
             guard identifier == loadIdentifier else { return }
             image = reusable
             loadedIdentifier = identifier
+#if DEBUG
+            debugLog("load.reusableCacheHit elapsed=\(debugElapsedMS(since: startedAt)) image=\(debugImageDescription(reusable))")
+#endif
             onImageLoaded(reusable)
         }
         // 不提前清空 image：保留旧图或占位图，避免磁盘缓存命中时的闪烁
@@ -275,21 +324,29 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
             headers: headers,
             scale: scale),
               !Task.isCancelled else {
+#if DEBUG
+            debugLog("load.downloadNil elapsed=\(debugElapsedMS(since: startedAt))")
+#endif
             return
         }
         guard identifier == loadIdentifier else { return }
         ImageMemoryCache.shared.insert(decoded, for: url, targetPixelSize: targetPixelSize)
         image = decoded
         loadedIdentifier = identifier
+#if DEBUG
+        debugLog("load.downloadDone elapsed=\(debugElapsedMS(since: startedAt)) image=\(debugImageDescription(decoded))")
+#endif
         onImageLoaded(decoded)
     }
 
     private var displayImage: UIImage? {
-        CachedImageDisplayState.preferredImage(
+        let reusableImage = url.flatMap { ImageMemoryCache.shared.bestImage(forAnyVariantOf: $0) }
+        return CachedImageDisplayState.preferredImage(
             loadedImage: image,
             loadedIdentifier: loadedIdentifier,
             currentIdentifier: loadIdentifier,
-            fallbackImage: fallbackImage)
+            fallbackImage: fallbackImage,
+            reusableImage: reusableImage)
     }
 
     private var loadIdentifier: String {
@@ -301,4 +358,27 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         }
         return "\(url.absoluteString)#original"
     }
+
+#if DEBUG
+    private func debugLog(_ message: String) {
+        guard let debugIdentifier else { return }
+        NSLog("ARTWORK_DIAG cachedAsyncImage %@ %@", debugIdentifier, message)
+    }
+
+    private func debugTargetDescription(_ target: CGSize?) -> String {
+        guard let target else { return "nil" }
+        return "\(Int(target.width.rounded()))x\(Int(target.height.rounded()))"
+    }
+
+    private func debugImageDescription(_ image: UIImage?) -> String {
+        guard let image else { return "nil" }
+        let width = Int((image.size.width * image.scale).rounded())
+        let height = Int((image.size.height * image.scale).rounded())
+        return "\(width)x\(height)@\(String(format: "%.1f", image.scale))"
+    }
+
+    private func debugElapsedMS(since start: CFAbsoluteTime) -> String {
+        String(format: "%.1fms", (CFAbsoluteTimeGetCurrent() - start) * 1000)
+    }
+#endif
 }
