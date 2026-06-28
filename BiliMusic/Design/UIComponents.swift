@@ -172,7 +172,7 @@ struct MusicLoadingBlock: View {
 }
 
 struct FeaturedTrackCard: View {
-    @AppStorage(TrackTitleFormatter.cleanListTitlesDefaultsKey) private var cleanListTitles = true
+    @AppStorage(TrackTitleFormatter.cleanListTitlesDefaultsKey) private var cleanListTitles = false
     let track: Track
     var isPlaying = false
 

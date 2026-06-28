@@ -112,8 +112,10 @@ struct NowPlayingView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var onDismiss: (() -> Void)? = nil
     var namespace: Namespace.ID
+    var usesSharedTransition = false
     var isCoverTransitionSource = true
     var coverRevealProgress: CGFloat = 1
+    var contentRevealProgress: CGFloat = 1
     var safeAreaTop: CGFloat = 0
     private enum PlayerPage: Int, CaseIterable {
         case queue = 0
@@ -153,6 +155,8 @@ struct NowPlayingView: View {
     @State private var showFavoriteFolders = false
     @State private var switchingMode = false
     @GestureState private var dismissDragOffset: CGFloat = 0
+    @GestureState private var bottomContextDragOffset: CGFloat = 0
+    @State private var bottomContextExpanded = false
     @State private var playHapticTrigger = 0
     @State private var prevHapticTrigger = 0
     @State private var nextHapticTrigger = 0
@@ -178,6 +182,7 @@ struct NowPlayingView: View {
         static let contextPreviewLimit = 8
         static let sidePanelPreviewLimit = 5
         static let compactRowHeight: CGFloat = 34
+        static let bottomSheetRowHeight: CGFloat = 52
         static let dismissGrabZoneHeight: CGFloat = PlayerGesturePolicy.dismissGrabZoneHeight
     }
 
@@ -345,23 +350,24 @@ struct NowPlayingView: View {
     }
 
     @ViewBuilder
-    private func nowPlayingPage(coverSize: CGFloat, isLandscape: Bool) -> some View {
+    private func nowPlayingPage(coverSize: CGFloat, pageWidth: CGFloat, isLandscape: Bool) -> some View {
         if isLandscape {
-            landscapeNowPlayingPage(coverSize: coverSize)
+            landscapeNowPlayingPage(coverSize: coverSize, pageWidth: pageWidth)
         } else {
-            portraitNowPlayingPage(coverSize: coverSize)
+            portraitNowPlayingPage(coverSize: coverSize, pageWidth: pageWidth)
         }
     }
 
-    private func landscapeNowPlayingPage(coverSize: CGFloat) -> some View {
-        HStack(spacing: 22) {
-            mediaView(coverSize: coverSize)
+    private func landscapeNowPlayingPage(coverSize: CGFloat, pageWidth: CGFloat) -> some View {
+            HStack(spacing: 22) {
+                mediaView(coverSize: coverSize)
 
             VStack(spacing: 8) {
                 playerMetadata(compact: true)
 
                 playerControlStack(compact: true)
             }
+            .playerContentReveal(opacity: playerContentOpacity)
             .frame(maxWidth: .infinity)
         }
         .padding(.horizontal, 34)
@@ -369,7 +375,7 @@ struct NowPlayingView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
-    private func portraitNowPlayingPage(coverSize: CGFloat) -> some View {
+    private func portraitNowPlayingPage(coverSize: CGFloat, pageWidth: CGFloat) -> some View {
         GeometryReader { proxy in
             let isCompact = proxy.size.height < 760
             let topPadding = isCompact ? 24 : min(72, max(48, proxy.size.height * 0.072))
@@ -385,8 +391,10 @@ struct NowPlayingView: View {
                 playerMetadata(compact: false, centered: false)
                     .padding(.horizontal, 34)
                     .padding(.bottom, metadataBottomSpacing)
+                    .playerContentReveal(opacity: playerContentOpacity)
 
                 portraitPlayerControls(isCompact: isCompact)
+                    .playerContentReveal(opacity: playerContentOpacity)
 
                 if let favoriteError = favorites.lastError {
                     Text(favoriteError)
@@ -396,6 +404,7 @@ struct NowPlayingView: View {
                         .multilineTextAlignment(.center)
                         .padding(.top, 8)
                         .padding(.horizontal, 28)
+                        .playerContentReveal(opacity: playerContentOpacity)
                 }
 
                 Spacer(minLength: bottomFloor)
@@ -415,9 +424,8 @@ struct NowPlayingView: View {
                 .lineSpacing(2)
                 .minimumScaleFactor(0.82)
                 .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("nowPlayingTitle")
-                .matchedGeometryEffect(id: "playerTitle", in: namespace)
                 .frame(maxWidth: .infinity, alignment: centered ? .center : .leading)
+                .accessibilityIdentifier("nowPlayingTitle")
 
             Text(displayArtist)
                 .font(.system(size: compact ? 13 : 17, weight: .regular))
@@ -458,7 +466,7 @@ struct NowPlayingView: View {
                 playerToolbarButtons
                     .padding(.top, isCompact ? 20 : 24)
 
-                bottomContextListPanel(maxRows: isCompact ? 3 : 5)
+                bottomContextDrawer(maxRows: isCompact ? 3 : 5)
                     .padding(.top, isCompact ? 12 : 16)
             }
             .accessibilityElement(children: .contain)
@@ -494,44 +502,35 @@ struct NowPlayingView: View {
     }
 
     private func playerPages(coverSize: CGFloat, width: CGFloat, safeAreaTop: CGFloat, isLandscape: Bool) -> some View {
-        ScrollView(.horizontal) {
-            LazyHStack(spacing: 0) {
+        TabView(selection: $selectedPage) {
                 horizontalListPage(accessibilityIdentifier: "playerQueuePage") {
                     queueList
                 }
-                .frame(width: width)
-                .id(PlayerPage.queue.rawValue)
+                .playerContentReveal(opacity: playerContentOpacity)
+                .tag(PlayerPage.queue.rawValue)
 
-                nowPlayingPage(coverSize: coverSize, isLandscape: isLandscape)
+                nowPlayingPage(coverSize: coverSize, pageWidth: width, isLandscape: isLandscape)
                     .padding(.top, Layout.contentTopInset)
                     .contentShape(Rectangle())
                     .simultaneousGesture(centerBodyDismissDrag, including: .gesture)
-                    .frame(width: width)
-                    .id(PlayerPage.nowPlaying.rawValue)
+                    .tag(PlayerPage.nowPlaying.rawValue)
 
                 horizontalListPage(accessibilityIdentifier: "playerRecommendationsPage") {
                     recommendationsList
                 }
-                .frame(width: width)
-                .id(PlayerPage.recommendations.rawValue)
-            }
-            .frame(width: width * CGFloat(PlayerPage.allCases.count), alignment: .leading)
-            .scrollTargetLayout()
+                .playerContentReveal(opacity: playerContentOpacity)
+                .tag(PlayerPage.recommendations.rawValue)
         }
-        .frame(width: width, alignment: .leading)
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .indexViewStyle(.page(backgroundDisplayMode: .never))
         .frame(maxHeight: .infinity)
         .clipped()
         .contentShape(Rectangle())
-        .scrollIndicators(.hidden)
-        .scrollTargetBehavior(.paging)
-        .scrollPosition(id: Binding<Int?>(
-            get: { selectedPage },
-            set: { selectedPage = $0 ?? PlayerPage.nowPlaying.rawValue }
-        ))
         .accessibilityIdentifier("playerHorizontalPager")
-        .animation(pageTransitionAnimation, value: selectedPage)
-        .safeAreaInset(edge: .top, spacing: 0) {
+        .simultaneousGesture(horizontalPageCommitDrag(width: width), including: .all)
+        .overlay(alignment: .top) {
             playerTopChrome(safeAreaTop: safeAreaTop)
+                .playerContentReveal(opacity: playerContentOpacity)
         }
         .onPreferenceChange(PlayerProgressFrameKey.self) { frame in
             progressFrameInGlobal = frame
@@ -591,7 +590,7 @@ struct NowPlayingView: View {
                 .accessibilityLabel("全屏播放 MV")
             }
         }
-            .matchedGeometryEffect(id: "playerArtwork", in: namespace)
+            .nowPlayingSharedGeometry(id: "playerArtwork", in: namespace, active: usesSharedTransition)
             .frame(width: coverSize, height: coverSize * 9 / 16)
             .opacity(coverRevealOpacity)
             .clipShape(RoundedRectangle(cornerRadius: AppTheme.playerCoverRadius))
@@ -619,7 +618,11 @@ struct NowPlayingView: View {
 
     private var coverRevealOpacity: Double {
         guard isCoverTransitionSource else { return 0 }
-        let progress = min(1, max(0, (coverRevealProgress - 0.55) / 0.28))
+        return 1
+    }
+
+    private var playerContentOpacity: Double {
+        let progress = min(1, max(0, contentRevealProgress / 0.18))
         let smoothed = progress * progress * (3 - 2 * progress)
         return Double(smoothed)
     }
@@ -1282,6 +1285,99 @@ struct NowPlayingView: View {
     }
 
     @ViewBuilder
+    private func bottomContextDrawer(maxRows: Int) -> some View {
+        if hasBottomContextContent {
+            VStack(spacing: 0) {
+                bottomContextHeader
+
+                if bottomContextExpanded {
+                    PlayerSurface.divider
+                        .frame(height: 0.5)
+                        .padding(.horizontal, 28)
+                        .padding(.bottom, 6)
+
+                    bottomContextListPanel(maxRows: maxRows)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .padding(.bottom, bottomContextExpanded ? 0 : 2)
+            .offset(y: bottomContextInteractiveOffset)
+            .background(bottomContextFrameReader)
+            .animation(.snappy(duration: 0.24, extraBounce: 0.02), value: bottomContextExpanded)
+            .animation(.interactiveSpring(response: 0.22, dampingFraction: 0.86), value: bottomContextDragOffset)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("playerBottomContextDrawer")
+        }
+    }
+
+    private var bottomContextHeader: some View {
+        Group {
+            if bottomContextExpanded {
+                HStack(spacing: 12) {
+                    bottomContextHandle
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(bottomContextEyebrow)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(PlayerSurface.secondaryText)
+                            .lineLimit(1)
+                        Text(bottomContextTitle)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(PlayerSurface.primaryText)
+                            .lineLimit(1)
+                    }
+
+                    Spacer()
+
+                    Button {
+                        animate(pageTransitionAnimation) {
+                            selectedPage = PlayerPage.queue.rawValue
+                        }
+                    } label: {
+                        Image(systemName: "list.bullet")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color.white.opacity(0.74))
+                            .frame(width: 34, height: 34)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(bottomContextFullListLabel)
+                }
+                .padding(.horizontal, 28)
+                .frame(height: 54)
+            } else {
+                VStack(spacing: 7) {
+                    bottomContextHandle
+
+                    Text(bottomContextCollapsedTitle)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(PlayerSurface.secondaryText)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 42)
+                .padding(.horizontal, 28)
+                .accessibilityIdentifier("playerBottomContextCollapsed")
+            }
+        }
+        .contentShape(Rectangle())
+        .gesture(bottomContextHeaderDrag)
+        .onTapGesture {
+            animate(.snappy(duration: 0.24, extraBounce: 0.02)) {
+                bottomContextExpanded.toggle()
+            }
+        }
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(bottomContextExpanded ? "收起播放列表" : "展开播放列表")
+    }
+
+    private var bottomContextHandle: some View {
+        RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+            .fill(Color.white.opacity(bottomContextExpanded ? 0.30 : 0.24))
+            .frame(width: 34, height: 3)
+    }
+
+    @ViewBuilder
     private func bottomContextListPanel(maxRows: Int) -> some View {
         if currentPlaylist != nil && !currentPlaylistTracks.isEmpty {
             currentPlaylistBottomPanel(maxRows: maxRows)
@@ -1292,66 +1388,30 @@ struct NowPlayingView: View {
 
     @ViewBuilder
     private func currentPlaylistBottomPanel(maxRows: Int) -> some View {
-        if let currentPlaylist, !currentPlaylistTracks.isEmpty {
+        if currentPlaylist != nil && !currentPlaylistTracks.isEmpty {
             let previewItems = PlayerListWindow.items(
                 tracks: currentPlaylistTracks,
                 current: engine.current,
                 maxRows: maxRows)
-            VStack(alignment: .leading, spacing: 8) {
-                playerDivider
-
-                HStack(spacing: 8) {
-                    Image(systemName: "rectangle.stack.fill")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(AppTheme.accent)
-
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(currentPlaylist.title)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(PlayerSurface.primaryText)
-                            .lineLimit(1)
-                        Text("所在合集 · \(currentPlaylistPositionText)")
-                            .font(.caption2)
-                            .foregroundStyle(PlayerSurface.secondaryText)
-                            .lineLimit(1)
-                    }
-
-                    Spacer()
-
-                    Button {
-                        animate(pageTransitionAnimation) {
-                            selectedPage = PlayerPage.queue.rawValue
-                        }
-                    } label: {
-                        Image(systemName: "list.bullet")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(PlayerSurface.secondaryText)
-                            .frame(width: 34, height: 30)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("查看完整合集")
-                }
-
+            VStack(alignment: .leading, spacing: 0) {
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(spacing: 0) {
                         ForEach(previewItems) { item in
                             guardedPlayerRowButton {
                                 Task { await playCurrentPlaylistTrack(at: item.index) }
                             } label: {
-                                compactPlaylistRow(track: item.track, index: item.index)
+                                bottomSheetTrackRow(track: item.track, index: item.index)
                             }
 
                             if item.index != previewItems.last?.index {
-                                playerDivider.padding(.leading, 34)
+                                playerDivider.padding(.leading, 72)
                             }
                         }
                     }
                 }
-                .frame(height: CGFloat(previewItems.count) * Layout.compactRowHeight)
+                .frame(height: CGFloat(previewItems.count) * Layout.bottomSheetRowHeight)
             }
             .padding(.horizontal, 28)
-            .background(bottomContextFrameReader)
             .accessibilityIdentifier("playerBottomPlaylistPanel")
         }
     }
@@ -1360,42 +1420,7 @@ struct NowPlayingView: View {
     private func queueBottomPanel(maxRows: Int) -> some View {
         if !engine.queue.isEmpty {
             let visibleRows = min(engine.queue.count, maxRows)
-            VStack(alignment: .leading, spacing: 8) {
-                playerDivider
-
-                HStack(spacing: 8) {
-                    Image(systemName: "text.line.first.and.arrowtriangle.forward")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(AppTheme.accent)
-
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("播放列表")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(PlayerSurface.primaryText)
-                            .lineLimit(1)
-                        Text("\(engine.queueIndex + 1)/\(engine.queue.count)")
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(PlayerSurface.secondaryText)
-                            .lineLimit(1)
-                    }
-
-                    Spacer()
-
-                    Button {
-                        animate(pageTransitionAnimation) {
-                            selectedPage = PlayerPage.queue.rawValue
-                        }
-                    } label: {
-                        Image(systemName: "list.bullet")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(PlayerSurface.secondaryText)
-                            .frame(width: 34, height: 30)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("查看完整播放列表")
-                }
-
+            VStack(alignment: .leading, spacing: 0) {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: engine.queue.count > visibleRows) {
                         LazyVStack(spacing: 0) {
@@ -1403,17 +1428,17 @@ struct NowPlayingView: View {
                                 guardedPlayerRowButton {
                                     Task { await engine.jump(to: index) }
                                 } label: {
-                                    compactPlaylistRow(track: track, index: index)
+                                    bottomSheetTrackRow(track: track, index: index)
                                         .id(track.id)
                                 }
 
                                 if index != engine.queue.count - 1 {
-                                    playerDivider.padding(.leading, 34)
+                                    playerDivider.padding(.leading, 72)
                                 }
                             }
                         }
                     }
-                    .frame(maxHeight: CGFloat(visibleRows) * Layout.compactRowHeight)
+                    .frame(maxHeight: CGFloat(visibleRows) * Layout.bottomSheetRowHeight)
                     .onAppear { scrollCurrentQueue(proxy) }
                     .onChange(of: engine.queueIndex) { _, _ in
                         scrollCurrentQueue(proxy)
@@ -1424,7 +1449,6 @@ struct NowPlayingView: View {
                 }
             }
             .padding(.horizontal, 28)
-            .background(bottomContextFrameReader)
             .accessibilityIdentifier("playerBottomQueuePanel")
         }
     }
@@ -1436,6 +1460,73 @@ struct NowPlayingView: View {
                 value: geo.frame(in: .global)
             )
         }
+    }
+
+    private var hasBottomContextContent: Bool {
+        currentPlaylistLoading ||
+            currentPlaylist != nil ||
+            !currentPlaylistTracks.isEmpty ||
+            !engine.queue.isEmpty
+    }
+
+    private var bottomContextCollapsedTitle: String {
+        if currentPlaylist != nil && !currentPlaylistTracks.isEmpty {
+            return "当前合集"
+        }
+        return "播放列表"
+    }
+
+    private var bottomContextEyebrow: String {
+        if currentPlaylistLoading && currentPlaylistTracks.isEmpty {
+            return "正在检测"
+        }
+        if currentPlaylist != nil && !currentPlaylistTracks.isEmpty {
+            return "Playing from"
+        }
+        return "Your Queue"
+    }
+
+    private var bottomContextTitle: String {
+        if currentPlaylistLoading && currentPlaylistTracks.isEmpty {
+            return "当前歌曲所属合集"
+        }
+        if let currentPlaylist, !currentPlaylistTracks.isEmpty {
+            return currentPlaylist.title
+        }
+        guard !engine.queue.isEmpty else { return "播放列表" }
+        return "\(engine.queueIndex + 1)/\(engine.queue.count)"
+    }
+
+    private var bottomContextFullListLabel: String {
+        currentPlaylist != nil && !currentPlaylistTracks.isEmpty ? "查看完整合集" : "查看完整播放列表"
+    }
+
+    private var bottomContextInteractiveOffset: CGFloat {
+        if bottomContextExpanded {
+            return max(0, min(28, bottomContextDragOffset * 0.35))
+        }
+        return min(0, max(-24, bottomContextDragOffset * 0.35))
+    }
+
+    private var bottomContextHeaderDrag: some Gesture {
+        DragGesture(minimumDistance: 8, coordinateSpace: .global)
+            .updating($bottomContextDragOffset) { value, state, _ in
+                guard abs(value.translation.height) > abs(value.translation.width) * 1.1 else { return }
+                state = value.translation.height
+            }
+            .onEnded { value in
+                guard abs(value.translation.height) > abs(value.translation.width) * 1.1 else { return }
+                let projected = value.predictedEndTranslation.height
+                if value.translation.height < -22 || projected < -46 {
+                    animate(.snappy(duration: 0.24, extraBounce: 0.02)) {
+                        bottomContextExpanded = true
+                    }
+                } else if value.translation.height > 28 || projected > 58 {
+                    animate(.snappy(duration: 0.22, extraBounce: 0.01)) {
+                        bottomContextExpanded = false
+                    }
+                }
+            }
     }
 
     @ViewBuilder
@@ -1517,6 +1608,51 @@ struct NowPlayingView: View {
         }
         .padding(.vertical, 7)
         .contentShape(Rectangle())
+    }
+
+    private func bottomSheetTrackRow(track: Track, index: Int) -> some View {
+        let isCurrent = engine.current.map { track.key.matches($0) } ?? false
+        let display = TrackTitleFormatter.displayMetadata(for: track, clean: cleanListTitles)
+        return HStack(spacing: 12) {
+            if let coverURL = thumbnailURL(track.coverURL, width: 96, height: 54) {
+                CachedAsyncImage(
+                    url: coverURL,
+                    targetSize: CGSize(width: 42, height: 24),
+                    fallbackImage: isCurrent ? engine.currentCoverImage : nil
+                ) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    artworkPlaceholder(cornerRadius: 4)
+                }
+                .frame(width: 42, height: 24)
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            } else {
+                artworkPlaceholder(cornerRadius: 4)
+                    .frame(width: 42, height: 24)
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(display.title)
+                    .font(.subheadline.weight(isCurrent ? .semibold : .regular))
+                    .foregroundStyle(isCurrent ? Color.white : PlayerSurface.primaryText)
+                    .lineLimit(1)
+                Text("\(display.artist) · \(format(Double(track.duration)))")
+                    .font(.caption)
+                    .foregroundStyle(PlayerSurface.secondaryText)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            Image(systemName: isCurrent ? "waveform" : "line.3.horizontal")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(isCurrent ? AppTheme.accent : PlayerSurface.secondaryText)
+                .frame(width: 24, height: 32)
+        }
+        .frame(height: Layout.bottomSheetRowHeight)
+        .contentShape(Rectangle())
+        .accessibilityLabel("\(index + 1). \(display.title)")
     }
 
     private var queuePreviewItems: [(index: Int, track: Track)] {
@@ -1775,6 +1911,34 @@ struct NowPlayingView: View {
         isProgressScrubbing = scrubbing
     }
 
+    private func horizontalPageCommitDrag(width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 16, coordinateSpace: .global)
+            .onEnded { value in
+                guard !isProgressGestureStart(value.startLocation),
+                      !isBottomContextGestureStart(value.startLocation),
+                      let intent = PlayerGesturePolicy.horizontalPageSwipeIntent(
+                        translation: value.translation,
+                        predictedEndTranslation: value.predictedEndTranslation,
+                        width: width)
+                else { return }
+
+                commitHorizontalPageSwipe(intent: intent)
+            }
+    }
+
+    private func commitHorizontalPageSwipe(intent: CGFloat) {
+        let nextPage: Int
+        if intent < 0 {
+            nextPage = min(selectedPage + 1, PlayerPage.allCases.count - 1)
+        } else {
+            nextPage = max(selectedPage - 1, 0)
+        }
+        guard nextPage != selectedPage else { return }
+        animate(pageTransitionAnimation) {
+            selectedPage = nextPage
+        }
+    }
+
     private var centerBodyDismissDrag: some Gesture {
         DragGesture(minimumDistance: 12, coordinateSpace: .global)
             .updating($dismissDragOffset) { value, state, _ in
@@ -1849,6 +2013,23 @@ struct NowPlayingView: View {
 }
 
 private extension View {
+    @ViewBuilder
+    func playerContentReveal(opacity: Double) -> some View {
+        self
+            .opacity(opacity)
+            .accessibilityHidden(opacity < 0.5)
+            .animation(.easeOut(duration: 0.12), value: opacity)
+    }
+
+    @ViewBuilder
+    func nowPlayingSharedGeometry(id: String, in namespace: Namespace.ID, active: Bool) -> some View {
+        if active {
+            matchedGeometryEffect(id: id, in: namespace)
+        } else {
+            self
+        }
+    }
+
     func playerPanelBackground(cornerRadius: CGFloat) -> some View {
         background {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)

@@ -10,7 +10,7 @@ struct TrackRow: View {
     }
 
     @Environment(PlayerEngine.self) private var engine
-    @AppStorage(TrackTitleFormatter.cleanListTitlesDefaultsKey) private var cleanListTitles = true
+    @AppStorage(TrackTitleFormatter.cleanListTitlesDefaultsKey) private var cleanListTitles = false
     let track: Track
     var isPlaying = false
     var showsTrailingIcon = true

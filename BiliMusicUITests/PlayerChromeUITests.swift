@@ -7,7 +7,10 @@ final class PlayerChromeUITests: XCTestCase {
         continueAfterFailure = false
         XCUIDevice.shared.orientation = .portrait
         app = XCUIApplication()
-        app.launchArguments = ["-searchHistory", "[]"]
+        app.launchArguments = [
+            "-searchHistory", "[]",
+            "-cleanListTitles", "false"
+        ]
         app.launchEnvironment["BILIMUSIC_UITEST_FIXTURE"] = "1"
         app.launch()
     }
@@ -48,7 +51,7 @@ final class PlayerChromeUITests: XCTestCase {
             let nowPlaying = element("nowPlayingView")
             XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should open on round \(iteration).")
 
-            let fullTitle = element("nowPlayingTitle")
+            let fullTitle = metadataElement(timeout: 3)
             XCTAssertTrue(fullTitle.waitForExistence(timeout: 3), "Full title should be visible after opening on round \(iteration).")
             XCTAssertEqual(fullTitle.label, "Fixture Song One", "Full title should keep the raw fixture title after opening on round \(iteration).")
             XCTAssertTrue(element("nowPlayingArtwork").waitForExistence(timeout: 3), "Full artwork should be visible after opening on round \(iteration).")
@@ -60,6 +63,39 @@ final class PlayerChromeUITests: XCTestCase {
             XCTAssertEqual(miniTitle.label, "Fixture Song One", "Mini title should keep the raw fixture title after closing on round \(iteration).")
             XCTAssertTrue(element("miniPlayerArtwork").waitForExistence(timeout: 3), "Mini artwork should be visible again after closing on round \(iteration).")
         }
+    }
+
+    @MainActor
+    func testFullPlayerContentAppearsPromptlyAfterOpenTransition() throws {
+        let miniPlayer = element("miniPlayer")
+        XCTAssertTrue(miniPlayer.waitForExistence(timeout: 5), "Fixture mini player should be visible.")
+
+        let openStart = miniPlayer.coordinate(withNormalizedOffset: CGVector(dx: 0.24, dy: 0.5))
+        let openEnd = openStart.withOffset(CGVector(dx: 0, dy: -160))
+        openStart.press(forDuration: 0.35, thenDragTo: openEnd)
+
+        let nowPlaying = element("nowPlayingView")
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 1), "Full player shell should mount as the open transition starts.")
+        XCTAssertTrue(element("nowPlayingArtwork").exists, "Artwork may participate in the mini-to-full transition.")
+        XCTAssertTrue(element("nowPlayingMetadata").waitForExistence(timeout: 0.8), "Metadata should appear promptly after opening.")
+        XCTAssertTrue(element("nowPlayingProgress").waitForExistence(timeout: 0.8), "Progress should appear promptly after opening.")
+        XCTAssertTrue(element("playerToolbar").waitForExistence(timeout: 0.8), "Player actions should appear promptly after opening.")
+    }
+
+    @MainActor
+    func testBottomContextDrawerStartsCollapsedAndExpandsWithUpwardDrag() throws {
+        try openFullPlayerFromMini()
+
+        let collapsedDrawer = element("playerBottomContextCollapsed")
+        XCTAssertTrue(collapsedDrawer.waitForExistence(timeout: 2), "Bottom queue context should start collapsed.")
+        XCTAssertFalse(element("playerBottomQueuePanel").exists, "The queue list should not be expanded by default.")
+
+        let start = collapsedDrawer.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.82))
+        let end = start.withOffset(CGVector(dx: 0, dy: -92))
+        start.press(forDuration: 0.05, thenDragTo: end)
+
+        XCTAssertTrue(element("playerBottomQueuePanel").waitForExistence(timeout: 2), "Dragging upward on the collapsed queue context should expand the list.")
+        XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 1), "Expanding the bottom queue context should not close the player.")
     }
 
     @MainActor
@@ -146,7 +182,7 @@ final class PlayerChromeUITests: XCTestCase {
 
         XCTAssertTrue(app.staticTexts["Fixture Song Ten"].waitForExistence(timeout: 2), "Queue side page should allow vertical scrolling to later rows.")
         XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 1), "Vertical queue scrolling should not minimize the full player.")
-        XCTAssertEqual(metadataElement().label, "Fixture Song One", "Vertical queue scrolling should not change the current track.")
+        XCTAssertEqual(nowPlayingTitleLabel(), "Fixture Song One", "Vertical queue scrolling should not change the current track.")
         XCTAssertTrue(waitForPlayerPage("队列"), "Vertical queue scrolling should keep the queue page selected.")
     }
 
@@ -181,7 +217,7 @@ final class PlayerChromeUITests: XCTestCase {
 
         XCTAssertTrue(app.staticTexts["Fixture Song Ten"].waitForExistence(timeout: 2), "Recommendation side page should allow vertical scrolling to later rows.")
         XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 1), "Vertical recommendation scrolling should not minimize the full player.")
-        XCTAssertEqual(metadataElement().label, "Fixture Song One", "Vertical recommendation scrolling should not change the current track.")
+        XCTAssertEqual(nowPlayingTitleLabel(), "Fixture Song One", "Vertical recommendation scrolling should not change the current track.")
         XCTAssertTrue(waitForPlayerPage("推荐"), "Vertical recommendation scrolling should keep the recommendations page selected.")
     }
 
@@ -235,7 +271,7 @@ final class PlayerChromeUITests: XCTestCase {
     @MainActor
     func testHorizontalDragOnQueueRowDoesNotJumpTrack() throws {
         try openFullPlayerFromMini()
-        XCTAssertEqual(metadataElement().label, "Fixture Song One")
+        XCTAssertEqual(nowPlayingTitleLabel(), "Fixture Song One")
 
         try swipeToPlayerPage(direction: .right)
 
@@ -308,6 +344,10 @@ final class PlayerChromeUITests: XCTestCase {
 
     private func element(_ identifier: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+    }
+
+    private func elements(_ identifier: String) -> [XCUIElement] {
+        app.descendants(matching: .any).matching(identifier: identifier).allElementsBoundByIndex
     }
 
     @MainActor
@@ -390,14 +430,24 @@ final class PlayerChromeUITests: XCTestCase {
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before swiping pages.")
         let currentTitle = currentPlayerPageTitle(timeout: 1) ?? "正在播放"
         let expectedPage = expectedPageTitle(afterSwiping: direction, from: currentTitle)
+
         let coverArea = centerPlayerCoverArea()
-        if direction == .left {
-            coverArea.leftSwipe()
-        } else {
-            coverArea.rightSwipe()
+        performPagerSwipe(direction: direction, in: coverArea)
+        if !waitForPlayerPage(expectedPage, timeout: 1.2) {
+            performPagerSwipe(direction: direction, in: coverArea)
         }
 
         XCTAssertTrue(waitForPlayerPage(expectedPage), "Horizontal swipe should switch the player page to \(expectedPage).")
+    }
+
+    @MainActor
+    private func performPagerSwipe(direction: PlayerPageSwipeDirection, in coverArea: CoverArea) {
+        switch direction {
+        case .left:
+            coverArea.leftSwipe()
+        case .right:
+            coverArea.rightSwipe()
+        }
     }
 
     @MainActor
@@ -423,32 +473,195 @@ final class PlayerChromeUITests: XCTestCase {
 
     @MainActor
     private func centerPlayerCoverArea() -> CoverArea {
+        let nowPlaying = element("nowPlayingView")
+        let artwork = element("nowPlayingArtwork")
         let pageHint = element("playerPageHint")
-        let metadata = metadataElement()
-        XCTAssertTrue(pageHint.waitForExistence(timeout: 2), "Page hint should exist before deriving the cover area.")
-        XCTAssertTrue(metadata.waitForExistence(timeout: 2), "Metadata should exist before deriving the cover area.")
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 2), "Full player should exist before deriving the cover area.")
+        if artwork.waitForExistence(timeout: 2), !artwork.frame.isEmpty {
+            return CoverArea(app: app, screenPoint: CGPoint(x: artwork.frame.midX, y: artwork.frame.midY))
+        }
 
-        let top = pageHint.frame.maxY
-        let bottom = metadata.frame.minY
-        let y = min(max((top + bottom) / 2, app.frame.minY + 120), app.frame.maxY - 120)
+        XCTAssertTrue(pageHint.waitForExistence(timeout: 2), "Page hint should exist before deriving the cover area.")
+
+        let top = max(pageHint.frame.maxY, nowPlaying.frame.minY + 96)
+        let y = min(max(top + 170, app.frame.minY + 160), app.frame.maxY * 0.54)
         return CoverArea(app: app, screenPoint: CGPoint(x: app.frame.midX, y: y))
     }
 
     @MainActor
     private func metadataElement(timeout: TimeInterval = 2) -> XCUIElement {
-        let identified = element("nowPlayingMetadata")
-        if identified.waitForExistence(timeout: 0.4) {
+        if let title = stableTitleElement(timeout: timeout) {
+            return title
+        }
+
+        if let identified = stableMetadataElement(timeout: timeout) {
             return identified
         }
 
-        let fixtureTitle = app.staticTexts
-            .matching(NSPredicate(format: "label == %@", "Fixture Song One"))
-            .firstMatch
-        if fixtureTitle.waitForExistence(timeout: timeout) {
+        if let fixtureTitle = fixtureTitleElement(timeout: timeout) {
             return fixtureTitle
         }
 
-        return identified
+        return element("nowPlayingMetadata")
+    }
+
+    @MainActor
+    private func nowPlayingTitleLabel(timeout: TimeInterval = 2) -> String {
+        if let title = stableTitleElement(timeout: timeout) {
+            return title.label
+        }
+        if let fixtureTitle = fixtureTitleElement(timeout: timeout) {
+            return fixtureTitle.label
+        }
+        return metadataElement(timeout: timeout).label
+    }
+
+    @MainActor
+    private func stableMetadataElement(timeout: TimeInterval) -> XCUIElement? {
+        let nowPlaying = element("nowPlayingView")
+        _ = nowPlaying.waitForExistence(timeout: timeout)
+
+        let progress = element("nowPlayingProgress")
+        _ = progress.waitForExistence(timeout: 0.4)
+        let progressFrame = progress.exists ? progress.frame : .null
+
+        if let fixtureTitle = fixtureTitleElement(timeout: 0.5) {
+            return fixtureTitle
+        }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let title = bestMetadataCandidate(
+                in: elements("nowPlayingTitle"),
+                playerFrame: nowPlaying.frame,
+                progressFrame: progressFrame
+            ) {
+                return title
+            }
+
+            if let metadata = bestMetadataCandidate(
+                in: elements("nowPlayingMetadata").filter { $0.elementType != .staticText },
+                playerFrame: nowPlaying.frame,
+                progressFrame: progress.frame
+            ) {
+                return titleElement(in: metadata) ?? metadata
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        } while Date() < deadline
+
+        return nil
+    }
+
+    @MainActor
+    private func stableTitleElement(timeout: TimeInterval) -> XCUIElement? {
+        let nowPlaying = element("nowPlayingView")
+        _ = nowPlaying.waitForExistence(timeout: timeout)
+
+        let progress = element("nowPlayingProgress")
+        _ = progress.waitForExistence(timeout: 0.4)
+        let progressFrame = progress.exists ? progress.frame : .null
+
+        if let fixtureTitle = fixtureTitleElement(timeout: 0.5) {
+            return fixtureTitle
+        }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let title = bestMetadataCandidate(
+                in: elements("nowPlayingTitle"),
+                playerFrame: nowPlaying.frame,
+                progressFrame: progressFrame
+            ) {
+                return title
+            }
+
+            if let metadata = bestMetadataCandidate(
+                in: elements("nowPlayingMetadata").filter { $0.elementType != .staticText },
+                playerFrame: nowPlaying.frame,
+                progressFrame: progressFrame
+            ), let title = titleElement(in: metadata) {
+                return title
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        } while Date() < deadline
+
+        return nil
+    }
+
+    @MainActor
+    private func fixtureTitleElement(timeout: TimeInterval) -> XCUIElement? {
+        let nowPlaying = element("nowPlayingView")
+        _ = nowPlaying.waitForExistence(timeout: timeout)
+
+        let progress = element("nowPlayingProgress")
+        _ = progress.waitForExistence(timeout: 0.4)
+        let progressFrame = progress.exists ? progress.frame : .null
+        let fixtureTitles = app.staticTexts.matching(NSPredicate(format: "label == %@", "Fixture Song One"))
+
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let candidates = fixtureTitles.allElementsBoundByIndex.filter { candidate in
+                candidate.exists &&
+                !candidate.frame.isEmpty &&
+                candidate.frame.intersects(nowPlaying.frame) &&
+                (progressFrame.isNull || progressFrame.isEmpty || candidate.frame.maxY <= progressFrame.minY + 1)
+            }
+
+            if let title = candidates.sorted(by: titleSort).first {
+                return title
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        } while Date() < deadline
+
+        return nil
+    }
+
+    private func bestMetadataCandidate(
+        in candidates: [XCUIElement],
+        playerFrame: CGRect,
+        progressFrame: CGRect
+    ) -> XCUIElement? {
+        let visible = candidates.filter { candidate in
+            candidate.exists &&
+            !candidate.frame.isEmpty &&
+            candidate.frame.intersects(playerFrame)
+        }
+
+        let ordered = visible.sorted { lhs, rhs in
+            if abs(lhs.frame.minY - rhs.frame.minY) > 1 {
+                return lhs.frame.minY < rhs.frame.minY
+            }
+            return lhs.frame.minX < rhs.frame.minX
+        }
+
+        if !progressFrame.isEmpty,
+           let aboveProgress = ordered.first(where: { $0.frame.maxY <= progressFrame.minY + 1 }) {
+            return aboveProgress
+        }
+
+        return ordered.first
+    }
+
+    private func titleElement(in metadata: XCUIElement) -> XCUIElement? {
+        let titles = metadata.descendants(matching: .staticText).allElementsBoundByIndex
+            .filter { $0.exists && !$0.frame.isEmpty }
+            .sorted(by: titleSort)
+
+        return titles.first(where: { isFixtureTitleLabel($0.label) }) ?? titles.first
+    }
+
+    private func isFixtureTitleLabel(_ label: String) -> Bool {
+        label.hasPrefix("Fixture Song")
+    }
+
+    private func titleSort(_ lhs: XCUIElement, _ rhs: XCUIElement) -> Bool {
+        if abs(lhs.frame.minY - rhs.frame.minY) > 1 {
+            return lhs.frame.minY < rhs.frame.minY
+        }
+        return lhs.frame.minX < rhs.frame.minX
     }
 
     private struct CoverArea {

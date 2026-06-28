@@ -262,6 +262,12 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
             onImageLoaded(cached)
             return
         }
+        if let reusable = ImageMemoryCache.shared.bestImage(forAnyVariantOf: url) {
+            guard identifier == loadIdentifier else { return }
+            image = reusable
+            loadedIdentifier = identifier
+            onImageLoaded(reusable)
+        }
         // 不提前清空 image：保留旧图或占位图，避免磁盘缓存命中时的闪烁
         guard let decoded = await ImageLoadCoordinator.shared.image(
             for: url,
