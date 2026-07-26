@@ -6,9 +6,9 @@ current_phase: 4
 current_phase_name: Interface Cohesion and Search Polish
 status: complete
 stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-06-27T10:30:00Z"
-last_activity: 2026-06-27
-last_activity_desc: Completed 04-01-PLAN.md
+last_updated: "2026-07-25T00:00:00Z"
+last_activity: 2026-07-25
+last_activity_desc: Completed post-milestone deep stability review and P1 hardening
 progress:
   total_phases: 4
   completed_phases: 4
@@ -24,16 +24,54 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-27)
 
 **Core value:** 让音乐尽快、稳定地响起来；当功能冲突时，播放启动速度和不中断播放优先于推荐、歌词、MV、UI 动效和其他增强体验。
-**Current focus:** Phase 04 — Interface Cohesion and Search Polish
+**Current focus:** Post-milestone stabilization audit — preserve first sound and playback correctness
 
 ## Current Position
 
 Phase: 4 — Interface Cohesion and Search Polish
 Plan: 1 of 1 — 04-01
 Status: Complete
-Last activity: 2026-06-27 — Completed 04-01-PLAN.md
+Last activity: 2026-07-25 — Completed post-milestone deep stability review and P1 hardening
 
 Progress: [##########] 100%
+
+## Post-Milestone Deep Review — 2026-07-25
+
+The review kept the shipped interaction model intact and concentrated on state races, stale async work,
+track identity, persistence ordering, and memory bounds.
+
+### P1 risks closed
+
+- Explicit track selection invalidates pending direct-play and radio requests before they can write back.
+- Radio lookup, pause/resume, previous-track, mode changes, and late recommendation responses preserve the
+  latest transport intent instead of restarting an ended player item.
+- Automatic queue advancement inherits a late pause, so an end notification cannot unexpectedly resume audio.
+- AVPlayer time/status/buffer/end/failure callbacks validate playback generation plus player/item identity.
+- Slow-start CDN fallback and item-failure recovery no longer replace the same playback source concurrently.
+- A corrupt local cache invalidates the matching prepared stream before retrying a fresh remote URL.
+- Progress scrubbing is bound to the track that began the gesture; a stale release cannot seek a new song.
+- Cache, playback history, and recent-home persistence use revisioned atomic writes and merge mutations made
+  during their initial disk load.
+- Search, favorites, Home recommendations, related recommendations, and playlist lookup reject stale responses.
+- Track, stream, cache, history, queue, and prefetch identity is exact to `bvid + cid` once cid is known.
+- Shared row haptics are attached once per screen rather than once per visible row.
+
+### Remaining P2 work
+
+- Split `PlayerEngine`, `NowPlayingView`, and `BiliClient` only in a dedicated phase with real-device gates.
+- Add versioned persistence envelopes, corrupt-file quarantine, cache orphan repair, disk quota, and LRU eviction.
+- Add a shared authentication-expiry state instead of waiting for a protected request to reveal stale cookies.
+- Replace broad ATS allowance after real Bilibili CDN host/scheme capture.
+- Make initial search results incremental instead of waiting for all first-batch pages.
+- Resolve Swift 6 strict-concurrency warnings before changing the project language mode.
+- Validate Dolby response schema and full-screen DASH MV support against real API samples before exposing them
+  as guaranteed quality paths.
+
+### Verification
+
+- Generic iOS device `xcodebuild` completed successfully with code signing disabled.
+- The app target and all test sources passed direct Swift typechecking; no simulator or real-device UI run was
+  performed during this audit.
 
 ## Performance Metrics
 
@@ -89,8 +127,8 @@ Recent decisions affecting current work:
 - [Phase 03-01]: Mini-player pull-up completion uses deterministic policy thresholds, including distance and projected velocity, rather than view-local ad hoc gesture checks.
 - [Phase 03-01]: The full-player overlay tracks rendered open progress for offset, opacity, and scale while Reduced Motion keeps scale disabled through existing guards.
 - [Phase 03-01]: The UI fixture uses mini-player-relative drag coordinates to avoid simulator-global coordinate drift while preserving deliberate-open and shallow-cancel coverage.
-- [Phase 03-player-interaction-and-regression-coverage]: Full-player page navigation uses lightweight page hints; MV/music switching moved into the persistent toolbar instead of a segmented top control.
-- [Phase 03-player-interaction-and-regression-coverage]: Center Now Playing no longer renders queue or playlist context panels; queue and recommendations stay on horizontal side pages.
+- [Current player model]: Queue, playlist context, and current-track recommendations live in one bottom drawer; the earlier horizontal side-page navigation was removed to avoid gesture conflicts.
+- [Current player model]: MV/music switching remains in the persistent toolbar and does not block initial audio playback.
 - [Phase 03-player-interaction-and-regression-coverage]: Recommendation tap stability is protected by a regression assertion that suppression is assigned before related playback starts.
 - [Phase 03-03]: Queue and recommendation list bodies own vertical scroll; minimize is allowed from center body or top chrome only through region-aware `PlayerGesturePolicy`.
 - [Phase 03-03]: Progress scrub owns the full progress block, including label hit targets, so page swipes cannot steal scrub gestures.

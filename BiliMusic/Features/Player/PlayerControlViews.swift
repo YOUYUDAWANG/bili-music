@@ -20,40 +20,6 @@ struct PlayerIconButton: View {
     }
 }
 
-struct ActionSymbolButton: View {
-    let title: String
-    let systemName: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 19, weight: .semibold))
-                .frame(maxWidth: .infinity)
-                .frame(height: 44)
-                .contentShape(RoundedRectangle(cornerRadius: 12))
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(AppTheme.accent)
-        .accessibilityLabel(title)
-    }
-}
-
-struct ActionSymbolLabel: View {
-    let title: String
-    let systemName: String
-
-    var body: some View {
-        Image(systemName: systemName)
-            .font(.system(size: 19, weight: .semibold))
-            .frame(maxWidth: .infinity)
-            .frame(height: 42)
-            .contentShape(RoundedRectangle(cornerRadius: 12))
-            .foregroundStyle(AppTheme.accent)
-            .accessibilityLabel(title)
-    }
-}
-
 struct PlayerToolbarActionButton: View {
     let title: String
     let systemName: String
@@ -205,9 +171,9 @@ struct PlayerProgressBar: View {
             .frame(height: 44)
 
             HStack {
-                Text(format(isScrubbing ? scrubValue : engine.currentTime))
+                Text(MusicFormatters.playbackTime(isScrubbing ? scrubValue : engine.currentTime))
                 Spacer()
-                Text(format(engine.duration))
+                Text(MusicFormatters.playbackTime(engine.duration))
             }
             .font(.caption.monospacedDigit())
             .foregroundStyle(Color.white.opacity(0.58))
@@ -216,11 +182,21 @@ struct PlayerProgressBar: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("播放进度")
-        .accessibilityValue("\(format(isScrubbing ? scrubValue : engine.currentTime)) / \(format(engine.duration))")
+        .accessibilityValue(
+            "\(MusicFormatters.playbackTime(isScrubbing ? scrubValue : engine.currentTime)) / \(MusicFormatters.playbackTime(engine.duration))"
+        )
         .accessibilityIdentifier("nowPlayingProgress")
         .onDisappear {
             guard isScrubbing else { return }
             engine.endScrub(to: scrubValue)
+            isScrubbing = false
+            onScrubChanged(false)
+        }
+        .onChange(of: engine.current?.key) { oldKey, newKey in
+            if let oldKey, let newKey, oldKey.isCIDEnrichment(to: newKey) {
+                return
+            }
+            guard isScrubbing else { return }
             isScrubbing = false
             onScrubChanged(false)
         }
@@ -230,6 +206,9 @@ struct PlayerProgressBar: View {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 if !isScrubbing {
+                    // 需要明确的水平位移意图才进入 scrub:
+                    // 纵向滑动(如下滑收起播放器)或轻微误触不应把进度跳走。
+                    guard ProgressScrubMath.shouldBeginScrub(translation: value.translation) else { return }
                     scrubValue = min(engine.currentTime, engine.duration)
                     isScrubbing = true
                     engine.beginScrub()
@@ -240,6 +219,7 @@ struct PlayerProgressBar: View {
                 scrubValue = progress * engine.duration
             }
             .onEnded { _ in
+                guard isScrubbing else { return }
                 engine.endScrub(to: scrubValue)
                 isScrubbing = false
                 onScrubChanged(false)
@@ -247,16 +227,17 @@ struct PlayerProgressBar: View {
             }
     }
 
-    private func format(_ seconds: Double) -> String {
-        let s = Int(seconds.isFinite ? max(seconds, 0) : 0)
-        return String(format: "%d:%02d", s / 60, s % 60)
-    }
 }
 
 enum ProgressScrubMath {
     static func progress(locationX: CGFloat, trackWidth: CGFloat) -> CGFloat {
         guard trackWidth > 0 else { return 0 }
         return max(0, min(1, locationX / trackWidth))
+    }
+
+    /// 是否具备进入 scrub 的水平意图:水平位移 ≥6pt 且大于纵向位移。
+    static func shouldBeginScrub(translation: CGSize) -> Bool {
+        abs(translation.width) >= 6 && abs(translation.width) > abs(translation.height)
     }
 }
 

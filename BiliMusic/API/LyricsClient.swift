@@ -122,8 +122,12 @@ struct LyricsClient {
         var request = URLRequest(url: components.url!)
         request.timeoutInterval = 8
         request.setValue("BiliMusic iOS personal app", forHTTPHeaderField: "User-Agent")
-        let (data, _) = try await URLSession.shared.data(for: request)
-        return (try? JSONDecoder().decode([Candidate].self, from: data)) ?? []
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        return try JSONDecoder().decode([Candidate].self, from: data)
     }
 
     /// 调 LRCLIB 精确接口并解码单个候选。
@@ -134,8 +138,14 @@ struct LyricsClient {
         request.timeoutInterval = 8
         request.setValue("BiliMusic iOS personal app", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await URLSession.shared.data(for: request)
-        if let http = response as? HTTPURLResponse, http.statusCode == 404 {
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        if http.statusCode == 404 {
             throw LyricsError.noMatch
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
         }
         return try JSONDecoder().decode(Candidate.self, from: data)
     }
@@ -261,7 +271,10 @@ struct LyricsClient {
         let ct = comparable(title)
         guard !ct.isEmpty else { return 0 }
         if ct == wanted { return 70 }
-        if ct.contains(wanted) || wanted.contains(ct) { return 56 }
+        if ct.contains(wanted) || wanted.contains(ct) {
+            // 归一化后只剩 1-2 字符的极短歌名(《光》《海》)contains 太宽,大幅降分不过门槛
+            return wanted.count >= 3 ? 56 : 20
+        }
         let ratio = similarity(ct, wanted)
         if ratio >= 0.82 { return 52 }
         if ratio >= 0.72 { return 44 }
@@ -527,20 +540,21 @@ struct LyricsClient {
         return parsePlainLyrics(plain, duration: duration)
     }
 
-    /// 解析 LRC 文本为带时间区间的歌词行。
+    /// 解析 LRC 文本为带时间区间的歌词行。支持 `[t1][t2]歌词` 多时间标签行（同一文本多时间点）。
     private func parseLRC(_ text: String) -> [PlayerEngine.LyricLine] {
-        let pattern = #"\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]\s*(.*)"#
+        let pattern = #"^\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
-        let rawLines: [(time: Double, text: String)] = text
-            .split(whereSeparator: \.isNewline)
-            .compactMap { raw in
-                let line = String(raw)
+        var rawLines: [(time: Double, text: String)] = []
+        for raw in text.split(whereSeparator: \.isNewline) {
+            var line = String(raw)
+            var times: [Double] = []
+            // 循环剥离行首所有时间标签
+            while true {
                 let range = NSRange(line.startIndex..<line.endIndex, in: line)
                 guard let match = regex.firstMatch(in: line, range: range),
+                      let fullRange = Range(match.range, in: line),
                       let minuteRange = Range(match.range(at: 1), in: line),
-                      let secondRange = Range(match.range(at: 2), in: line) else {
-                    return nil
-                }
+                      let secondRange = Range(match.range(at: 2), in: line) else { break }
                 let minute = Double(line[minuteRange]) ?? 0
                 let second = Double(line[secondRange]) ?? 0
                 var fraction = 0.0
@@ -548,12 +562,17 @@ struct LyricsClient {
                     let rawFraction = String(line[fractionRange])
                     fraction = (Double(rawFraction) ?? 0) / pow(10, Double(rawFraction.count))
                 }
-                let textRange = Range(match.range(at: 4), in: line)
-                let content = textRange.map { String(line[$0]).trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
-                guard !content.isEmpty else { return nil }
-                return (minute * 60 + second + fraction, content)
+                times.append(minute * 60 + second + fraction)
+                line.removeSubrange(fullRange)
+                line = String(line.drop(while: { $0 == " " || $0 == "\t" }))
             }
-            .sorted { $0.time < $1.time }
+            let content = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !content.isEmpty, !times.isEmpty else { continue }
+            for time in times {
+                rawLines.append((time, content))
+            }
+        }
+        rawLines.sort { $0.time < $1.time }
 
         return rawLines.enumerated().map { index, line in
             let nextTime = index + 1 < rawLines.count ? rawLines[index + 1].time : line.time + 5

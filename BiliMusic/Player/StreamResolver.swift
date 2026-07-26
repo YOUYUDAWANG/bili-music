@@ -7,6 +7,16 @@ private let streamLog = Logger(subsystem: "com.fubuki.BiliMusic", category: "str
 /// URL 有时效,只做内存级预取,不持久化。
 @MainActor
 final class StreamResolver {
+    private struct PreparedStreamKey: Hashable {
+        let track: TrackKey
+        let preferredQuality: Int
+    }
+
+    private struct PreparingStream {
+        let id: UUID
+        let task: Task<PreparedAudioStream, Error>
+    }
+
     struct PreparedAudioStream {
         let url: URL
         let candidateURLs: [URL]
@@ -39,50 +49,79 @@ final class StreamResolver {
     }
 
     private let client: BiliClient
-    private var preparedStreams: [TrackKey: PreparedAudioStream] = [:]
-    private var preparingStreams: [TrackKey: Task<PreparedAudioStream, Error>] = [:]
-    private var warmingStreams = Set<TrackKey>()
+    private var preparedStreams: [PreparedStreamKey: PreparedAudioStream] = [:]
+    private var preparingStreams: [PreparedStreamKey: PreparingStream] = [:]
+    private var warmingStreams: [PreparedStreamKey: UUID] = [:]
+    private static let preparedStreamTTL: TimeInterval = 90 * 60
+    private static let preparedStreamLimit = 40
 
     init(client: BiliClient = BiliClient()) {
         self.client = client
     }
 
-    func cachedAudio(for track: Track) -> PreparedAudioStream? {
-        let key = track.key
-        let fallbackKey = TrackKey(bvid: track.bvid, cid: nil)
-        guard let prepared = preparedStreams[key] ?? preparedStreams[fallbackKey] else { return nil }
-        if Date().timeIntervalSince(prepared.fetchedAt) < 90 * 60 {
-            return prepared
+    func cachedAudio(for track: Track, preferredQuality: Int) -> PreparedAudioStream? {
+        prunePreparedStreams()
+        let key = PreparedStreamKey(track: track.key, preferredQuality: preferredQuality)
+        if let exact = preparedStreams[key] {
+            return exact
         }
-        preparedStreams[key] = nil
-        preparedStreams[fallbackKey] = nil
-        preparingStreams[key] = nil
-        preparingStreams[fallbackKey] = nil
-        return nil
-    }
-
-    func isPreparing(_ track: Track) -> Bool {
-        preparingStreams[track.key] != nil || warmingStreams.contains(track.key)
+        guard track.cid == nil else { return nil }
+        let fallbackKey = PreparedStreamKey(
+            track: TrackKey(bvid: track.bvid, cid: nil),
+            preferredQuality: preferredQuality)
+        return preparedStreams[fallbackKey]
     }
 
     func invalidateAudio(for track: Track) {
-        preparedStreams[track.key] = nil
-        preparingStreams[track.key] = nil
-        if track.cid != nil {
-            let fallbackKey = TrackKey(bvid: track.bvid, cid: nil)
-            preparedStreams[fallbackKey] = nil
-            preparingStreams[fallbackKey] = nil
+        let fallbackTrackKey = TrackKey(bvid: track.bvid, cid: nil)
+        let preparedKeys = preparedStreams.keys.filter { key in
+            key.track == track.key || (track.cid != nil && key.track == fallbackTrackKey)
+        }
+        for key in preparedKeys {
+            preparedStreams[key] = nil
+        }
+        let preparingKeys = preparingStreams.keys.filter { key in
+            key.track == track.key || (track.cid != nil && key.track == fallbackTrackKey)
+        }
+        for key in preparingKeys {
+            preparingStreams[key]?.task.cancel()
+            preparingStreams[key] = nil
+        }
+        warmingStreams = warmingStreams.filter { key, _ in
+            key.track != track.key && !(track.cid != nil && key.track == fallbackTrackKey)
         }
     }
 
-    func prepareAudio(for track: Track, preferredQuality: Int) async throws -> PreparedAudioStream {
-        if let prepared = cachedAudio(for: track) {
-            return prepared
-        }
-        if let task = preparingStreams[track.key] {
-            return try await task.value
+    /// 真正开播时取消其他曲目的后台解析，避免列表预加载与首响争抢 API/CDN 连接。
+    /// 当前曲目若已在预取则保留，播放请求可以直接复用同一个任务。
+    func cancelPreparations(except track: Track?) {
+        let retainedKey = track?.key
+        let shouldRetain: (PreparedStreamKey) -> Bool = { key in
+            guard let retainedKey else { return false }
+            if retainedKey.cid == nil {
+                return key.track.bvid == retainedKey.bvid
+            }
+            return key.track == retainedKey
         }
 
+        let preparingKeys = preparingStreams.keys.filter { !shouldRetain($0) }
+        for key in preparingKeys {
+            preparingStreams[key]?.task.cancel()
+            preparingStreams[key] = nil
+        }
+        warmingStreams = warmingStreams.filter { shouldRetain($0.key) }
+    }
+
+    func prepareAudio(for track: Track, preferredQuality: Int) async throws -> PreparedAudioStream {
+        if let prepared = cachedAudio(for: track, preferredQuality: preferredQuality) {
+            return prepared
+        }
+        let requestKey = PreparedStreamKey(track: track.key, preferredQuality: preferredQuality)
+        if let preparing = preparingStreams[requestKey] {
+            return try await preparing.task.value
+        }
+
+        let requestID = UUID()
         let task = Task<PreparedAudioStream, Error> { [client] in
             let start = CFAbsoluteTimeGetCurrent()
             let meta = try await Self.resolveCidDuration(
@@ -106,30 +145,44 @@ final class StreamResolver {
                 fetchedAt: Date())
         }
 
-        preparingStreams[track.key] = task
+        preparingStreams[requestKey] = PreparingStream(id: requestID, task: task)
         do {
             let prepared = try await task.value
-            let resolvedKey = TrackKey(bvid: track.bvid, cid: prepared.cid)
-            preparedStreams[resolvedKey] = prepared
-            if resolvedKey != track.key {
-                preparedStreams[track.key] = prepared
+            guard preparingStreams[requestKey]?.id == requestID else {
+                return prepared
             }
-            preparingStreams[track.key] = nil
+            let resolvedKey = PreparedStreamKey(
+                track: TrackKey(bvid: track.bvid, cid: prepared.cid),
+                preferredQuality: preferredQuality)
+            preparedStreams[resolvedKey] = prepared
+            if resolvedKey != requestKey {
+                preparedStreams[requestKey] = prepared
+            }
+            prunePreparedStreams()
+            preparingStreams[requestKey] = nil
             return prepared
         } catch {
-            preparingStreams[track.key] = nil
+            if preparingStreams[requestKey]?.id == requestID {
+                preparingStreams[requestKey] = nil
+            }
             throw error
         }
     }
 
     func warmAudioCDN(for track: Track, preferredQuality: Int) async {
-        let key = track.key
-        guard !warmingStreams.contains(key) else { return }
-        warmingStreams.insert(key)
-        defer { warmingStreams.remove(key) }
+        let key = PreparedStreamKey(track: track.key, preferredQuality: preferredQuality)
+        guard warmingStreams[key] == nil else { return }
+        let requestID = UUID()
+        warmingStreams[key] = requestID
+        defer {
+            if warmingStreams[key] == requestID {
+                warmingStreams[key] = nil
+            }
+        }
 
         do {
             let prepared = try await prepareAudio(for: track, preferredQuality: preferredQuality)
+            guard !Task.isCancelled else { return }
             guard prepared.candidateURLs.count > 1 else { return }
             if let warmedAt = prepared.cdnWarmedAt,
                Date().timeIntervalSince(warmedAt) < 10 * 60 {
@@ -138,6 +191,7 @@ final class StreamResolver {
             guard let selected = await AudioCDNSelector.fastestReachableURL(
                 from: prepared.candidateURLs,
                 timeout: .milliseconds(700)) else { return }
+            guard !Task.isCancelled, warmingStreams[key] == requestID else { return }
             let warmed = PreparedAudioStream(
                 url: selected,
                 candidateURLs: prepared.candidateURLs,
@@ -147,9 +201,12 @@ final class StreamResolver {
                 bandwidth: prepared.bandwidth,
                 fetchedAt: prepared.fetchedAt,
                 cdnWarmedAt: Date())
-            let resolvedKey = TrackKey(bvid: track.bvid, cid: prepared.cid)
+            let resolvedKey = PreparedStreamKey(
+                track: TrackKey(bvid: track.bvid, cid: prepared.cid),
+                preferredQuality: preferredQuality)
             preparedStreams[resolvedKey] = warmed
             preparedStreams[key] = warmed
+            prunePreparedStreams()
             streamLog.debug("warm audio cdn(bvid:\(track.bvid)) host=\(selected.host() ?? "nil", privacy: .public)")
         } catch {
             // 预热失败不影响真正播放;播放时仍会走普通取流和慢启动 fallback。
@@ -165,15 +222,34 @@ final class StreamResolver {
         }
         return (cid ?? page.cid, duration > 0 ? duration : page.duration)
     }
+
+    private func prunePreparedStreams(now: Date = Date()) {
+        preparedStreams = preparedStreams.filter {
+            now.timeIntervalSince($0.value.fetchedAt) < Self.preparedStreamTTL
+        }
+        guard preparedStreams.count > Self.preparedStreamLimit else { return }
+        let overflow = preparedStreams.count - Self.preparedStreamLimit
+        let oldestKeys = preparedStreams
+            .sorted { $0.value.fetchedAt < $1.value.fetchedAt }
+            .prefix(overflow)
+            .map(\.key)
+        for key in oldestKeys {
+            preparedStreams[key] = nil
+        }
+    }
 }
 
 @MainActor
 protocol AudioStreamResolving: AnyObject {
-    func cachedAudio(for track: Track) -> StreamResolver.PreparedAudioStream?
-    func isPreparing(_ track: Track) -> Bool
+    func cachedAudio(for track: Track, preferredQuality: Int) -> StreamResolver.PreparedAudioStream?
     func invalidateAudio(for track: Track)
+    func cancelPreparations(except track: Track?)
     func prepareAudio(for track: Track, preferredQuality: Int) async throws -> StreamResolver.PreparedAudioStream
     func warmAudioCDN(for track: Track, preferredQuality: Int) async
+}
+
+extension AudioStreamResolving {
+    func cancelPreparations(except track: Track?) {}
 }
 
 extension StreamResolver: AudioStreamResolving {}

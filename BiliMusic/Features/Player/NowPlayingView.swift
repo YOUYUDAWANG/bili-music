@@ -33,13 +33,6 @@ private struct InlineMVPlayerView: UIViewRepresentable {
     }
 }
 
-private struct PlayerProgressFrameKey: PreferenceKey {
-    static let defaultValue: CGRect = .null
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        value = nextValue()
-    }
-}
-
 private struct PlayerBottomContextFrameKey: PreferenceKey {
     static let defaultValue: CGRect = .null
     static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
@@ -103,6 +96,54 @@ struct RecommendationVisibleLoadPolicy: Equatable {
         RecommendationVisibleLoadPolicy(
             shouldLoad: recommendationContextVisible &&
                 (recommendationsStale || recommendationsEmpty || recommendationsMismatched))
+    }
+}
+
+private struct PlaylistLookupResult {
+    let playlist: BiliClient.UPPlaylist?
+    let tracks: [Track]
+    let error: String?
+}
+
+@MainActor
+private final class PlayerPlaylistLookupCache {
+    static let shared = PlayerPlaylistLookupCache()
+
+    private struct Entry {
+        let result: PlaylistLookupResult
+        let storedAt: Date
+    }
+
+    private var entries: [String: Entry] = [:]
+    private let capacity = 32
+
+    func result(for bvid: String, now: Date = Date()) -> PlaylistLookupResult? {
+        guard let entry = entries[bvid] else { return nil }
+        let ttl: TimeInterval
+        if entry.result.error != nil {
+            ttl = 60
+        } else if entry.result.playlist == nil {
+            ttl = 30 * 60
+        } else {
+            ttl = 2 * 60 * 60
+        }
+        guard now.timeIntervalSince(entry.storedAt) < ttl else {
+            entries[bvid] = nil
+            return nil
+        }
+        return entry.result
+    }
+
+    func store(_ result: PlaylistLookupResult, for bvid: String, now: Date = Date()) {
+        entries[bvid] = Entry(result: result, storedAt: now)
+        guard entries.count > capacity else { return }
+        let overflow = entries.count - capacity
+        for key in entries
+            .sorted(by: { $0.value.storedAt < $1.value.storedAt })
+            .prefix(overflow)
+            .map(\.key) {
+            entries[key] = nil
+        }
     }
 }
 
@@ -197,8 +238,9 @@ struct NowPlayingView: View {
     @State private var recommendationSeedKey: TrackKey?
     @State private var shownRecommendationKeys: Set<TrackKey> = []
     @State private var recommendationTask: Task<Void, Never>?
+    @State private var recommendationLoadID = UUID()
     @State private var playlistLookupTask: Task<Void, Never>?
-    @State private var playlistLookupCache: [String: PlaylistLookupResult] = [:]
+    @State private var scheduledPlaylistBVID: String?
     @State private var showLyrics = false
     @State private var showMVFullscreen = false
     @State private var showUPPlaylists = false
@@ -215,9 +257,12 @@ struct NowPlayingView: View {
     @State private var favoriteWasAdded = false
     @State private var downloadTrigger = 0
     @State private var isProgressScrubbing = false
-    @State private var progressFrameInGlobal: CGRect = .null
-    @State private var bottomContextFrameInGlobal: CGRect = .null
-    @State private var listRowActionSuppressedUntil: Date?
+    // 抽屉 frame 只被手势判定读取，不参与布局；存进引用盒避免
+    // onPreferenceChange 在拖拽/动画期间每帧触发整个 body 重算。
+    @State private var bottomContextFrameBox = BottomContextFrameBox()
+    // 确认下滑关闭后冻结的偏移量：@GestureState 松手自动归零会导致内容
+    // 先回弹再淡出，这里把最终偏移接住让关闭沿手势方向继续。
+    @State private var dismissCommitOffset: CGFloat = 0
     @State private var landscapeMVFullscreenKey: TrackKey?
     @State private var showInlineMVChrome = false
     @State private var inlineMVChromeHideTask: Task<Void, Never>?
@@ -248,12 +293,6 @@ struct NowPlayingView: View {
         static let accentStroke = AppTheme.accent.opacity(0.30)
     }
 
-    private struct PlaylistLookupResult {
-        let playlist: BiliClient.UPPlaylist?
-        let tracks: [Track]
-        let error: String?
-    }
-
     var body: some View {
         GeometryReader { proxy in
             let effectiveSafeAreaTop = max(proxy.safeAreaInsets.top, safeAreaTop)
@@ -272,10 +311,12 @@ struct NowPlayingView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
-            .offset(y: dismissDragOffset)
+            .offset(y: dismissDragOffset + dismissCommitOffset)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("nowPlayingView")
-            .animation(dismissDragAnimation, value: dismissDragOffset)
+            // 对两者之和做动画：确认关闭时 GestureState 归零、commit 同帧接住，
+            // 和值不变所以不产生回弹动画。
+            .animation(dismissDragAnimation, value: dismissDragOffset + dismissCommitOffset)
             .onAppear {
                 handleLandscapeMVFullscreen(isLandscape: isLandscape)
             }
@@ -299,24 +340,35 @@ struct NowPlayingView: View {
             MVFullscreenView()
         }
         .onAppear {
-            scheduleCurrentPlaylistLookup(force: false, delay: .milliseconds(1600))
+            if engine.state == .playing {
+                scheduleCurrentPlaylistLookup(force: false, delay: .milliseconds(350))
+            }
         }
         .onChange(of: engine.playbackMode) { _, mode in
-            if mode == .mv {
-                inlineMVChromeHideTask?.cancel()
-                showInlineMVChrome = false
-            } else {
-                inlineMVChromeHideTask?.cancel()
-                showInlineMVChrome = false
-            }
+            inlineMVChromeHideTask?.cancel()
+            showInlineMVChrome = false
             if mode != .mv {
                 landscapeMVFullscreenKey = nil
             }
         }
-        .onChange(of: engine.current?.bvid) {
+        .onChange(of: isCoverTransitionSource) { _, ownsArtwork in
+            // 关闭动画中途重新打开:清掉已冻结的下滑偏移,让内容滑回原位。
+            if ownsArtwork, dismissCommitOffset != 0 {
+                dismissCommitOffset = 0
+            }
+        }
+        .onChange(of: engine.current?.key) { oldKey, newKey in
+            if let oldKey, let newKey, oldKey.isCIDEnrichment(to: newKey) {
+                return
+            }
             recommendationTask?.cancel()
+            recommendationLoadID = UUID()
             playlistLookupTask?.cancel()
-            scheduleCurrentPlaylistLookup(force: false, delay: .milliseconds(1800))
+            scheduledPlaylistBVID = nil
+            currentPlaylist = nil
+            currentPlaylistTracks = []
+            currentPlaylistError = nil
+            currentPlaylistLoading = false
             recommendationSeedKey = nil
             recommendedTracks = []
             recommendationsError = nil
@@ -333,6 +385,7 @@ struct NowPlayingView: View {
         }
         .onChange(of: engine.state) { _, state in
             guard state == .playing else { return }
+            scheduleCurrentPlaylistLookup(force: false, delay: .milliseconds(350))
             let loadPolicy = RecommendationVisibleLoadPolicy.playbackStarted(
                 recommendationContextVisible: isRecommendationContextVisible,
                 recommendationsStale: recommendationsStale,
@@ -364,7 +417,9 @@ struct NowPlayingView: View {
         }
         .onDisappear {
             recommendationTask?.cancel()
+            recommendationLoadID = UUID()
             playlistLookupTask?.cancel()
+            scheduledPlaylistBVID = nil
             inlineMVChromeHideTask?.cancel()
         }
     }
@@ -516,26 +571,6 @@ struct NowPlayingView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
-    private func fullQueuePortraitPage(pageHeight: CGFloat, maxRows: Int) -> some View {
-        let drawerTopOffset = fullQueueDrawerTopOffset(for: pageHeight)
-        let drawerHeight = max(420, pageHeight - drawerTopOffset)
-
-        return ZStack(alignment: .top) {
-            fullQueueMiniPlayerHeader
-                .padding(.horizontal, 24)
-                .frame(height: Layout.fullQueueMiniHeaderHeight, alignment: .center)
-                .playerContentReveal(opacity: playerContentOpacity)
-
-            bottomContextDrawer(maxRows: maxRows)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .frame(height: drawerHeight, alignment: .top)
-                .offset(y: drawerTopOffset)
-                .layoutPriority(1)
-                .playerContentReveal(opacity: playerContentOpacity)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    }
-
     private func fullQueueDrawerTopOffset(for pageHeight: CGFloat) -> CGFloat {
         pageHeight < 760 ? 76 : 84
     }
@@ -590,7 +625,7 @@ struct NowPlayingView: View {
     @ViewBuilder
     private var fullQueueHeaderArtwork: some View {
         let currentTrack = engine.current
-        let coverURL = thumbnailURL(currentTrack?.coverURL, width: 320, height: 180)
+        let coverURL = BiliArtworkURL.thumbnail(currentTrack?.coverURL, width: 320, height: 180)
         if let coverURL {
             CachedAsyncImage(
                 url: coverURL,
@@ -721,7 +756,7 @@ struct NowPlayingView: View {
         includeBottomContext: Bool = true
     ) -> some View {
         VStack(spacing: 0) {
-            trackedProgressView
+            progressView
 
             transportControls
                 .padding(.top, portraitTransportTopPadding(isCompact: isCompact))
@@ -782,7 +817,7 @@ struct NowPlayingView: View {
 
     private func playerControlStack(compact: Bool) -> some View {
         VStack(spacing: compact ? 6 : 12) {
-            trackedProgressView
+            progressView
 
             transportControls
                 .padding(.top, compact ? -6 : -2)
@@ -795,23 +830,11 @@ struct NowPlayingView: View {
         .padding(.bottom, 2)
     }
 
-    private var trackedProgressView: some View {
-        progressView
-            .background(
-                GeometryReader { geo in
-                    Color.clear.preference(
-                        key: PlayerProgressFrameKey.self,
-                        value: geo.frame(in: .global)
-                    )
-                }
-            )
-    }
-
     private func playerPages(coverSize: CGFloat, width: CGFloat, safeAreaTop: CGFloat, isLandscape: Bool) -> some View {
         nowPlayingPage(coverSize: coverSize, pageWidth: width, isLandscape: isLandscape)
             .padding(.top, playerContentTopInset(safeAreaTop: safeAreaTop, isLandscape: isLandscape))
             .contentShape(Rectangle())
-            .simultaneousGesture(centerBodyDismissDrag, including: .gesture)
+            .simultaneousGesture(centerBodyDismissDrag, including: .all)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .clipped()
         .contentShape(Rectangle())
@@ -819,11 +842,8 @@ struct NowPlayingView: View {
             playerTopChrome(safeAreaTop: safeAreaTop)
                 .playerContentReveal(opacity: playerContentOpacity)
         }
-        .onPreferenceChange(PlayerProgressFrameKey.self) { frame in
-            progressFrameInGlobal = frame
-        }
-        .onPreferenceChange(PlayerBottomContextFrameKey.self) { frame in
-            bottomContextFrameInGlobal = frame
+        .onPreferenceChange(PlayerBottomContextFrameKey.self) { [box = bottomContextFrameBox] frame in
+            box.rect = frame
         }
     }
 
@@ -843,7 +863,7 @@ struct NowPlayingView: View {
     private func mediaView(coverSize: CGFloat) -> some View {
         ZStack(alignment: .topTrailing) {
             let currentTrack = engine.current
-            let coverURL = thumbnailURL(currentTrack?.coverURL, width: 960, height: 540)
+            let coverURL = BiliArtworkURL.thumbnail(currentTrack?.coverURL, width: 960, height: 540)
             ZStack {
                 if engine.playbackMode == .mv, let player = engine.avPlayer {
                     InlineMVPlayerView(player: player)
@@ -854,7 +874,6 @@ struct NowPlayingView: View {
                         url: coverURL,
                         targetSize: CGSize(width: coverSize, height: coverSize * 9 / 16),
                         fallbackImage: engine.currentCoverImage,
-                        debugIdentifier: "nowPlayingArtwork",
                         onImageLoaded: { image in
                             engine.rememberCurrentCover(image, for: currentTrack)
                         }
@@ -895,7 +914,7 @@ struct NowPlayingView: View {
                 id: "playerArtwork",
                 in: namespace,
                 active: usesSharedTransition,
-                isSource: true)
+                isSource: isCoverTransitionSource)
             .opacity(coverRevealOpacity)
             .clipShape(RoundedRectangle(cornerRadius: AppTheme.playerCoverRadius))
             .overlay {
@@ -906,14 +925,6 @@ struct NowPlayingView: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("播放封面")
             .accessibilityIdentifier("nowPlayingArtwork")
-#if DEBUG
-            .onAppear {
-                artworkDiag("mediaView.appear", coverSize: coverSize)
-            }
-            .onChange(of: artworkDebugSignature(coverSize: coverSize)) { _, signature in
-                NSLog("ARTWORK_DIAG view mediaView.changed %@", signature)
-            }
-#endif
             .simultaneousGesture(TapGesture().onEnded {
                 guard engine.playbackMode == .mv else { return }
                 revealInlineMVChrome()
@@ -960,30 +971,6 @@ struct NowPlayingView: View {
                 .foregroundStyle(Color.white.opacity(0.42))
         }
     }
-
-#if DEBUG
-    private func artworkDiag(_ message: String, coverSize: CGFloat) {
-        NSLog("ARTWORK_DIAG view %@ %@", message, artworkDebugSignature(coverSize: coverSize))
-    }
-
-    private func artworkDebugSignature(coverSize: CGFloat) -> String {
-        let trackKey = engine.current?.key.description ?? "nil"
-        let state = String(describing: engine.state)
-        let engineCover = debugImageDescription(engine.currentCoverImage)
-        let reveal = String(format: "%.2f", coverRevealOpacity)
-        let progress = String(format: "%.2f", Double(coverRevealProgress))
-        let content = String(format: "%.2f", playerContentOpacity)
-        let size = String(format: "%.1f", Double(coverSize))
-        return "track=\(trackKey) mode=\(engine.playbackMode.rawValue) state=\(state) engineCover=\(engineCover) reveal=\(reveal) content=\(content) progress=\(progress) isSource=\(isCoverTransitionSource) shared=\(usesSharedTransition) coverSize=\(size)"
-    }
-
-    private func debugImageDescription(_ image: UIImage?) -> String {
-        guard let image else { return "nil" }
-        let width = Int((image.size.width * image.scale).rounded())
-        let height = Int((image.size.height * image.scale).rounded())
-        return "\(width)x\(height)@\(String(format: "%.1f", image.scale))"
-    }
-#endif
 
     private var progressView: some View {
         // 独立子视图:只有它订阅 engine.currentTime(每 0.5s 变),
@@ -1062,6 +1049,35 @@ struct NowPlayingView: View {
         .symbolEffect(.bounce, value: isFavorite)
         .accessibilityHint("收藏到默认收藏夹")
         .sensoryFeedback(.intent(favoriteWasAdded ? .success : .selection), trigger: favoriteHapticTrigger)
+        .contextMenu {
+            if CookieStore.isLoggedIn, !favorites.folders.isEmpty {
+                ForEach(favorites.folders) { folder in
+                    Button {
+                        guard let current = engine.current else { return }
+                        Task {
+                            await favorites.toggle(track: current, folder: folder)
+                        }
+                    } label: {
+                        Label(folder.title, systemImage: "folder")
+                    }
+                }
+            } else {
+                Button {
+                    showFavoriteFolders = true
+                } label: {
+                    Label(
+                        CookieStore.isLoggedIn ? "选择收藏夹" : "请先登录 B 站",
+                        systemImage: "folder.badge.plus")
+                }
+                .disabled(!CookieStore.isLoggedIn)
+            }
+        }
+        .task {
+            guard CookieStore.isLoggedIn, favorites.folders.isEmpty else { return }
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            await favorites.loadFolders()
+        }
     }
 
     private var downloadButton: some View {
@@ -1107,7 +1123,7 @@ struct NowPlayingView: View {
         Menu {
             ForEach(PlayerEngine.QueueMode.allCases) { mode in
                 Button {
-                    engine.queueMode = mode
+                    engine.setQueueMode(mode)
                 } label: {
                     Label(mode.rawValue, systemImage: mode.icon).tag(mode)
                 }
@@ -1229,7 +1245,7 @@ struct NowPlayingView: View {
             Section("播放模式") {
                 ForEach(PlayerEngine.QueueMode.allCases) { mode in
                     Button {
-                        engine.queueMode = mode
+                        engine.setQueueMode(mode)
                     } label: {
                         Label(mode.rawValue, systemImage: engine.queueMode == mode ? "checkmark" : mode.icon)
                     }
@@ -1312,8 +1328,9 @@ struct NowPlayingView: View {
     private func setPlaybackMode(_ mode: PlayerEngine.PlaybackMode) {
         guard mode != engine.playbackMode, !switchingMode else { return }
         guard mode == .music || engine.videoAvailable else { return }
+        // 同步置位：Task 内置位会让快速双击都通过 guard，模式被切换两次。
+        switchingMode = true
         Task {
-            switchingMode = true
             await engine.setPlaybackMode(mode)
             switchingMode = false
         }
@@ -1328,6 +1345,9 @@ struct NowPlayingView: View {
             }
             return
         }
+        // sheet 与 fullScreenCover 不能同时呈现；有 sheet 时不消费 key，
+        // 留待 sheet 关闭后再次旋转仍可触发。
+        guard !showLyrics, !showFavoriteFolders, !showUPPlaylists else { return }
         guard landscapeMVFullscreenKey?.matches(current) != true else { return }
         landscapeMVFullscreenKey = current.key
         showMVFullscreen = true
@@ -1341,27 +1361,12 @@ struct NowPlayingView: View {
         action: @escaping () -> Void,
         @ViewBuilder label: () -> Label
     ) -> some View {
-        Button {
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(80))
-                guard !isListRowActionSuppressed else { return }
-                action()
-            }
-        } label: {
+        Button(action: action) {
             label()
         }
-            .buttonStyle(.plain)
-            .contentShape(Rectangle())
-            .accessibilityAddTraits(.isButton)
-    }
-
-    private var isListRowActionSuppressed: Bool {
-        guard let listRowActionSuppressedUntil else { return false }
-        return Date() < listRowActionSuppressedUntil
-    }
-
-    private func suppressListRowActionsBriefly() {
-        listRowActionSuppressedUntil = Date().addingTimeInterval(0.45)
+        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .accessibilityAddTraits(.isButton)
     }
 
     private func playerPageState(
@@ -1696,7 +1701,10 @@ struct NowPlayingView: View {
                     }
                     .frame(maxHeight: queuePresentationState == .fullQueue ? .infinity : CGFloat(visibleRows) * Layout.bottomSheetRowHeight)
                     .onAppear { scrollCurrentPlaylist(proxy) }
-                    .onChange(of: engine.current?.id) { _, _ in
+                    .onChange(of: engine.current?.key) { oldKey, newKey in
+                        if let oldKey, let newKey, oldKey.isCIDEnrichment(to: newKey) {
+                            return
+                        }
                         scrollCurrentPlaylist(proxy)
                     }
                 }
@@ -1744,7 +1752,10 @@ struct NowPlayingView: View {
                     .onChange(of: engine.queueIndex) { _, _ in
                         scrollCurrentQueue(proxy)
                     }
-                    .onChange(of: engine.current?.id) { _, _ in
+                    .onChange(of: engine.current?.key) { oldKey, newKey in
+                        if let oldKey, let newKey, oldKey.isCIDEnrichment(to: newKey) {
+                            return
+                        }
                         scrollCurrentQueue(proxy)
                     }
                 }
@@ -1925,7 +1936,11 @@ struct NowPlayingView: View {
     private var bottomContextHeaderDrag: some Gesture {
         DragGesture(minimumDistance: 8, coordinateSpace: .global)
             .updating($bottomContextDragOffset) { value, state, _ in
-                guard abs(value.translation.height) > abs(value.translation.width) * 1.1 else { return }
+                guard abs(value.translation.height) > abs(value.translation.width) * 1.1 else {
+                    // 方向意图消失时归零,避免视差偏移冻结。
+                    state = 0
+                    return
+                }
                 state = value.translation.height
             }
             .onEnded { value in
@@ -1947,7 +1962,7 @@ struct NowPlayingView: View {
         let isCurrent = engine.current.map { track.key.matches($0) } ?? false
         let display = TrackTitleFormatter.displayMetadata(for: track, clean: cleanListTitles)
         return HStack(spacing: 12) {
-            if let coverURL = thumbnailURL(track.coverURL, width: 96, height: 54) {
+            if let coverURL = BiliArtworkURL.thumbnail(track.coverURL, width: 96, height: 54) {
                 CachedAsyncImage(
                     url: coverURL,
                     targetSize: CGSize(width: 42, height: 24),
@@ -1970,7 +1985,7 @@ struct NowPlayingView: View {
                     .font(.subheadline.weight(isCurrent ? .semibold : .regular))
                     .foregroundStyle(isCurrent ? Color.white : PlayerSurface.primaryText)
                     .lineLimit(1)
-                Text("\(display.artist) · \(format(Double(track.duration)))")
+                Text("\(display.artist) · \(MusicFormatters.playbackTime(Double(track.duration)))")
                     .font(.caption)
                     .foregroundStyle(PlayerSurface.secondaryText)
                     .lineLimit(1)
@@ -2013,6 +2028,7 @@ struct NowPlayingView: View {
 
     private func scheduleRecommendationLoad(clear: Bool) {
         recommendationTask?.cancel()
+        recommendationLoadID = UUID()
         recommendationsError = nil
         if clear {
             recommendedTracks = []
@@ -2034,16 +2050,19 @@ struct NowPlayingView: View {
         if isVisible && recommendedTracks.isEmpty {
             recommendationsLoading = true
         }
+        let loadID = UUID()
+        recommendationLoadID = loadID
         recommendationTask = Task(priority: isVisible ? .userInitiated : .utility) {
             try? await Task.sleep(for: .milliseconds(clear && isVisible ? 260 : 0))
-            guard !Task.isCancelled else { return }
-            await loadRecommendations()
+            guard !Task.isCancelled, recommendationLoadID == loadID else { return }
+            await loadRecommendations(loadID: loadID)
         }
     }
 
     private func scheduleCurrentPlaylistLookup(force: Bool, delay: Duration) {
-        playlistLookupTask?.cancel()
         guard let current = engine.current else {
+            playlistLookupTask?.cancel()
+            scheduledPlaylistBVID = nil
             currentPlaylist = nil
             currentPlaylistTracks = []
             currentPlaylistError = nil
@@ -2052,11 +2071,16 @@ struct NowPlayingView: View {
         }
 
         let bvid = current.bvid
-        if !force, let cached = playlistLookupCache[bvid] {
+        if !force, let cached = PlayerPlaylistLookupCache.shared.result(for: bvid) {
+            playlistLookupTask?.cancel()
+            scheduledPlaylistBVID = nil
             applyPlaylistLookup(cached, for: bvid)
             return
         }
+        guard force || scheduledPlaylistBVID != bvid else { return }
 
+        playlistLookupTask?.cancel()
+        scheduledPlaylistBVID = bvid
         currentPlaylist = nil
         currentPlaylistTracks = []
         currentPlaylistError = nil
@@ -2077,12 +2101,15 @@ struct NowPlayingView: View {
         currentPlaylistLoading = false
     }
 
-    private func loadRecommendations() async {
+    private func loadRecommendations(loadID: UUID) async {
         guard let current = engine.current else { return }
-        let bvid = current.bvid
         let currentKey = current.key
         recommendationsLoading = isRecommendationContextVisible && recommendedTracks.isEmpty
-        defer { recommendationsLoading = false }
+        defer {
+            if recommendationLoadID == loadID {
+                recommendationsLoading = false
+            }
+        }
         let excluded = shownRecommendationKeys.union([currentKey])
         let tracks = await RecommendationEngine().recommendations(
             mode: .relatedPanel,
@@ -2092,7 +2119,9 @@ struct NowPlayingView: View {
                 playlistTracks: currentPlaylistTracks,
                 excludedKeys: excluded),
             limit: 24)
-        guard engine.current?.bvid == bvid else { return }
+        guard !Task.isCancelled,
+              recommendationLoadID == loadID,
+              engine.current.map({ currentKey.matches($0) }) ?? false else { return }
         shownRecommendationKeys.formUnion(tracks.map(\.key))
         recommendationSeedKey = currentKey
         recommendedTracks = tracks
@@ -2112,14 +2141,19 @@ struct NowPlayingView: View {
         }
 
         let bvid = current.bvid
-        if !force, let cached = playlistLookupCache[bvid] {
+        if !force, let cached = PlayerPlaylistLookupCache.shared.result(for: bvid) {
             applyPlaylistLookup(cached, for: bvid)
             return
         }
 
         currentPlaylistLoading = true
         currentPlaylistError = nil
-        defer { currentPlaylistLoading = false }
+        defer {
+            if scheduledPlaylistBVID == bvid {
+                currentPlaylistLoading = false
+                scheduledPlaylistBVID = nil
+            }
+        }
         do {
             let client = BiliClient()
             var resolvedOwnerMid = current.ownerMid
@@ -2127,15 +2161,21 @@ struct NowPlayingView: View {
             if playlist == nil {
                 if resolvedOwnerMid == nil {
                     resolvedOwnerMid = try? await client.videoInfo(bvid: bvid).owner.mid
+                    guard !Task.isCancelled else { return }
                 }
                 if let ownerMid = resolvedOwnerMid {
-                    playlist = try? await client.upPlaylistContaining(bvid: bvid, mid: ownerMid)
+                    playlist = try? await client.upPlaylistContaining(
+                        bvid: bvid,
+                        mid: ownerMid,
+                        maxPlaylists: 4,
+                        maxPages: 2)
+                    guard !Task.isCancelled else { return }
                 }
             }
             guard let playlist else {
                 guard engine.current?.bvid == bvid else { return }
                 let result = PlaylistLookupResult(playlist: nil, tracks: [], error: nil)
-                playlistLookupCache[bvid] = result
+                storePlaylistLookup(result, for: bvid)
                 applyPlaylistLookup(result, for: bvid)
                 return
             }
@@ -2154,18 +2194,22 @@ struct NowPlayingView: View {
             } ?? []
             guard engine.current?.bvid == bvid else { return }
             let result = PlaylistLookupResult(playlist: playlist, tracks: tracks, error: nil)
-            playlistLookupCache[bvid] = result
+            storePlaylistLookup(result, for: bvid)
             applyPlaylistLookup(result, for: bvid)
             engine.preload(tracks: tracks, limit: 2, delay: .milliseconds(700))
         } catch {
-            guard engine.current?.bvid == bvid else { return }
+            guard !Task.isCancelled, engine.current?.bvid == bvid else { return }
             let result = PlaylistLookupResult(
                 playlist: nil,
                 tracks: [],
                 error: "合集检测失败: \(error.localizedDescription)")
-            playlistLookupCache[bvid] = result
+            storePlaylistLookup(result, for: bvid)
             applyPlaylistLookup(result, for: bvid)
         }
+    }
+
+    private func storePlaylistLookup(_ result: PlaylistLookupResult, for bvid: String) {
+        PlayerPlaylistLookupCache.shared.store(result, for: bvid)
     }
 
     private func playCurrentPlaylistTrack(at index: Int) async {
@@ -2199,20 +2243,6 @@ struct NowPlayingView: View {
         return URL(string: raw.hasPrefix("//") ? "https:" + raw : raw)
     }
 
-    private func dedupe(_ tracks: [Track]) -> [Track] {
-        var seen = Set<String>()
-        return tracks.filter { track in
-            guard !seen.contains(track.bvid) else { return false }
-            seen.insert(track.bvid)
-            return true
-        }
-    }
-
-    private func format(_ seconds: Double) -> String {
-        let s = Int(seconds.isFinite ? max(seconds, 0) : 0)
-        return String(format: "%d:%02d", s / 60, s % 60)
-    }
-
     private func formatBitrate(_ bandwidth: Int) -> String {
         if bandwidth >= 1_000_000 {
             return String(format: "%.1f Mbps", Double(bandwidth) / 1_000_000)
@@ -2229,19 +2259,13 @@ struct NowPlayingView: View {
     }
 
     private func isBottomContextGestureStart(_ location: CGPoint) -> Bool {
-        guard !bottomContextFrameInGlobal.isNull, !bottomContextFrameInGlobal.isEmpty else { return false }
+        let frame = bottomContextFrameBox.rect
+        guard !frame.isNull, !frame.isEmpty else { return false }
         if queuePresentationState == .fullQueue {
-            return location.y >= bottomContextFrameInGlobal.minY - 12
+            return location.y >= frame.minY - 12
         }
-        return bottomContextFrameInGlobal
+        return frame
             .insetBy(dx: -10, dy: -8)
-            .contains(location)
-    }
-
-    private func isProgressGestureStart(_ location: CGPoint) -> Bool {
-        guard !progressFrameInGlobal.isNull, !progressFrameInGlobal.isEmpty else { return false }
-        return progressFrameInGlobal
-            .insetBy(dx: -28, dy: -18)
             .contains(location)
     }
 
@@ -2260,7 +2284,11 @@ struct NowPlayingView: View {
                     dismissGrabZoneHeight: Layout.dismissGrabZoneHeight,
                     region: .centerBody,
                     isProgressScrubbing: isProgressScrubbing
-                ) else { return }
+                ) else {
+                    // 方向意图消失时归零而不是保持旧值,避免偏移冻结在中途。
+                    state = 0
+                    return
+                }
                 state = offset
             }
             .onEnded { value in
@@ -2274,6 +2302,7 @@ struct NowPlayingView: View {
                     region: .centerBody,
                     isProgressScrubbing: isProgressScrubbing
                 ) {
+                    commitDismissOffset(for: value, region: .centerBody)
                     closePlayer()
                 }
             }
@@ -2288,7 +2317,10 @@ struct NowPlayingView: View {
                     dismissGrabZoneHeight: Layout.dismissGrabZoneHeight,
                     region: .topChrome,
                     isProgressScrubbing: isProgressScrubbing
-                ) else { return }
+                ) else {
+                    state = 0
+                    return
+                }
                 state = offset
             }
             .onEnded { value in
@@ -2300,9 +2332,22 @@ struct NowPlayingView: View {
                     region: .topChrome,
                     isProgressScrubbing: isProgressScrubbing
                 ) {
+                    commitDismissOffset(for: value, region: .topChrome)
                     closePlayer()
                 }
             }
+    }
+
+    /// 确认关闭时把手势最终偏移接进 `dismissCommitOffset`,
+    /// 抵消 @GestureState 自动归零造成的向上回弹。
+    private func commitDismissOffset(for value: DragGesture.Value, region: PlayerGesturePolicy.DismissRegion) {
+        dismissCommitOffset = PlayerGesturePolicy.dismissDragOffset(
+            translation: value.translation,
+            startY: value.startLocation.y,
+            dismissGrabZoneHeight: Layout.dismissGrabZoneHeight,
+            region: region,
+            isProgressScrubbing: isProgressScrubbing
+        ) ?? 0
     }
 
     private var dismissDragAnimation: Animation {
@@ -2320,6 +2365,12 @@ struct NowPlayingView: View {
             withAnimation(animation, updates)
         }
     }
+}
+
+/// 承载抽屉全局 frame 的引用盒:写入不触发 SwiftUI 视图失效。
+/// 仅在主线程读写(手势回调与 preference 回调均在主线程)。
+private final class BottomContextFrameBox: @unchecked Sendable {
+    var rect: CGRect = .null
 }
 
 private extension View {
@@ -2371,15 +2422,6 @@ private extension View {
     }
 }
 
-/// 为 hdslb.com 的封面 URL 追加 WebP 缩略图参数。
-private func thumbnailURL(_ url: URL?, width: Int, height: Int) -> URL? {
-    guard let url else { return nil }
-    let raw = url.absoluteString
-    guard !raw.localizedCaseInsensitiveContains("transparent.png") else { return nil }
-    guard raw.contains("hdslb.com"), !raw.contains("@") else { return url }
-    return URL(string: raw + "@\(width)w_\(height)h_1c.webp")
-}
-
 // MARK: - Control views and sheet views are in separate files:
-// PlayerControlViews.swift (PlayerIconButton, ActionSymbolButton, PlayerProgressBar, etc.)
+// PlayerControlViews.swift (PlayerIconButton, PlayerProgressBar, etc.)
 // PlayerSheetViews.swift (LyricsSheetView, MVFullscreenView, FavoriteFolderPickerView, UPPlaylistsView, etc.)

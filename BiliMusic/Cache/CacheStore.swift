@@ -4,8 +4,17 @@ import Observation
 
 private let log = Logger(subsystem: "com.fubuki.BiliMusic", category: "cache")
 
+actor VersionedAtomicFileWriter {
+    private var latestRevision = 0
 
-struct CachedEntry: Codable, Identifiable, Equatable {
+    func write(_ data: Data, revision: Int, to url: URL) throws {
+        guard revision >= latestRevision else { return }
+        latestRevision = revision
+        try data.write(to: url, options: .atomic)
+    }
+}
+
+struct CachedEntry: Codable, Identifiable, Equatable, Sendable {
     let bvid: String
     let cid: Int
     let title: String
@@ -51,6 +60,8 @@ final class CacheStore {
     private var mutationVersion = 0
     private var removedDuringLoad: Set<TrackKey> = []
     private var clearedDuringLoad = false
+    private let fileWriter = VersionedAtomicFileWriter()
+    private var writeRevision = 0
 
     private func rebuildIndex() {
         index = Dictionary(entries.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
@@ -64,15 +75,27 @@ final class CacheStore {
             .appendingPathComponent("audio", isDirectory: true)
     }
 
-    private var indexURL: URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("cache_index.json")
-    }
+    // 实例持有的路径:生产环境等同 Documents 索引 + Self.audioDir;测试可注入隔离目录。
+    private let indexURL: URL
+    private let audioDir: URL
 
     private init() {
-        try? FileManager.default.createDirectory(at: Self.audioDir, withIntermediateDirectories: true)
+        indexURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("cache_index.json")
+        audioDir = Self.audioDir
+        try? FileManager.default.createDirectory(at: audioDir, withIntermediateDirectories: true)
         rebuildIndex()   // didSet 在 init 内不触发,手动建一次
     }
+
+#if DEBUG
+    /// 测试注入:索引文件与音频目录都指向隔离路径,与真实 Documents 完全隔离。
+    init(indexURLForTesting: URL, audioDirForTesting: URL) {
+        indexURL = indexURLForTesting
+        audioDir = audioDirForTesting
+        try? FileManager.default.createDirectory(at: audioDirForTesting, withIntermediateDirectories: true)
+        rebuildIndex()
+    }
+#endif
 
     func loadIfNeeded() async {
         guard !isLoaded else { return }
@@ -83,17 +106,33 @@ final class CacheStore {
         }
 
         let indexURL = indexURL
-        let audioDir = Self.audioDir
+        let audioDir = audioDir
         loadStartVersion = mutationVersion
         let task = Task<[CachedEntry], Never>.detached(priority: .utility) {
             let start = CFAbsoluteTimeGetCurrent()
-            try? FileManager.default.createDirectory(at: audioDir, withIntermediateDirectories: true)
-            guard let data = try? Data(contentsOf: indexURL),
-                  let saved = try? JSONDecoder().decode([CachedEntry].self, from: data) else {
-                return []
+            let fileManager = FileManager.default
+            try? fileManager.createDirectory(at: audioDir, withIntermediateDirectories: true)
+            let saved: [CachedEntry]
+            if let data = try? Data(contentsOf: indexURL) {
+                guard let decoded = try? JSONDecoder().decode([CachedEntry].self, from: data) else {
+                    // 索引存在但解码失败:跳过孤儿清理,避免把有效音频误当孤儿删掉
+                    return []
+                }
+                saved = decoded
+            } else {
+                saved = []
             }
             let entries = saved.filter {
-                FileManager.default.fileExists(atPath: audioDir.appendingPathComponent($0.fileName).path)
+                fileManager.fileExists(atPath: audioDir.appendingPathComponent($0.fileName).path)
+            }
+            // 孤儿清理:删除 audioDir 里不在索引中的文件(下载落盘与写索引之间被杀等场景遗留)。
+            // 下载方 download()/addPersisting() 都会先 await loadIfNeeded() 才动 audioDir,
+            // 下载中的临时文件也在系统 tmp 而非 audioDir,所以此刻清理不会误删进行中的下载。
+            let indexedFileNames = Set(saved.map(\.fileName))
+            if let files = try? fileManager.contentsOfDirectory(at: audioDir, includingPropertiesForKeys: nil) {
+                for file in files where !indexedFileNames.contains(file.lastPathComponent) {
+                    try? fileManager.removeItem(at: file)
+                }
             }
             let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
             log.debug("load() \(elapsed, format: .fixed(precision: 1))ms entries=\(entries.count)")
@@ -105,54 +144,82 @@ final class CacheStore {
     }
 
     func entry(for track: Track) -> CachedEntry? {
-        if let cid = track.cid, let exact = index[TrackKey(bvid: track.bvid, cid: cid)] {
-            return exact
+        if let cid = track.cid {
+            return index[TrackKey(bvid: track.bvid, cid: cid)]
         }
         guard !ambiguousBVIDs.contains(track.bvid) else { return nil }
-        return uniqueBVIDIndex[track.bvid]
-    }
-
-    func entry(key: TrackKey) -> CachedEntry? {
-        if let exact = index[key] {
-            return exact
+        guard let candidate = uniqueBVIDIndex[track.bvid],
+              Self.titlesLikelyMatch(track.title, candidate.title) else {
+            return nil
         }
-        guard key.cid == nil else { return nil }
-        guard !ambiguousBVIDs.contains(key.bvid) else { return nil }
-        return uniqueBVIDIndex[key.bvid]
+        return candidate
     }
 
-    /// 兼容旧调用:只在该 BV 唯一缓存时返回,避免多分P误命中。
-    func entry(bvid: String) -> CachedEntry? {
-        entry(key: TrackKey(bvid: bvid, cid: nil))
+    private static func titlesLikelyMatch(_ lhs: String, _ rhs: String) -> Bool {
+        func normalized(_ value: String) -> String {
+            value
+                .replacingOccurrences(of: "<em class=\"keyword\">", with: "")
+                .replacingOccurrences(of: "</em>", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+        }
+        let left = normalized(lhs)
+        let right = normalized(rhs)
+        return !left.isEmpty && left == right
     }
 
-    func localURL(for track: Track) -> URL? {
-        entry(for: track).map { Self.audioDir.appendingPathComponent($0.fileName) }
+    func addPersisting(_ entry: CachedEntry) async throws {
+        await loadIfNeeded()
+        saveTask?.cancel()
+        mutationVersion += 1
+        let previousEntries = entries
+        var updated = entries
+        updated.removeAll { $0.key == entry.key }
+        updated.insert(entry, at: 0)
+        setEntries(updated)
+        let revision = nextWriteRevision()
+        do {
+            try await write(updated, revision: revision)
+            finishSave(revision: revision)
+        } catch {
+            mutationVersion += 1
+            var rollbackEntries = entries
+            rollbackEntries.removeAll { $0.key == entry.key }
+            if let previousIndex = previousEntries.firstIndex(where: { $0.key == entry.key }) {
+                rollbackEntries.insert(
+                    previousEntries[previousIndex],
+                    at: min(previousIndex, rollbackEntries.count))
+            }
+            setEntries(rollbackEntries)
+            let rollbackRevision = nextWriteRevision()
+            try? await write(rollbackEntries, revision: rollbackRevision)
+            finishSave(revision: rollbackRevision)
+            throw error
+        }
     }
 
-    func localURL(bvid: String) -> URL? {
-        entry(bvid: bvid).map { Self.audioDir.appendingPathComponent($0.fileName) }
-    }
-
-    func add(_ entry: CachedEntry) {
+#if DEBUG
+    func addForTesting(_ entry: CachedEntry) {
         mutationVersion += 1
         var updated = entries
         updated.removeAll { $0.key == entry.key }
         updated.insert(entry, at: 0)
         setEntries(updated)
-        save(immediate: true)
     }
+#endif
 
     func remove(_ entry: CachedEntry) {
         mutationVersion += 1
         if loadTask != nil, !isLoaded {
             removedDuringLoad.insert(entry.key)
         }
-        try? FileManager.default.removeItem(at: Self.audioDir.appendingPathComponent(entry.fileName))
+        try? FileManager.default.removeItem(at: audioDir.appendingPathComponent(entry.fileName))
         var updated = entries
         updated.removeAll { $0.key == entry.key }
         setEntries(updated)
-        save(immediate: true)
+        // load 未完成时不写盘,避免把不完整的索引落盘;applyLoadedEntries 合并后统一补写
+        guard isLoaded else { return }
+        save()   // 逐条删除走防抖;scene phase 切后台的 flush() 兜底
     }
 
     func removeAll() {
@@ -161,9 +228,11 @@ final class CacheStore {
             clearedDuringLoad = true
         }
         entries.forEach {
-            try? FileManager.default.removeItem(at: Self.audioDir.appendingPathComponent($0.fileName))
+            try? FileManager.default.removeItem(at: audioDir.appendingPathComponent($0.fileName))
         }
         setEntries([])
+        // load 未完成时推迟写盘,由 applyLoadedEntries 的 clearedDuringLoad 分支补上
+        guard isLoaded else { return }
         save(immediate: true)
     }
 
@@ -173,42 +242,61 @@ final class CacheStore {
 
     private var saveTask: Task<Void, Never>?
 
-    /// 防抖写盘:短时间内多次 add/remove 只在末尾写一次,encode 也挪到后台,
-    /// 不再每次改动都在主线程全量序列化整张索引。
-    func flush() async {
+    /// 立即写盘:scene phase 切后台等时机兜底,把防抖中的改动落盘。
+    func flush() async throws {
+        guard isLoaded || mutationVersion > 0 else { return }
+        if !isLoaded {
+            // 先等索引加载合并完成,避免把不完整的索引落盘
+            await loadIfNeeded()
+        }
         saveTask?.cancel()
-        await write(entries)
-        saveTask = nil
+        let revision = nextWriteRevision()
+        try await write(entries, revision: revision)
+        finishSave(revision: revision)
     }
 
+    /// 写盘。immediate=false 走 1s 防抖(连续逐条 remove 只在末尾写一次),
+    /// removeAll / load 合并等关键路径用 immediate=true 立即写。encode 在后台执行。
     private func save(immediate: Bool = false) {
         let snapshot = entries
-        if immediate {
-            saveTask?.cancel()
-            saveTask = Task { [weak self] in
-                await self?.write(snapshot)
-                self?.saveTask = nil
-            }
-            return
-        }
         saveTask?.cancel()
+        let revision = nextWriteRevision()
         saveTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(1))
-            guard !Task.isCancelled else { return }
-            await self?.write(snapshot)
-            self?.saveTask = nil
+            guard let self else { return }
+            if !immediate {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+            }
+            do {
+                try await self.write(snapshot, revision: revision)
+            } catch {
+                log.error("save failed: \(error.localizedDescription, privacy: .public)")
+            }
+            self.finishSave(revision: revision)
         }
     }
 
-    private func write(_ snapshot: [CachedEntry]) async {
+    private func write(_ snapshot: [CachedEntry], revision: Int) async throws {
         let url = indexURL
-        await Task.detached(priority: .background) {
+        let data = try await Task.detached(priority: .background) {
             let start = CFAbsoluteTimeGetCurrent()
-            guard let data = try? JSONEncoder().encode(snapshot) else { return }
-            try? data.write(to: url, options: .atomic)
+            let data = try JSONEncoder().encode(snapshot)
             let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
-            log.debug("save() \(elapsed, format: .fixed(precision: 1))ms entries=\(snapshot.count)")
+            log.debug("encode() \(elapsed, format: .fixed(precision: 1))ms entries=\(snapshot.count)")
+            return data
         }.value
+        try await fileWriter.write(data, revision: revision, to: url)
+    }
+
+    private func nextWriteRevision() -> Int {
+        writeRevision += 1
+        return writeRevision
+    }
+
+    private func finishSave(revision: Int) {
+        if writeRevision == revision {
+            saveTask = nil
+        }
     }
 
     private func applyLoadedEntries(_ loaded: [CachedEntry], startedAt version: Int) {
@@ -216,18 +304,18 @@ final class CacheStore {
         let changedWhileLoading = mutationVersion != version
         if clearedDuringLoad {
             isLoaded = true
+            // removeAll 在 load 期间推迟的写盘在此补上
+            save(immediate: true)
         } else if changedWhileLoading {
             let currentKeys = Set(entries.map(\.key))
             let retainedLoaded = loaded
                 .filter { !removedDuringLoad.contains($0.key) }
                 .filter { !currentKeys.contains($0.key) }
             let updated = entries + retainedLoaded
-            let didChange = updated != entries
             setEntries(updated)
-            if didChange {
-                save(immediate: true)
-            }
             isLoaded = true
+            // load 期间被推迟的写盘,连同 merge 结果一并在此落盘
+            save(immediate: true)
         } else {
             setEntries(loaded)
             isLoaded = true

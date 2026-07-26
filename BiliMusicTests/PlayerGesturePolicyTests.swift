@@ -243,6 +243,26 @@ final class PlayerGesturePolicyTests: XCTestCase {
         XCTAssertEqual(ProgressScrubMath.progress(locationX: 120, trackWidth: 0), 0)
     }
 
+    func testProgressScrubBeginsOnlyWithDeliberateHorizontalIntent() {
+        // 水平位移 ≥6pt 且大于纵向位移才进入 scrub。
+        XCTAssertTrue(ProgressScrubMath.shouldBeginScrub(
+            translation: CGSize(width: 6, height: 0)))
+        XCTAssertTrue(ProgressScrubMath.shouldBeginScrub(
+            translation: CGSize(width: -14, height: 5)))
+
+        // 位移不足 6pt:视为点按/噪声。
+        XCTAssertFalse(ProgressScrubMath.shouldBeginScrub(
+            translation: CGSize(width: 5, height: 0)))
+        // 纵向主导:让位给下滑关闭手势。
+        XCTAssertFalse(ProgressScrubMath.shouldBeginScrub(
+            translation: CGSize(width: 8, height: 12)))
+        // 水平不严格大于纵向时不进入 scrub。
+        XCTAssertFalse(ProgressScrubMath.shouldBeginScrub(
+            translation: CGSize(width: 6, height: 6)))
+        XCTAssertFalse(ProgressScrubMath.shouldBeginScrub(
+            translation: CGSize(width: 0, height: -20)))
+    }
+
     func testHorizontalListDragSuppressesRowTapWithoutBlockingVerticalScroll() {
         XCTAssertFalse(PlayerGesturePolicy.shouldSuppressListRowTap(
             translation: CGSize(width: 6, height: 2),

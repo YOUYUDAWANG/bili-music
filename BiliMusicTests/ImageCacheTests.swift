@@ -6,13 +6,13 @@ final class ImageCacheTests: XCTestCase {
     override func setUp() async throws {
         try await super.setUp()
         await MainActor.run {
-            ImageMemoryCache.shared.removeAll()
+            ImageMemoryCache.shared.releaseReloadableImages()
         }
     }
 
     override func tearDown() async throws {
         await MainActor.run {
-            ImageMemoryCache.shared.removeAll()
+            ImageMemoryCache.shared.releaseReloadableImages()
         }
         CountingImageURLProtocol.reset()
         try await super.tearDown()
@@ -26,6 +26,23 @@ final class ImageCacheTests: XCTestCase {
         }
 
         XCTAssertEqual(ImageMemoryCache.memoryCost(for: image), 10 * 20 * Int(image.scale * image.scale) * 4)
+    }
+
+    func testBiliArtworkURLBuildsOneSharedWidescreenVariant() {
+        let source = URL(string: "https://i0.hdslb.com/bfs/archive/cover.jpg")!
+
+        XCTAssertEqual(
+            BiliArtworkURL.widescreenThumbnail(source, width: 160)?.absoluteString,
+            "https://i0.hdslb.com/bfs/archive/cover.jpg@160w_90h_1c.webp"
+        )
+    }
+
+    func testBiliArtworkURLRejectsTransparentPlaceholderAndKeepsExistingVariant() {
+        let placeholder = URL(string: "https://i0.hdslb.com/transparent.png")!
+        let variant = URL(string: "https://i0.hdslb.com/bfs/archive/cover.jpg@320w_180h_1c.webp")!
+
+        XCTAssertNil(BiliArtworkURL.thumbnail(placeholder, width: 320, height: 180))
+        XCTAssertEqual(BiliArtworkURL.thumbnail(variant, width: 640, height: 360), variant)
     }
 
     @MainActor

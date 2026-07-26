@@ -28,6 +28,23 @@ enum MusicFilter {
 
     private static let weakMusicHints: Set<String> = ["合集", "playlist"]
 
+    /// 音乐提示词匹配。≤4 字符的纯 ASCII 短词("op"/"ed"/"dj"/"sing"/"live" 等)
+    /// 用词边界精确比对,避免 "explained" 命中 "ed"、"using" 命中 "sing";
+    /// 中文/日文与长词保持子串包含。纯逻辑,便于测试。
+    private static func containsMusicHint(_ text: String, _ hint: String) -> Bool {
+        if hint.count <= 4, hint.allSatisfy(\.isASCII) {
+            return asciiWords(in: text).contains(hint)
+        }
+        return text.contains(hint)
+    }
+
+    /// 简单分词:按「非 ASCII 字母数字」切开。中文与英文相邻时
+    /// ("陈奕迅mv合集")英文段仍能独立成词。
+    private static func asciiWords(in text: String) -> Set<String> {
+        Set(text.split(whereSeparator: { !($0.isASCII && ($0.isLetter || $0.isNumber)) })
+            .map(String.init))
+    }
+
     /// 宽松判定（用于推荐扩列，允许更多疑似音乐通过）。
     static func isMusic(_ track: Track) -> Bool {
         isMusic(title: track.title, artist: track.artist, duration: track.duration)
@@ -43,7 +60,7 @@ enum MusicFilter {
         // 搜索页宁可少一点,也不要混进解说/剪辑/教程/影视/游戏等泛内容。
         guard (60...720).contains(track.duration) else { return false }
         let text = (track.title + " " + track.artist).lowercased()
-        let hasMusicHint = musicHints.contains { text.contains($0.lowercased()) }
+        let hasMusicHint = musicHints.contains { containsMusicHint(text, $0.lowercased()) }
         if let typeID = track.typeID, !musicTypeIDs.contains(typeID) {
             return false
         }
@@ -72,10 +89,10 @@ enum MusicFilter {
     private static func isExpandedSearchResult(_ track: Track, query: String? = nil) -> Bool {
         guard (45...900).contains(track.duration) else { return false }
         let text = (track.title + " " + track.artist).lowercased()
-        let hasMusicHint = musicHints.contains { text.contains($0.lowercased()) }
+        let hasMusicHint = musicHints.contains { containsMusicHint(text, $0.lowercased()) }
         let hasStrongMusicHint = musicHints.contains { hint in
             let normalizedHint = hint.lowercased()
-            return !weakMusicHints.contains(normalizedHint) && text.contains(normalizedHint)
+            return !weakMusicHints.contains(normalizedHint) && containsMusicHint(text, normalizedHint)
         }
         if nonMusicHints.contains(where: { text.contains($0.lowercased()) }), !hasStrongMusicHint {
             return false
@@ -138,11 +155,11 @@ enum MusicFilter {
         if nonMusicHints.contains(where: { text.contains($0.lowercased()) }) {
             return musicHints.contains { hint in
                 let normalizedHint = hint.lowercased()
-                return !weakMusicHints.contains(normalizedHint) && text.contains(normalizedHint)
+                return !weakMusicHints.contains(normalizedHint) && containsMusicHint(text, normalizedHint)
             }
         }
 
-        if musicHints.contains(where: { text.contains($0.lowercased()) }) {
+        if musicHints.contains(where: { containsMusicHint(text, $0.lowercased()) }) {
             return true
         }
 
@@ -157,7 +174,7 @@ enum MusicFilter {
         if nonMusicHints.contains(where: { text.contains($0.lowercased()) }) {
             return false
         }
-        if musicHints.contains(where: { text.contains($0.lowercased()) }) {
+        if musicHints.contains(where: { containsMusicHint(text, $0.lowercased()) }) {
             return true
         }
         return looksLikeSongTitle(text)

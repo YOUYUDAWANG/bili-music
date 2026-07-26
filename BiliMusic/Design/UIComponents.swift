@@ -1,53 +1,5 @@
 import SwiftUI
 
-// MARK: - 长文本右侧渐变淡出
-
-struct FadeOutRightModifier: ViewModifier {
-    var fadeWidth: CGFloat = 16
-
-    func body(content: Content) -> some View {
-        content
-            .mask(
-                HStack(spacing: 0) {
-                    Rectangle()
-                    LinearGradient(
-                        colors: [.black, .clear],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                    .frame(width: fadeWidth)
-                }
-            )
-    }
-}
-
-extension View {
-    func fadeOutRight(width: CGFloat = 16) -> some View {
-        modifier(FadeOutRightModifier(fadeWidth: width))
-    }
-}
-
-// MARK: - Mini 播放器微进度条（隔离渲染，只订阅 currentTime）
-
-struct MiniProgressBar: View {
-    @Environment(PlayerEngine.self) private var engine
-
-    var body: some View {
-        GeometryReader { geo in
-            let progress = engine.duration > 0 ? CGFloat(engine.currentTime / engine.duration) : 0
-            Rectangle()
-                .fill(Color.primary.opacity(0.06))
-                .overlay(
-                    Rectangle()
-                        .fill(Color.primary.opacity(0.35))
-                        .frame(width: geo.size.width * progress),
-                    alignment: .leading
-                )
-        }
-        .frame(height: 1.5)
-    }
-}
-
 // MARK: - Mini 播放器控制按钮按压缩放
 
 struct MiniPlayerControlButtonStyle: ButtonStyle {
@@ -180,7 +132,7 @@ struct FeaturedTrackCard: View {
         let display = TrackTitleFormatter.displayMetadata(for: track, clean: cleanListTitles)
         VStack(alignment: .leading, spacing: 10) {
             CachedAsyncImage(
-                url: thumbnailURL(track.coverURL, width: 640, height: 360),
+                url: BiliArtworkURL.thumbnail(track.coverURL, width: 640, height: 360),
                 targetSize: CGSize(width: 320, height: 180)
             ) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
@@ -220,30 +172,6 @@ struct FeaturedTrackCard: View {
         .contentShape(Rectangle())
     }
 
-    private func thumbnailURL(_ url: URL?, width: Int, height: Int) -> URL? {
-        guard let url else { return nil }
-        let raw = url.absoluteString
-        guard !raw.localizedCaseInsensitiveContains("transparent.png") else { return nil }
-        guard raw.contains("hdslb.com"), !raw.contains("@") else { return url }
-        return URL(string: raw + "@\(width)w_\(height)h_1c.webp")
-    }
-}
-
-struct MusicTrackRow: View {
-    let track: Track
-    var isPlaying = false
-    var showsMenu = true
-    var isLoading = false
-
-    var body: some View {
-        TrackRow(
-            track: track,
-            isPlaying: isPlaying,
-            showsTrailingIcon: showsMenu,
-            isLoading: isLoading,
-            appearance: .prominent
-        )
-    }
 }
 
 enum MusicFormatters {
@@ -251,5 +179,10 @@ enum MusicFormatters {
         seconds >= 3600
             ? String(format: "%d:%02d:%02d", seconds / 3600, seconds % 3600 / 60, seconds % 60)
             : String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+
+    static func playbackTime(_ seconds: Double) -> String {
+        let value = Int(seconds.isFinite ? max(seconds, 0) : 0)
+        return String(format: "%d:%02d", value / 60, value % 60)
     }
 }

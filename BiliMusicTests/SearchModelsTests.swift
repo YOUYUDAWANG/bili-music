@@ -83,22 +83,26 @@ final class SearchModelsTests: XCTestCase {
             TrackTitleFormatter.DisplayMetadata(title: "【4K修复】周杰伦《晴天》Official MV", artist: "音乐UP"))
     }
 
-    func testTrackTitleFormatterCachesMetadataByTrackKeyAndCleaningFlag() {
+    func testTrackTitleFormatterCachesMetadataByTrackContentAndCleaningFlag() {
         TrackTitleFormatter.resetDisplayMetadataCacheForTesting()
         defer { TrackTitleFormatter.resetDisplayMetadataCacheForTesting() }
 
         let track = Track(typeID: 193, bvid: "BV13", title: "【4K修复】周杰伦《晴天》Official MV", artist: "音乐UP",
                           coverURL: nil, duration: 269)
+        let updatedTrack = Track(typeID: 193, bvid: "BV13", title: "陈奕迅《富士山下》Official MV", artist: "另一个UP",
+                                 coverURL: nil, duration: 269)
 
         let cleanedOnce = TrackTitleFormatter.displayMetadata(for: track, clean: true)
         let cleanedTwice = TrackTitleFormatter.displayMetadata(for: track, clean: true)
         let rawOnce = TrackTitleFormatter.displayMetadata(for: track, clean: false)
         let rawTwice = TrackTitleFormatter.displayMetadata(for: track, clean: false)
+        let updated = TrackTitleFormatter.displayMetadata(for: updatedTrack, clean: true)
 
         XCTAssertEqual(cleanedOnce, cleanedTwice)
         XCTAssertEqual(rawOnce, rawTwice)
-        XCTAssertEqual(TrackTitleFormatter.displayMetadataCacheCountForTesting, 2)
-        XCTAssertEqual(TrackTitleFormatter.displayMetadataCacheMissesForTesting, 2)
+        XCTAssertEqual(updated, TrackTitleFormatter.DisplayMetadata(title: "富士山下", artist: "陈奕迅"))
+        XCTAssertEqual(TrackTitleFormatter.displayMetadataCacheCountForTesting, 3)
+        XCTAssertEqual(TrackTitleFormatter.displayMetadataCacheMissesForTesting, 3)
     }
 
     func testTrackTitleFormatterKeepsAmbiguousTitlesUnchanged() {
@@ -305,6 +309,47 @@ final class SearchModelsTests: XCTestCase {
         XCTAssertEqual(store.resultsQuery, "新歌")
         XCTAssertEqual(store.results.map { $0.bvid }, ["BVNEW"])
         XCTAssertFalse(store.searching)
+    }
+
+    @MainActor
+    func testConcurrentSearchPagesKeepRelevanceOrderInsteadOfCompletionOrder() async throws {
+        let store = SearchStore(searchPageForTesting: { _, page, _ in
+            if page == 1 {
+                try? await Task.sleep(nanoseconds: 120_000_000)
+            } else if page == 2 {
+                try? await Task.sleep(nanoseconds: 60_000_000)
+            }
+            return [makeTrack(
+                bvid: "BVPAGE\(page)",
+                title: "晴天 Official MV 第 \(page) 页")]
+        })
+
+        store.submitSearch("晴天") { _ in }
+        try await Task.sleep(nanoseconds: 220_000_000)
+
+        XCTAssertEqual(store.results.map(\.bvid), ["BVPAGE1", "BVPAGE2", "BVPAGE3"])
+        XCTAssertFalse(store.searching)
+    }
+
+    @MainActor
+    func testSearchSnapshotCacheEvictsLeastRecentlyUsedEntry() {
+        let store = SearchStore()
+        for index in 0..<13 {
+            store.storeCachedSnapshotForTesting(
+                query: "query-\(index)",
+                mode: .music,
+                snapshot: SearchCachedSnapshot(
+                    tracks: [makeTrack(
+                        bvid: "BVCACHE\(index)",
+                        title: "缓存歌曲 \(index)")],
+                    nextPage: 4,
+                    activeKeywords: ["query-\(index)"],
+                    hasMoreResults: true))
+        }
+
+        XCTAssertFalse(store.restoreCachedResultsIfAvailable(for: "query-0"))
+        XCTAssertTrue(store.restoreCachedResultsIfAvailable(for: "query-12"))
+        XCTAssertEqual(store.results.map(\.bvid), ["BVCACHE12"])
     }
 
     @MainActor

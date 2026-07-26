@@ -6,7 +6,7 @@
 
 ## 入口与启动
 
-- **文件**: `NowPlayingView.swift`
+- **文件**: `NowPlayingView.swift`（主入口）、`PlayerControlViews.swift`（控制子视图）、`PlayerSheetViews.swift`（歌词/合集/收藏等 sheet）、`PlayerGesturePolicy.swift`（手势阈值与进度计算纯函数）、`PlayerListWindow.swift`（队列长列表窗口化纯函数）
 - 由 `RootView` 通过 `.ignoresSafeArea()` 和 `.offset(y:)` 以浮层方式呈现。
 - 迷你播放器由 `RootView` 的自定义 `GlassEffectContainer` 底部浮层呈现，和导航胶囊/搜索圆按钮组成 Apple Music 风格的内缩底部组。
 
@@ -30,6 +30,16 @@
 | 歌词页 | LyricSheetView（滚动高亮、自动居中） |
 | MV 全屏 | MVFullscreenView（全屏视频播放） |
 
+### PlayerGesturePolicy（static 枚举，纯函数）
+
+- 集中定义手势阈值：mini bar 上滑展开（拖动区间 190pt、激活进度 0.38）、下滑关闭（位移 130pt / 预测 260pt，顶部 chrome 区 90pt / 180pt）、速度投影时间等。
+- `miniOpenProgress` / `renderedMiniOpenProgress` 等把手势位移换算成展开进度，供 `BiliMusicTests/PlayerGesturePolicyTests` 验证。
+
+### PlayerListWindow（static 枚举，纯函数）
+
+- `items(tracks:current:maxRows:)` — 以当前曲目为中心取队列的可视窗口片段（长队列不整表渲染）。
+- `positionText(tracks:current:)` — 「第 x / n 首」定位文案。
+
 ## 关键依赖与配置
 
 - `PlayerEngine` — 所有状态通过 Environment 读取。
@@ -49,9 +59,14 @@
 ## 相关文件清单
 
 - `NowPlayingView.swift`
+- `PlayerControlViews.swift`
+- `PlayerSheetViews.swift`
+- `PlayerGesturePolicy.swift`
+- `PlayerListWindow.swift`
 
 ## 变更记录
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-27 | 全项目 review 修复 + 文档同步：模块拆分为 5 个文件，新增 PlayerGesturePolicy / PlayerListWindow 纯函数说明；UI 层行为由 `BiliMusicUITests/PlayerChromeUITests` 以 fixture 覆盖。 |
 | 2026-06-24 | 初始文档创建。 |

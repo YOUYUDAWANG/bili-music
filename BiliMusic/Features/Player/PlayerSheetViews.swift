@@ -244,6 +244,8 @@ struct UPPlaylistsView: View {
     @State private var playlists: [BiliClient.UPPlaylist] = []
     @State private var loading = false
     @State private var errorMessage: String?
+    @State private var sourceOwnerMid: Int?
+    @State private var sourceArtist = ""
 
     var body: some View {
         NavigationStack {
@@ -269,7 +271,12 @@ struct UPPlaylistsView: View {
             .navigationTitle("合集")
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: BiliClient.UPPlaylist.self) { playlist in
-                UPPlaylistDetailView(playlist: playlist)
+                if let sourceOwnerMid {
+                    UPPlaylistDetailView(
+                        playlist: playlist,
+                        ownerMid: sourceOwnerMid,
+                        artist: sourceArtist)
+                }
             }
             .overlay {
                 if loading {
@@ -288,6 +295,8 @@ struct UPPlaylistsView: View {
             errorMessage = "当前歌曲缺少 UP 主信息"
             return
         }
+        sourceOwnerMid = mid
+        sourceArtist = current.artist
         loading = true
         defer { loading = false }
         do {
@@ -320,6 +329,8 @@ struct UPPlaylistDetailView: View {
     @Environment(PlayerEngine.self) private var engine
     @Environment(\.dismiss) private var dismiss
     let playlist: BiliClient.UPPlaylist
+    let ownerMid: Int
+    let artist: String
 
     @State private var tracks: [Track] = []
     @State private var page = 1
@@ -374,16 +385,17 @@ struct UPPlaylistDetailView: View {
     }
 
     private func loadMore() async {
-        guard hasMore, !loading, let mid = engine.current?.ownerMid else { return }
+        guard hasMore, !loading else { return }
         loading = true
+        errorMessage = nil
         defer { loading = false }
         do {
-            let result = try await BiliClient().upPlaylistItems(mid: mid, playlist: playlist, page: page)
+            let result = try await BiliClient().upPlaylistItems(mid: ownerMid, playlist: playlist, page: page)
+            guard !Task.isCancelled else { return }
             page += 1
             hasMore = result.hasMore
-            let artist = engine.current?.artist ?? ""
             let newTracks = result.items
-                .map { Track(playlist: $0, artist: artist, ownerMid: mid) }
+                .map { Track(playlist: $0, artist: artist, ownerMid: ownerMid) }
                 .filter(MusicFilter.isMusic)
             tracks.append(contentsOf: newTracks)
             engine.preload(tracks: newTracks, limit: 2, delay: .milliseconds(700))

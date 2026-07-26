@@ -43,6 +43,7 @@ struct SearchView: View {
             }
             .scrollDismissesKeyboard(.immediately)
         }
+        .sensoryFeedback(.intent(.lightImpact), trigger: searchResultTapTrigger)
         .task {
             await store.loadLocalContent(history: history, cache: cache)
         }
@@ -226,7 +227,6 @@ struct SearchView: View {
                         }
                         .contentShape(Rectangle())
                         .buttonStyle(MusicRowButtonStyle())
-                        .sensoryFeedback(.intent(.lightImpact), trigger: searchResultTapTrigger)
                     }
                 }
             }

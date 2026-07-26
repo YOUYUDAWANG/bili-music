@@ -5,9 +5,26 @@ import XCTest
 
 @MainActor
 final class PlaybackCriticalPathTests: XCTestCase {
+    func testManualNextBypassesRepeatOneWhileAutomaticAdvanceRepeats() {
+        XCTAssertEqual(
+            QueueController.nextIndex(
+                mode: .repeatOne,
+                queueCount: 3,
+                currentIndex: 1,
+                automatic: true),
+            1)
+        XCTAssertEqual(
+            QueueController.nextIndex(
+                mode: .repeatOne,
+                queueCount: 3,
+                currentIndex: 1,
+                automatic: false),
+            2)
+    }
+
     override func tearDown() {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
-        ImageMemoryCache.shared.removeAll()
+        ImageMemoryCache.shared.releaseReloadableImages()
         super.tearDown()
     }
 
@@ -35,6 +52,25 @@ final class PlaybackCriticalPathTests: XCTestCase {
 
         XCTAssertEqual(currentDuringResolution?.bvid, track.bvid)
         XCTAssertEqual(engine.current?.bvid, track.bvid)
+    }
+
+    func testInvalidQueueSelectionDoesNotDiscardCurrentPlayback() async {
+        let track = Self.track()
+        let stream = Self.stream(
+            url: URL(fileURLWithPath: "/tmp/current.m4a"),
+            cid: 1001,
+            duration: 211,
+            quality: 30280,
+            bandwidth: 0)
+        let engine = PlayerEngine(
+            streamResolver: CriticalPathAudioResolver(cached: stream, prepared: stream),
+            startupTestHooks: .init(startPlaybackOverride: { _, _, _ in }))
+
+        await engine.play(tracks: [track], startAt: 0)
+        await engine.play(tracks: [], startAt: 0)
+
+        XCTAssertEqual(engine.current?.bvid, track.bvid)
+        XCTAssertEqual(engine.queue.count, 1)
     }
 
     func testPlayBindsCachedArtworkBeforeAwaitedSourceResolutionCompletes() async {
@@ -101,9 +137,20 @@ final class PlaybackCriticalPathTests: XCTestCase {
             .playerItemCreated(.freshRemote),
             .playRequested(.freshRemote)
         ])
+        XCTAssertEqual(resolver.retainedPreparationKeys, [track.key])
     }
 
     func testFirstObservedPlayingSchedulesOnlyAllowedPostSoundWork() async {
+        let defaults = UserDefaults.standard
+        let previousAutoCache = defaults.object(forKey: PlaybackPreferences.autoCacheKey)
+        defaults.set(false, forKey: PlaybackPreferences.autoCacheKey)
+        defer {
+            if let previousAutoCache {
+                defaults.set(previousAutoCache, forKey: PlaybackPreferences.autoCacheKey)
+            } else {
+                defaults.removeObject(forKey: PlaybackPreferences.autoCacheKey)
+            }
+        }
         let track = Self.track()
         let cached = Self.stream(
             url: URL(fileURLWithPath: "/tmp/critical-path.m4a"),
@@ -217,6 +264,561 @@ final class PlaybackCriticalPathTests: XCTestCase {
         XCTAssertNotEqual(available.videoAvailable, unavailable.videoAvailable)
     }
 
+    func testPlaybackBufferPolicyKeepsVideoMemoryBounded() {
+        let track = Self.track(bvid: "BVBUFFER001")
+        let remoteAudio = PlaybackSource(
+            track: track,
+            url: URL(string: "https://example.invalid/audio.m4a")!,
+            isLocal: false,
+            kind: .freshRemote,
+            quality: 30280,
+            bandwidth: 192_000)
+        let remoteVideo = PlaybackSource(
+            track: track,
+            url: URL(string: "https://example.invalid/video.mp4")!,
+            isLocal: false,
+            kind: .mvRemote,
+            quality: nil,
+            bandwidth: nil)
+        let localAudio = PlaybackSource(
+            track: track,
+            url: URL(fileURLWithPath: "/tmp/audio.m4a"),
+            isLocal: true,
+            kind: .localCache,
+            quality: 30280,
+            bandwidth: 192_000)
+
+        XCTAssertEqual(
+            PlaybackBufferPolicy.preferredForwardBufferDuration(for: remoteAudio),
+            30)
+        XCTAssertTrue(PlaybackBufferPolicy.allowsNetworkUseWhilePaused(for: remoteAudio))
+        XCTAssertEqual(
+            PlaybackBufferPolicy.preferredForwardBufferDuration(for: remoteVideo),
+            6)
+        XCTAssertFalse(PlaybackBufferPolicy.allowsNetworkUseWhilePaused(for: remoteVideo))
+        XCTAssertEqual(
+            PlaybackBufferPolicy.preferredForwardBufferDuration(for: localAudio),
+            0)
+        XCTAssertFalse(PlaybackBufferPolicy.allowsNetworkUseWhilePaused(for: localAudio))
+    }
+
+    func testAutomaticMVPolicyRequiresEverySafetyCondition() {
+        let baseline = (
+            prefersMVOnWiFi: true,
+            isWiFi: true,
+            hasManualModeOverride: false,
+            currentMode: PlayerEngine.PlaybackMode.music,
+            hasPreparedVideo: true,
+            wantsPlayback: true,
+            isAppActive: true
+        )
+
+        XCTAssertTrue(PlayerEngine.AutomaticPlaybackPolicy.shouldSwitchToMV(
+            prefersMVOnWiFi: baseline.prefersMVOnWiFi,
+            isWiFi: baseline.isWiFi,
+            hasManualModeOverride: baseline.hasManualModeOverride,
+            currentMode: baseline.currentMode,
+            hasPreparedVideo: baseline.hasPreparedVideo,
+            wantsPlayback: baseline.wantsPlayback,
+            isAppActive: baseline.isAppActive))
+        XCTAssertFalse(PlayerEngine.AutomaticPlaybackPolicy.shouldSwitchToMV(
+            prefersMVOnWiFi: false,
+            isWiFi: true,
+            hasManualModeOverride: false,
+            currentMode: .music,
+            hasPreparedVideo: true,
+            wantsPlayback: true,
+            isAppActive: true))
+        XCTAssertFalse(PlayerEngine.AutomaticPlaybackPolicy.shouldSwitchToMV(
+            prefersMVOnWiFi: true,
+            isWiFi: false,
+            hasManualModeOverride: false,
+            currentMode: .music,
+            hasPreparedVideo: true,
+            wantsPlayback: true,
+            isAppActive: true))
+        XCTAssertFalse(PlayerEngine.AutomaticPlaybackPolicy.shouldSwitchToMV(
+            prefersMVOnWiFi: true,
+            isWiFi: true,
+            hasManualModeOverride: true,
+            currentMode: .music,
+            hasPreparedVideo: true,
+            wantsPlayback: true,
+            isAppActive: true))
+        XCTAssertFalse(PlayerEngine.AutomaticPlaybackPolicy.shouldSwitchToMV(
+            prefersMVOnWiFi: true,
+            isWiFi: true,
+            hasManualModeOverride: false,
+            currentMode: .music,
+            hasPreparedVideo: false,
+            wantsPlayback: true,
+            isAppActive: true))
+        XCTAssertFalse(PlayerEngine.AutomaticPlaybackPolicy.shouldSwitchToMV(
+            prefersMVOnWiFi: true,
+            isWiFi: true,
+            hasManualModeOverride: false,
+            currentMode: .music,
+            hasPreparedVideo: true,
+            wantsPlayback: true,
+            isAppActive: false))
+    }
+
+    func testMVPlaybackFailureFallsBackToMusicInsteadOfFailingTheTrack() {
+        XCTAssertTrue(
+            PlayerEngine.PlaybackFailureRecoveryPolicy.shouldFallbackToMusic(
+                sourceKind: .mvRemote))
+        XCTAssertFalse(
+            PlayerEngine.PlaybackFailureRecoveryPolicy.shouldFallbackToMusic(
+                sourceKind: .freshRemote))
+        XCTAssertFalse(
+            PlayerEngine.PlaybackFailureRecoveryPolicy.shouldFallbackToMusic(
+                sourceKind: .localCache))
+    }
+
+    func testExplicitAutomaticPlaybackQualityIsNotReplacedByDefaultQuality() {
+        let defaults = UserDefaults.standard
+        let key = PlaybackPreferences.playbackQualityKey
+        let previousValue = defaults.object(forKey: key)
+        defaults.set(0, forKey: key)
+        defer {
+            if let previousValue {
+                defaults.set(previousValue, forKey: key)
+            } else {
+                defaults.removeObject(forKey: key)
+            }
+        }
+
+        XCTAssertEqual(PlaybackPreferences.playbackQuality, 0)
+    }
+
+    func testPauseDuringSourceResolutionPreventsLateAutoplay() async {
+        let track = Self.track()
+        let stream = Self.stream(
+            url: URL(string: "https://example.invalid/delayed.m4a")!,
+            cid: 1001,
+            duration: 211,
+            quality: 30280,
+            bandwidth: 192_000)
+        let resolver = SuspendedAudioResolver()
+        var events: [PlayerEngine.PlaybackStartupTestEvent] = []
+        let engine = PlayerEngine(
+            streamResolver: resolver,
+            startupTestHooks: .init(
+                record: { events.append($0) },
+                startPlaybackOverride: { _, _, _ in }))
+
+        let playTask = Task { await engine.play(tracks: [track], startAt: 0) }
+        await resolver.waitUntilRequested()
+        engine.pause()
+        resolver.resolve(stream)
+        await playTask.value
+
+        XCTAssertFalse(engine.wantsPlayback)
+        XCTAssertEqual(engine.state, .paused)
+        XCTAssertFalse(events.contains { event in
+            if case .playRequested = event { return true }
+            return false
+        })
+    }
+
+    func testSeekDuringSourceResolutionIsAppliedWhenPlaybackStarts() async {
+        let track = Self.track()
+        let stream = Self.stream(
+            url: URL(string: "https://example.invalid/delayed-seek.m4a")!,
+            cid: 1001,
+            duration: 211,
+            quality: 30280,
+            bandwidth: 192_000)
+        let resolver = SuspendedAudioResolver()
+        var playbackResumeAt: Double?
+        let engine = PlayerEngine(
+            streamResolver: resolver,
+            startupTestHooks: .init(
+                startPlaybackOverride: { _, resumeAt, _ in
+                    playbackResumeAt = resumeAt
+                }))
+
+        let playTask = Task { await engine.play(tracks: [track], startAt: 0) }
+        await resolver.waitUntilRequested()
+        engine.seek(to: 47)
+        resolver.resolve(stream)
+        await playTask.value
+
+        XCTAssertEqual(try XCTUnwrap(playbackResumeAt), 47, accuracy: 0.001)
+        XCTAssertEqual(engine.currentTime, 47, accuracy: 0.001)
+    }
+
+    func testStaleSourceResolutionCannotOverwriteANewerQueueSelection() async {
+        let staleTrack = Self.track(bvid: "BVSTALE001", cid: nil)
+        let selectedTrack = Self.track(bvid: "BVSELECTED001", cid: 2001)
+        let staleStream = Self.stream(
+            url: URL(string: "https://example.invalid/stale.m4a")!,
+            cid: 1001,
+            duration: 211,
+            quality: 30280,
+            bandwidth: 192_000)
+        let selectedStream = Self.stream(
+            url: URL(string: "https://example.invalid/selected.m4a")!,
+            cid: 2001,
+            duration: 211,
+            quality: 30280,
+            bandwidth: 192_000)
+        let resolver = StaleResolutionAudioResolver(
+            suspendedBVID: staleTrack.bvid,
+            immediateBVID: selectedTrack.bvid,
+            immediateStream: selectedStream)
+        let engine = PlayerEngine(
+            streamResolver: resolver,
+            startupTestHooks: .init(startPlaybackOverride: { _, _, _ in }))
+
+        let stalePlay = Task {
+            await engine.play(tracks: [staleTrack], startAt: 0)
+        }
+        await resolver.waitUntilSuspended()
+        await engine.play(tracks: [selectedTrack], startAt: 0)
+
+        resolver.resolveSuspended(with: staleStream)
+        await stalePlay.value
+
+        XCTAssertEqual(engine.current?.bvid, selectedTrack.bvid)
+        XCTAssertEqual(engine.current?.cid, selectedTrack.cid)
+        XCTAssertEqual(engine.queue.map(\.bvid), [selectedTrack.bvid])
+    }
+
+    func testStaleRadioAdvanceCannotReplaceNewUserSelection() async {
+        let seed = Self.track(bvid: "BVRADIO001")
+        let selected = Self.track(bvid: "BVSELECTED", cid: 2001)
+        let staleRecommendation = Self.track(bvid: "BVSTALE001", cid: 3001)
+        let stream = Self.stream(
+            url: URL(string: "https://example.invalid/radio.m4a")!,
+            cid: 1001,
+            duration: 211,
+            quality: 30280,
+            bandwidth: 192_000)
+        let resolver = CriticalPathAudioResolver(cached: stream, prepared: stream)
+        let provider = ControlledRadioTrackProvider()
+        let engine = PlayerEngine(
+            streamResolver: resolver,
+            startupTestHooks: .init(startPlaybackOverride: { _, _, _ in }),
+            radioTrackProvider: { seed, excluded in
+                await provider.request(seed: seed, excluded: excluded)
+            })
+
+        await engine.playRadio(seed: seed)
+        let advanceTask = Task { await engine.advance(automatic: false) }
+        await provider.waitUntilRequested()
+
+        await engine.play(tracks: [selected], startAt: 0)
+        provider.resolve(staleRecommendation)
+        await advanceTask.value
+
+        XCTAssertEqual(engine.current?.bvid, selected.bvid)
+        XCTAssertEqual(engine.queue.map(\.bvid), [selected.bvid])
+        XCTAssertEqual(engine.queueMode, .sequential)
+    }
+
+    func testChangingModeDuringAutomaticRadioLookupDoesNotLeavePlayerLoading() async {
+        let seed = Self.track(bvid: "BVRADIOMODE")
+        let stream = Self.stream(
+            url: URL(string: "https://example.invalid/radio-mode.m4a")!,
+            cid: 1001,
+            duration: 211,
+            quality: 30280,
+            bandwidth: 192_000)
+        let resolver = CriticalPathAudioResolver(cached: stream, prepared: stream)
+        let provider = ControlledRadioTrackProvider()
+        let engine = PlayerEngine(
+            streamResolver: resolver,
+            startupTestHooks: .init(startPlaybackOverride: { _, _, _ in }),
+            radioTrackProvider: { seed, excluded in
+                await provider.request(seed: seed, excluded: excluded)
+            })
+
+        await engine.playRadio(seed: seed)
+        let advanceTask = Task { await engine.advance(automatic: true) }
+        await provider.waitUntilRequested()
+        engine.setQueueMode(.sequential)
+
+        for _ in 0..<20 where engine.state == .loading {
+            await Task.yield()
+        }
+        XCTAssertEqual(engine.state, .paused)
+        XCTAssertFalse(engine.wantsPlayback)
+
+        provider.resolve(nil)
+        await advanceTask.value
+
+        XCTAssertEqual(engine.queueMode, .sequential)
+    }
+
+    @MainActor
+    func testPauseDuringRadioLookupPreventsReturnedTrackFromResumingPlayback() async {
+        let seed = Self.track(bvid: "BVRADIOPAUSE")
+        let recommendation = Self.track(bvid: "BVRADIONEXT", cid: 3001)
+        let stream = Self.stream(
+            url: URL(string: "https://example.invalid/radio-pause.m4a")!,
+            cid: 1001,
+            duration: 211,
+            quality: 30280,
+            bandwidth: 192_000)
+        let resolver = CriticalPathAudioResolver(cached: stream, prepared: stream)
+        let provider = ControlledRadioTrackProvider()
+        var events: [PlayerEngine.PlaybackStartupTestEvent] = []
+        let engine = PlayerEngine(
+            streamResolver: resolver,
+            startupTestHooks: .init(
+                record: { events.append($0) },
+                startPlaybackOverride: { _, _, _ in }),
+            radioTrackProvider: { seed, excluded in
+                await provider.request(seed: seed, excluded: excluded)
+            })
+
+        await engine.playRadio(seed: seed)
+        let advanceTask = Task { await engine.advance(automatic: true) }
+        await provider.waitUntilRequested()
+
+        engine.pause()
+        provider.resolve(recommendation)
+        await advanceTask.value
+
+        XCTAssertEqual(engine.current?.bvid, recommendation.bvid)
+        XCTAssertEqual(engine.state, .paused)
+        XCTAssertEqual(
+            events.filter {
+                if case .playRequested = $0 { return true }
+                return false
+            }.count,
+            1)
+    }
+
+    func testPlayDuringRadioLookupWaitsForResolvedTrackInsteadOfRestartingSeed() async {
+        let seed = Self.track(bvid: "BVRADIORESUME")
+        let recommendation = Self.track(bvid: "BVRADIORESUMENEXT", cid: 3001)
+        let stream = Self.stream(
+            url: URL(string: "https://example.invalid/radio-resume.m4a")!,
+            cid: 1001,
+            duration: 211,
+            quality: 30280,
+            bandwidth: 192_000)
+        let provider = ControlledRadioTrackProvider()
+        var events: [PlayerEngine.PlaybackStartupTestEvent] = []
+        let engine = PlayerEngine(
+            streamResolver: CriticalPathAudioResolver(cached: stream, prepared: stream),
+            startupTestHooks: .init(
+                record: { events.append($0) },
+                startPlaybackOverride: { _, _, _ in },
+                reportFirstPlayingImmediately: true),
+            radioTrackProvider: { seed, excluded in
+                await provider.request(seed: seed, excluded: excluded)
+            })
+
+        await engine.playRadio(seed: seed)
+        let advanceTask = Task { await engine.advance(automatic: true) }
+        await provider.waitUntilRequested()
+
+        engine.pause()
+        engine.play()
+
+        XCTAssertTrue(engine.wantsPlayback)
+        XCTAssertEqual(engine.state, .loading)
+        XCTAssertEqual(engine.current?.bvid, seed.bvid)
+
+        provider.resolve(recommendation)
+        await advanceTask.value
+
+        XCTAssertEqual(engine.current?.bvid, recommendation.bvid)
+        XCTAssertEqual(engine.state, .playing)
+        XCTAssertEqual(
+            events.filter {
+                if case .playRequested = $0 { return true }
+                return false
+            }.count,
+            2)
+    }
+
+    func testPreviousDuringRadioLookupRestartsSeedAndRejectsLateRecommendation() async {
+        let seed = Self.track(bvid: "BVRADIOPREVIOUS")
+        let staleRecommendation = Self.track(bvid: "BVRADIOSTALE", cid: 3001)
+        let stream = Self.stream(
+            url: URL(string: "https://example.invalid/radio-previous.m4a")!,
+            cid: 1001,
+            duration: 211,
+            quality: 30280,
+            bandwidth: 192_000)
+        let provider = ControlledRadioTrackProvider()
+        var events: [PlayerEngine.PlaybackStartupTestEvent] = []
+        let engine = PlayerEngine(
+            streamResolver: CriticalPathAudioResolver(cached: stream, prepared: stream),
+            startupTestHooks: .init(
+                record: { events.append($0) },
+                startPlaybackOverride: { _, _, _ in },
+                reportFirstPlayingImmediately: true),
+            radioTrackProvider: { seed, excluded in
+                await provider.request(seed: seed, excluded: excluded)
+            })
+
+        await engine.playRadio(seed: seed)
+        let advanceTask = Task { await engine.advance(automatic: true) }
+        await provider.waitUntilRequested()
+
+        await engine.playPrevious()
+        provider.resolve(staleRecommendation)
+        await advanceTask.value
+
+        XCTAssertEqual(engine.current?.bvid, seed.bvid)
+        XCTAssertEqual(engine.queue.map(\.bvid), [seed.bvid])
+        XCTAssertEqual(engine.state, .playing)
+        XCTAssertEqual(
+            events.filter {
+                if case .playRequested = $0 { return true }
+                return false
+            }.count,
+            2)
+    }
+
+    func testAutomaticEndOfSequentialQueueClearsPlaybackIntent() async {
+        let track = Self.track()
+        let stream = Self.stream(
+            url: URL(fileURLWithPath: "/tmp/end-of-queue.m4a"),
+            cid: 1001,
+            duration: 211,
+            quality: 30280,
+            bandwidth: 0)
+        let resolver = CriticalPathAudioResolver(cached: stream, prepared: stream)
+        let engine = PlayerEngine(
+            streamResolver: resolver,
+            startupTestHooks: .init(
+                startPlaybackOverride: { _, _, _ in },
+                reportFirstPlayingImmediately: true))
+
+        await engine.play(tracks: [track], startAt: 0)
+        XCTAssertTrue(engine.wantsPlayback)
+
+        await engine.advance(automatic: true)
+
+        XCTAssertFalse(engine.wantsPlayback)
+        XCTAssertEqual(engine.state, .paused)
+        XCTAssertEqual(engine.currentTime, 211)
+        XCTAssertEqual(
+            MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPNowPlayingInfoPropertyPlaybackRate] as? Double,
+            0)
+    }
+
+    func testLateAutomaticAdvanceAfterPauseMovesQueueWithoutRestartingPlayback() async {
+        let first = Self.track(bvid: "BVAUTOPAUSEFIRST")
+        let second = Self.track(bvid: "BVAUTOPAUSESECOND")
+        let stream = Self.stream(
+            url: URL(fileURLWithPath: "/tmp/automatic-advance-paused.m4a"),
+            cid: 1001,
+            duration: 211,
+            quality: 30280,
+            bandwidth: 0)
+        var events: [PlayerEngine.PlaybackStartupTestEvent] = []
+        let engine = PlayerEngine(
+            streamResolver: CriticalPathAudioResolver(cached: stream, prepared: stream),
+            startupTestHooks: .init(
+                record: { events.append($0) },
+                startPlaybackOverride: { _, _, _ in }))
+
+        await engine.play(tracks: [first, second], startAt: 0)
+        engine.pause()
+        await engine.advance(automatic: true)
+
+        XCTAssertEqual(engine.current?.bvid, second.bvid)
+        XCTAssertEqual(engine.state, .paused)
+        XCTAssertFalse(engine.wantsPlayback)
+        XCTAssertEqual(
+            events.filter {
+                if case .playRequested = $0 { return true }
+                return false
+            }.count,
+            1)
+    }
+
+    func testSeekRejectsNonFiniteValuesAndClampsToTrackBounds() async {
+        let track = Self.track()
+        let stream = Self.stream(
+            url: URL(fileURLWithPath: "/tmp/seek-bounds.m4a"),
+            cid: 1001,
+            duration: 211,
+            quality: 30280,
+            bandwidth: 0)
+        let engine = PlayerEngine(
+            streamResolver: CriticalPathAudioResolver(cached: stream, prepared: stream),
+            startupTestHooks: .init(startPlaybackOverride: { _, _, _ in }))
+        await engine.play(tracks: [track], startAt: 0)
+
+        engine.seek(to: -20)
+        XCTAssertEqual(engine.currentTime, 0)
+
+        engine.seek(to: 999)
+        XCTAssertEqual(engine.currentTime, 211)
+
+        engine.seek(to: .nan)
+        XCTAssertEqual(engine.currentTime, 211)
+    }
+
+    func testScrubEndingAfterTrackChangeCannotSeekTheNewTrack() async {
+        let first = Self.track(bvid: "BVSCRUBFIRST")
+        let second = Self.track(bvid: "BVSCRUBSECOND")
+        let stream = Self.stream(
+            url: URL(fileURLWithPath: "/tmp/stale-scrub.m4a"),
+            cid: 1001,
+            duration: 211,
+            quality: 30280,
+            bandwidth: 0)
+        let engine = PlayerEngine(
+            streamResolver: CriticalPathAudioResolver(cached: stream, prepared: stream),
+            startupTestHooks: .init(startPlaybackOverride: { _, _, _ in }))
+
+        await engine.play(tracks: [first], startAt: 0)
+        engine.beginScrub()
+        await engine.play(tracks: [second], startAt: 0)
+        engine.endScrub(to: 90)
+
+        XCTAssertEqual(engine.current?.bvid, second.bvid)
+        XCTAssertEqual(engine.currentTime, 0)
+        XCTAssertFalse(engine.isScrubbing)
+    }
+
+    func testVersionedAtomicWriterRejectsAnOlderSnapshot() async throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bili-music-writer-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let writer = VersionedAtomicFileWriter()
+
+        try await writer.write(Data("new".utf8), revision: 2, to: url)
+        try await writer.write(Data("old".utf8), revision: 1, to: url)
+
+        XCTAssertEqual(try Data(contentsOf: url), Data("new".utf8))
+    }
+
+    func testHistoryRecordBeforeInitialLoadMergesWithPersistedEntries() async throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bili-music-history-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let persistedTrack = Self.track(bvid: "BVHISTORY001", cid: 3001)
+        let newTrack = Self.track(bvid: "BVHISTORY002", cid: 3002)
+        let persisted = PlaybackHistoryEntry(
+            track: persistedTrack,
+            playCount: 4,
+            lastPlayedAt: Date(timeIntervalSince1970: 1_700_000_000))
+        try JSONEncoder().encode([persisted]).write(to: url, options: .atomic)
+        let store = PlaybackHistoryStore(fileURLForTesting: url)
+
+        store.record(newTrack)
+        await store.loadIfNeeded()
+        await store.flush()
+
+        XCTAssertEqual(Set(store.entries.map(\.bvid)), [persistedTrack.bvid, newTrack.bvid])
+        XCTAssertEqual(store.entries.first(where: { $0.bvid == persistedTrack.bvid })?.playCount, 4)
+        XCTAssertEqual(store.entries.first(where: { $0.bvid == newTrack.bvid })?.playCount, 1)
+        let saved = try JSONDecoder().decode(
+            [PlaybackHistoryEntry].self,
+            from: Data(contentsOf: url))
+        XCTAssertEqual(Set(saved.map(\.bvid)), [persistedTrack.bvid, newTrack.bvid])
+    }
+
     private static func track(
         bvid: String = "BVPATH001",
         cid: Int? = 1001,
@@ -275,35 +877,189 @@ final class PlaybackCriticalPathTests: XCTestCase {
 }
 
 @MainActor
+private final class SuspendedAudioResolver: AudioStreamResolving {
+    private var continuation: CheckedContinuation<StreamResolver.PreparedAudioStream, Error>?
+
+    func cachedAudio(
+        for track: Track,
+        preferredQuality: Int
+    ) -> StreamResolver.PreparedAudioStream? {
+        nil
+    }
+
+    func invalidateAudio(for track: Track) {}
+
+    func prepareAudio(
+        for track: Track,
+        preferredQuality: Int
+    ) async throws -> StreamResolver.PreparedAudioStream {
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func warmAudioCDN(for track: Track, preferredQuality: Int) async {}
+
+    func waitUntilRequested() async {
+        await waitBounded(
+            description: "SuspendedAudioResolver.prepareAudio was never requested"
+        ) { self.continuation != nil }
+    }
+
+    func resolve(_ stream: StreamResolver.PreparedAudioStream) {
+        let continuation = continuation
+        self.continuation = nil
+        continuation?.resume(returning: stream)
+    }
+}
+
+@MainActor
+private final class StaleResolutionAudioResolver: AudioStreamResolving {
+    private let suspendedBVID: String
+    private let immediateBVID: String
+    private let immediateStream: StreamResolver.PreparedAudioStream
+    private var continuation: CheckedContinuation<StreamResolver.PreparedAudioStream, Error>?
+
+    init(
+        suspendedBVID: String,
+        immediateBVID: String,
+        immediateStream: StreamResolver.PreparedAudioStream
+    ) {
+        self.suspendedBVID = suspendedBVID
+        self.immediateBVID = immediateBVID
+        self.immediateStream = immediateStream
+    }
+
+    func cachedAudio(
+        for track: Track,
+        preferredQuality: Int
+    ) -> StreamResolver.PreparedAudioStream? {
+        track.bvid == immediateBVID ? immediateStream : nil
+    }
+
+    func invalidateAudio(for track: Track) {}
+
+    func prepareAudio(
+        for track: Track,
+        preferredQuality: Int
+    ) async throws -> StreamResolver.PreparedAudioStream {
+        if track.bvid == immediateBVID {
+            return immediateStream
+        }
+        guard track.bvid == suspendedBVID else {
+            throw URLError(.badURL)
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func warmAudioCDN(for track: Track, preferredQuality: Int) async {}
+
+    func waitUntilSuspended() async {
+        await waitBounded(
+            description: "StaleResolutionAudioResolver.prepareAudio never suspended"
+        ) { self.continuation != nil }
+    }
+
+    func resolveSuspended(with stream: StreamResolver.PreparedAudioStream) {
+        continuation?.resume(returning: stream)
+        continuation = nil
+    }
+}
+
+@MainActor
+private final class ControlledRadioTrackProvider {
+    private var continuation: CheckedContinuation<Track?, Never>?
+
+    func request(seed: Track, excluded: Set<TrackKey>) async -> Track? {
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func waitUntilRequested() async {
+        await waitBounded(
+            description: "ControlledRadioTrackProvider.request was never called"
+        ) { self.continuation != nil }
+    }
+
+    func resolve(_ track: Track?) {
+        let continuation = continuation
+        self.continuation = nil
+        continuation?.resume(returning: track)
+    }
+}
+
+/// 有界等待:行为回归时明确 XCTFail 而不是让 `while … { await Task.yield() }` 挂死整个测试进程。
+@MainActor
+private func waitBounded(
+    description: String,
+    timeout: TimeInterval = 5,
+    until condition: @MainActor () -> Bool
+) async {
+    let deadline = Date().addingTimeInterval(timeout)
+    var yields = 0
+    while !condition() {
+        yields += 1
+        if yields > 20_000 || Date() > deadline {
+            XCTFail("timed out: \(description)")
+            return
+        }
+        await Task.yield()
+    }
+}
+
+@MainActor
 private final class CriticalPathAudioResolver: AudioStreamResolving {
     var onPrepare: ((PlayerEngine) -> Void)?
     var engineProvider: (() -> PlayerEngine)?
     private let cached: StreamResolver.PreparedAudioStream?
     private let prepared: StreamResolver.PreparedAudioStream
     private(set) var prepareCount = 0
+    private(set) var retainedPreparationKeys: [TrackKey] = []
 
     init(cached: StreamResolver.PreparedAudioStream? = nil, prepared: StreamResolver.PreparedAudioStream) {
         self.cached = cached
         self.prepared = prepared
     }
 
-    func cachedAudio(for track: Track) -> StreamResolver.PreparedAudioStream? {
-        cached
-    }
-
-    func isPreparing(_ track: Track) -> Bool {
-        false
+    func cachedAudio(for track: Track, preferredQuality: Int) -> StreamResolver.PreparedAudioStream? {
+        cached.map { stream($0, matching: track) }
     }
 
     func invalidateAudio(for track: Track) {}
+
+    func cancelPreparations(except track: Track?) {
+        if let track {
+            retainedPreparationKeys.append(track.key)
+        }
+    }
 
     func prepareAudio(for track: Track, preferredQuality: Int) async throws -> StreamResolver.PreparedAudioStream {
         prepareCount += 1
         if let engine = engineProvider?() {
             onPrepare?(engine)
         }
-        return prepared
+        return stream(prepared, matching: track)
     }
 
     func warmAudioCDN(for track: Track, preferredQuality: Int) async {}
+
+    /// 生产 resolver 返回的流总是对应请求曲目的 cid。fixture 若固定回一个 cid,
+    /// PlayerEngine 的分P身份守卫会把不同 cid 的曲目当成换了分P而拒绝该流。
+    private func stream(
+        _ base: StreamResolver.PreparedAudioStream,
+        matching track: Track
+    ) -> StreamResolver.PreparedAudioStream {
+        guard let cid = track.cid, cid != base.cid else { return base }
+        return .init(
+            url: base.url,
+            candidateURLs: base.candidateURLs,
+            cid: cid,
+            duration: base.duration,
+            quality: base.quality,
+            bandwidth: base.bandwidth,
+            fetchedAt: base.fetchedAt)
+    }
 }

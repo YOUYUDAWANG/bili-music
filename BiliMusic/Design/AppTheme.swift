@@ -4,44 +4,26 @@ import UIKit
 /// 全局主题。结构参考 Apple Music 的克制层级，品牌强调色使用更耐看的 B 站蓝青。
 enum AppTheme {
     static let brand = Color(red: 0.000, green: 0.631, blue: 0.839)
-    static let brandPressed = Color(red: 0.000, green: 0.541, blue: 0.753)
-    static let brandSoft = Color(red: 0.906, green: 0.973, blue: 1.000)
+    /// 品牌色的柔和背景（正在播放行高亮等）。动态色：
+    /// 浅色模式用近白的浅青，深色模式用低亮度品牌色调，保证 `.secondary` 文字可读。
+    static let brandSoft = Color(uiColor: UIColor { trait in
+        if trait.userInterfaceStyle == .dark {
+            return UIColor(red: 0.055, green: 0.145, blue: 0.180, alpha: 1)
+        }
+        return UIColor(red: 0.906, green: 0.973, blue: 1.000, alpha: 1)
+    })
     static let accent = brand
     static let background = Color(uiColor: .systemBackground)
     static let groupedBackground = Color(uiColor: .systemGroupedBackground)
     static let secondaryBackground = Color(uiColor: .secondarySystemGroupedBackground)
-    static let elevatedBackground = Color(uiColor: .tertiarySystemGroupedBackground)
-    static let rowBackground = Color(uiColor: .secondarySystemGroupedBackground)
-    static let rowPressedBackground = Color(uiColor: .tertiarySystemGroupedBackground)
     static let separator = Color(uiColor: .separator)
     static let label = Color(uiColor: .label)
-    static let secondaryLabel = Color(uiColor: .secondaryLabel)
 
     /// 语义颜色
     static let error = Color.red
     static let success = Color.green
 
-    /// 通用圆角半径
-    static let cardRadius: CGFloat = 12
-    static let controlRadius: CGFloat = 12
-    static let coverRadius: CGFloat = 6
     static let playerCoverRadius: CGFloat = 14
-
-    /// 封面缩略图尺寸
-    static let listCoverSize: CGFloat = 56
-    static let miniCoverWidth: CGFloat = 52
-    static let miniCoverHeight: CGFloat = 30
-
-    /// 没有封面时的中性兜底背景,带很轻的 B 站蓝青品牌感。
-    static let playerGradient = LinearGradient(
-        colors: [
-            brand.opacity(0.18),
-            Color(uiColor: .secondarySystemBackground),
-            Color(uiColor: .systemBackground)
-        ],
-        startPoint: .top,
-        endPoint: .bottom
-    )
 }
 
 struct PlayerArtworkPalette: Equatable {

@@ -12,6 +12,8 @@ struct RootView: View {
     @State private var isTrackingMiniOpenDrag = false
     @State private var sharedPlayerTransitionActive = false
     @State private var isClosingFullPlayer = false
+    @State private var playerTransitionGeneration = UUID()
+    @State private var scenePhaseGeneration = UUID()
     @State private var showSettings = false
     @State private var selectedTab = 0
     @Namespace private var playerTransition
@@ -55,7 +57,8 @@ struct RootView: View {
                         .clipShape(RoundedRectangle(cornerRadius: fullPlayerCornerRadius, style: .continuous))
                         .ignoresSafeArea()
                         .zIndex(10)
-                        .allowsHitTesting(showFullPlayer)
+                        // 关闭动画期间不再拦截触摸,避免误触垂死播放器内的按钮。
+                        .allowsHitTesting(showFullPlayer && !isClosingFullPlayer)
                 }
 
             }
@@ -67,23 +70,30 @@ struct RootView: View {
         .onChange(of: selectedTab) { _, _ in
             engine.isMiniPlayerHidden = false
         }
-        .onChange(of: engine.current?.id) { _, trackID in
-            if trackID == nil {
+        .onChange(of: engine.current != nil) { _, hasCurrentTrack in
+            if !hasCurrentTrack {
                 resetFullPlayerState()
             }
         }
         .onChange(of: scenePhase) { _, phase in
+            let generation = UUID()
+            scenePhaseGeneration = generation
             switch phase {
             case .background:
                 Task {
+                    guard scenePhaseGeneration == generation else { return }
                     await AppResourceCleanup.handleBackgrounding(engine: engine)
                 }
             case .inactive:
-                Task {
-                    await engine.handleScenePhase(isBackground: true)
+                // mini 上拉用普通 @State 记录拖拽,系统取消手势(来电/系统弹窗)
+                // 时不会回调 onEnded,在这里兜底复位,避免播放器卡在半开状态。
+                if !showFullPlayer, isMiniOpening || isTrackingMiniOpenDrag {
+                    cancelFullPlayerDrag()
                 }
+                engine.prepareForInactiveSnapshot()
             case .active:
                 Task {
+                    guard scenePhaseGeneration == generation else { return }
                     await engine.handleScenePhase(isBackground: false)
                 }
             @unknown default:
@@ -97,8 +107,9 @@ struct RootView: View {
             Task(priority: .utility) {
                 await WBISigner.prewarm()
             }
-            await CacheStore.shared.loadIfNeeded()
-            await PlaybackHistoryStore.shared.loadIfNeeded()
+            async let cacheLoad: Void = CacheStore.shared.loadIfNeeded()
+            async let historyLoad: Void = PlaybackHistoryStore.shared.loadIfNeeded()
+            _ = await (cacheLoad, historyLoad)
 #if DEBUG
             if UITestFixtures.enabled {
                 engine.installUITestFixture(tracks: UITestFixtures.homeTracks, startAt: 0)
@@ -277,13 +288,29 @@ struct RootView: View {
     }
 
     private func openFullPlayer(startProgress explicitStartProgress: CGFloat? = nil) {
+        let generation = UUID()
+
+        // 关闭动画中途重新打开:不能无动画重置进度(会闪一帧"跳到底部"),
+        // 全部状态带动画翻转,让 spring 从当前表现值接管。
+        if isClosingFullPlayer {
+            playerTransitionGeneration = generation
+            withAnimation(openAnimation) {
+                isClosingFullPlayer = false
+                sharedPlayerTransitionActive = true
+                showFullPlayer = true
+                miniOpenDragTranslation = nil
+                isTrackingMiniOpenDrag = false
+                fullPlayerOpenProgress = 1
+            }
+            finishSharedPlayerTransitionAfterOpen(generation: generation)
+            return
+        }
+
         let startProgress = max(explicitStartProgress ?? playerOpenProgress, 0.04)
-        #if DEBUG
-        NSLog("mini->full open startProgress=%.3f", Double(startProgress))
-        #endif
         var transaction = Transaction()
         transaction.animation = nil
         withTransaction(transaction) {
+            playerTransitionGeneration = generation
             isClosingFullPlayer = false
             sharedPlayerTransitionActive = true
             showFullPlayer = true
@@ -295,10 +322,11 @@ struct RootView: View {
         withAnimation(openAnimation) {
             fullPlayerOpenProgress = 1
         }
-        finishSharedPlayerTransitionAfterOpen()
+        finishSharedPlayerTransitionAfterOpen(generation: generation)
     }
 
     private func cancelFullPlayerDrag() {
+        playerTransitionGeneration = UUID()
         withAnimation(cancelAnimation) {
             miniOpenDragTranslation = nil
             isTrackingMiniOpenDrag = false
@@ -310,15 +338,21 @@ struct RootView: View {
     }
 
     private func closeFullPlayer() {
-        sharedPlayerTransitionActive = true
-        isClosingFullPlayer = true
+        let generation = UUID()
+        playerTransitionGeneration = generation
+        // isClosingFullPlayer 必须在动画事务内翻转:它驱动封面 source 交接与
+        // 显隐,在事务外置位会让大封面在第一帧无动画消失。
         withAnimation(closeAnimation) {
+            sharedPlayerTransitionActive = true
+            isClosingFullPlayer = true
             miniOpenDragTranslation = nil
             isTrackingMiniOpenDrag = false
             fullPlayerOpenProgress = 0
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + closeRemovalDelay) {
-            guard isClosingFullPlayer, fullPlayerOpenProgress <= 0.01 else { return }
+            guard playerTransitionGeneration == generation,
+                  isClosingFullPlayer,
+                  fullPlayerOpenProgress <= 0.01 else { return }
             showFullPlayer = false
             sharedPlayerTransitionActive = false
             isClosingFullPlayer = false
@@ -326,6 +360,7 @@ struct RootView: View {
     }
 
     private func resetFullPlayerState() {
+        playerTransitionGeneration = UUID()
         showFullPlayer = false
         miniOpenDragTranslation = nil
         isTrackingMiniOpenDrag = false
@@ -334,10 +369,11 @@ struct RootView: View {
         isClosingFullPlayer = false
     }
 
-    private func finishSharedPlayerTransitionAfterOpen() {
+    private func finishSharedPlayerTransitionAfterOpen(generation: UUID) {
         let delay: TimeInterval = reduceMotion ? 0.18 : 0.72
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            guard PlayerGesturePolicy.shouldFinishOpenTransition(
+            guard playerTransitionGeneration == generation,
+                  PlayerGesturePolicy.shouldFinishOpenTransition(
                 isFullPlayerPresented: showFullPlayer,
                 isMiniOpening: isMiniOpening,
                 isClosing: isClosingFullPlayer)
@@ -388,9 +424,6 @@ struct RootView: View {
     private func handleMiniOpenDragEnded(_ sample: MiniOpenDragSample) {
         guard isTrackingMiniOpenDrag else { return }
         isTrackingMiniOpenDrag = false
-        #if DEBUG
-        NSLog("mini drag ended translationY=%.1f velocityY=%.1f", Double(sample.translation.height), Double(sample.velocity.height))
-        #endif
         finishMiniOpenDrag(sample)
     }
 
@@ -398,9 +431,6 @@ struct RootView: View {
         PlayerGesturePolicy.shouldBeginMiniOpenDrag(translation: sample.translation)
     }
 
-    private func miniOpenProgress(for translationY: CGFloat) -> CGFloat {
-        PlayerGesturePolicy.miniOpenProgress(for: translationY)
-    }
 }
 
 @MainActor
@@ -408,9 +438,14 @@ enum AppResourceCleanup {
     static func handleBackgrounding(engine: PlayerEngine) async {
         engine.restoreCurrentArtworkFromImageCache()
         ImageMemoryCache.shared.releaseReloadableImages()
-        await CacheStore.shared.flush()
-        await PlaybackHistoryStore.shared.flush()
         await engine.handleScenePhase(isBackground: true)
+        do {
+            try await CacheStore.shared.flush()
+        } catch {
+            NSLog("Cache index flush failed: %@", error.localizedDescription)
+        }
+        await PlaybackHistoryStore.shared.flush()
+        await RecentHomeFeedStore.shared.flush()
     }
 
     static func handleMemoryWarning(_ notification: Notification, engine: PlayerEngine? = nil) {
@@ -526,12 +561,11 @@ private struct SystemMiniPlayer: View {
     private func artwork(layoutProgress: CGFloat) -> some View {
         let currentTrack = engine.current
         return Group {
-            if let url = thumbnailURL(currentTrack?.coverURL, width: 150, height: 85) {
+            if let url = BiliArtworkURL.thumbnail(currentTrack?.coverURL, width: 150, height: 85) {
                 CachedAsyncImage(
                     url: url,
                     targetSize: CGSize(width: 44, height: 25),
                     fallbackImage: engine.currentCoverImage,
-                    debugIdentifier: "miniPlayerArtwork",
                     onImageLoaded: { image in
                         engine.rememberCurrentCover(image, for: currentTrack)
                     }
@@ -634,14 +668,6 @@ private struct SystemMiniPlayer: View {
             translation: value.translation,
             velocity: predictedVelocity
         )
-    }
-
-    private func thumbnailURL(_ url: URL?, width: Int, height: Int) -> URL? {
-        guard let url else { return nil }
-        let raw = url.absoluteString
-        guard !raw.localizedCaseInsensitiveContains("transparent.png") else { return nil }
-        guard raw.contains("hdslb.com"), !raw.contains("@") else { return url }
-        return URL(string: raw + "@\(width)w_\(height)h_1c.webp")
     }
 
     private func lerp(_ start: CGFloat, _ end: CGFloat, _ progress: CGFloat) -> CGFloat {

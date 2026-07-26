@@ -10,6 +10,7 @@ struct HomeView: View {
     @State private var errorMessage: String?
     @State private var trackTapTrigger = 0
     @State private var refreshTrigger = 0
+    @State private var activeLoadID = UUID()
 
     init(showSettings: Binding<Bool> = .constant(false)) {
         _showSettings = showSettings
@@ -74,7 +75,15 @@ struct HomeView: View {
             .task {
                 if tracks.isEmpty { await load(trigger: .initialHomeLoad) }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .biliAuthenticationDidChange)) { _ in
+                // CookieStore.isLoggedIn 非响应式:登录/登出后清空旧推荐并重载,
+                // 顺带让空态文案按新登录态重新渲染
+                tracks = []
+                errorMessage = nil
+                Task { await load(trigger: .initialHomeLoad) }
+            }
         }
+        .sensoryFeedback(.intent(.lightImpact), trigger: trackTapTrigger)
     }
 
     @ViewBuilder
@@ -101,7 +110,6 @@ struct HomeView: View {
                 }
                 .accessibilityIdentifier("homeTrackRow0")
                 .buttonStyle(MusicRowButtonStyle())
-                .sensoryFeedback(.intent(.lightImpact), trigger: trackTapTrigger)
             }
         }
     }
@@ -145,7 +153,6 @@ struct HomeView: View {
                         }
                         .accessibilityIdentifier("homeTrackRow\(index)")
                         .buttonStyle(MusicRowButtonStyle())
-                        .sensoryFeedback(.intent(.lightImpact), trigger: trackTapTrigger)
                     }
                 }
             }
@@ -164,18 +171,28 @@ struct HomeView: View {
         }
 #endif
         let policy = RecommendationSchedulingPolicy.home(trigger: trigger)
+        let loadID = UUID()
+        activeLoadID = loadID
         loading = true
-        defer { loading = false }
+        defer {
+            if activeLoadID == loadID {
+                loading = false
+            }
+        }
         errorMessage = nil
-        let excluded = RecentHomeFeedStore.shared.recentKeys()
+        let excluded = await RecentHomeFeedStore.shared.recentKeys()
         var result = await fetch(excluding: excluded, policy: policy)
+        guard !Task.isCancelled, activeLoadID == loadID else { return }
         if result.isEmpty, !excluded.isEmpty {
             result = await fetch(excluding: [], policy: policy)
+            guard !Task.isCancelled, activeLoadID == loadID else { return }
         }
         if result.isEmpty {
             errorMessage = CookieStore.isLoggedIn ? "暂时没有找到合适的音乐推荐" : nil
         } else {
-            RecentHomeFeedStore.shared.record(result.map(\.bvid))
+            await RecentHomeFeedStore.shared.record(result.map(\.bvid))
+            // record 是挂起点:期间可能有「换一批」发起新加载,写结果前必须重新校验
+            guard !Task.isCancelled, activeLoadID == loadID else { return }
             tracks = result
             engine.preload(tracks: result, limit: 3, delay: .milliseconds(700))
         }

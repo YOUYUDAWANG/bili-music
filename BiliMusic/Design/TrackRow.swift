@@ -21,7 +21,7 @@ struct TrackRow: View {
         let display = TrackTitleFormatter.displayMetadata(for: track, clean: cleanListTitles)
         HStack(spacing: metrics.horizontalSpacing) {
             CachedAsyncImage(
-                url: thumbnailURL(track.coverURL, size: metrics.thumbnailWidth),
+                url: BiliArtworkURL.widescreenThumbnail(track.coverURL, width: metrics.thumbnailWidth),
                 targetSize: CGSize(width: metrics.coverWidth, height: metrics.coverHeight)
             ) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
@@ -35,6 +35,7 @@ struct TrackRow: View {
             }
             .frame(width: metrics.coverWidth, height: metrics.coverHeight)
             .clipShape(RoundedRectangle(cornerRadius: metrics.coverCornerRadius, style: .continuous))
+            .accessibilityHidden(true)   // 封面纯装饰,信息由文字承载
 
             VStack(alignment: .leading, spacing: metrics.textSpacing) {
                 Text(displayTitle)
@@ -46,17 +47,21 @@ struct TrackRow: View {
                         Image(systemName: "waveform")
                             .font(metrics.waveformFont)
                             .foregroundStyle(AppTheme.accent)
+                            .accessibilityHidden(true)   // 装饰图标,状态由 accessibilityValue 表达
                     }
                     Text(display.artist)
                         .lineLimit(1)
                         .truncationMode(.tail)
-                    Text(format(track.duration))
+                    Text(MusicFormatters.duration(track.duration))
                         .font(.caption.monospacedDigit())
                         .fixedSize(horizontal: true, vertical: false)
                 }
                 .font(metrics.metadataFont)
                 .foregroundStyle(secondaryForeground)
             }
+            // 行内容(标题+UP主+时长)合并为单个可访问元素;尾部 Menu 保持独立可点
+            .accessibilityElement(children: .combine)
+            .accessibilityValue(isPlaying ? "正在播放" : "")
 
             Spacer(minLength: metrics.trailingSpacing)
 
@@ -70,6 +75,7 @@ struct TrackRow: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(AppTheme.accent)
                         .frame(width: metrics.trailingControlSize, height: metrics.trailingControlSize)
+                        .accessibilityHidden(true)   // 装饰图标,状态由 accessibilityValue 表达
                 } else {
                     Menu {
                         Button {
@@ -90,6 +96,7 @@ struct TrackRow: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("更多操作")
                 }
             }
         }
@@ -224,20 +231,6 @@ struct TrackRow: View {
         }
     }
 
-    private func format(_ seconds: Int) -> String {
-        seconds >= 3600
-            ? String(format: "%d:%02d:%02d", seconds / 3600, seconds % 3600 / 60, seconds % 60)
-            : String(format: "%d:%02d", seconds / 60, seconds % 60)
-    }
-
-    private func thumbnailURL(_ url: URL?, size: Int) -> URL? {
-        guard let url else { return nil }
-        let raw = url.absoluteString
-        guard !raw.localizedCaseInsensitiveContains("transparent.png") else { return nil }
-        guard raw.contains("hdslb.com"), !raw.contains("@") else { return url }
-        let height = max(1, Int(Double(size) * 9.0 / 16.0))
-        return URL(string: raw + "@\(size)w_\(height)h_1c.webp")
-    }
 }
 
 private struct Metrics {

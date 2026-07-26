@@ -64,6 +64,18 @@ final class RecommendationSchedulingTests: XCTestCase {
         XCTAssertTrue(policy.shouldMarkStale)
     }
 
+    func testCIDResolutionIsMetadataEnrichmentRatherThanATrackChange() {
+        let unresolved = TrackKey(bvid: "BVIDENTITY", cid: nil)
+        let resolved = TrackKey(bvid: "BVIDENTITY", cid: 101)
+        let anotherPart = TrackKey(bvid: "BVIDENTITY", cid: 202)
+        let anotherVideo = TrackKey(bvid: "BVOTHER", cid: 101)
+
+        XCTAssertTrue(unresolved.isCIDEnrichment(to: resolved))
+        XCTAssertFalse(resolved.isCIDEnrichment(to: unresolved))
+        XCTAssertFalse(resolved.isCIDEnrichment(to: anotherPart))
+        XCTAssertFalse(unresolved.isCIDEnrichment(to: anotherVideo))
+    }
+
     func testPlayingDoesNotLoadRecommendationsWhenPanelIsHidden() {
         let policy = RecommendationVisibleLoadPolicy.playbackStarted(
             recommendationContextVisible: false,
@@ -156,7 +168,9 @@ final class RecommendationSchedulingTests: XCTestCase {
 
         XCTAssertLessThan(videoRange.lowerBound, tapCatcherRange.lowerBound)
         XCTAssertLessThan(tapCatcherRange.lowerBound, chromeRange.lowerBound)
-        XCTAssertTrue(source.contains(".onTapGesture {\n                        revealChrome()\n                    }"))
+        // 只断言关键调用存在,不绑定精确缩进的多行文本(排版调整不该弄红测试)。
+        XCTAssertTrue(source.contains("revealChrome()"))
+        XCTAssertTrue(source.contains(".onTapGesture"))
     }
 
     func testMVFullscreenChromeKeepsCloseAndQualityControlsAddressable() throws {

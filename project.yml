@@ -59,3 +59,20 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: $(BILIMUSIC_BUNDLE_ID).UITests
         SWIFT_VERSION: "5.10"
         CODE_SIGNING_ALLOWED: NO
+# 共享 scheme：让 xcodebuild test -scheme 不依赖 Xcode 自动创建的本地 scheme（CI 可用）。
+# 单元测试挂在 BiliMusic scheme；UI 测试独立 scheme（跑真模拟器交互，较慢，按需触发）。
+schemes:
+  BiliMusic:
+    build:
+      targets:
+        BiliMusic: all
+    test:
+      targets:
+        - BiliMusicTests
+  BiliMusicUITests:
+    build:
+      targets:
+        BiliMusic: all
+    test:
+      targets:
+        - BiliMusicUITests

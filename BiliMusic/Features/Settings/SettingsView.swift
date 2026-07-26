@@ -3,16 +3,19 @@ import SwiftUI
 
 /// 设置页：账号登录/登出、推荐种子夹、音质、缓存、播放偏好、播放历史入口。
 struct SettingsView: View {
+    /// 与 RecommendationEngine.swift 中读取的 UserDefaults key 保持一致(后续统一收敛到此常量)
+    static let recommendFolderKey = "recommendFolderId"
+
     @Environment(PlayerEngine.self) private var engine
     @State private var loggedIn = CookieStore.isLoggedIn
     @State private var username: String?
     @State private var showLogin = false
-    @AppStorage("autoCache") private var autoCache = false
-    @AppStorage("playbackQuality") private var playbackQuality = 0
-    @AppStorage("downloadQuality") private var downloadQuality = 0
-    @AppStorage("preferMVOnWiFi") private var preferMVOnWiFi = true
+    @AppStorage(PlaybackPreferences.autoCacheKey) private var autoCache = false
+    @AppStorage(PlaybackPreferences.playbackQualityKey) private var playbackQuality = 30280
+    @AppStorage(PlaybackPreferences.downloadQualityKey) private var downloadQuality = 0
+    @AppStorage(PlaybackPreferences.preferMVOnWiFiKey) private var preferMVOnWiFi = true
     @AppStorage(TrackTitleFormatter.cleanListTitlesDefaultsKey) private var cleanListTitles = false
-    @AppStorage("recommendFolderId") private var recommendFolderId = 0
+    @AppStorage(SettingsView.recommendFolderKey) private var recommendFolderId = 0
     @AppStorage(AudioCDNSelector.preferredHostDefaultsKey) private var preferredAudioCDNHost = ""
     @AppStorage("audioCDNProbeRows") private var audioCDNProbeRowsData = ""
     @State private var favFolders: [BiliClient.FavFolder] = []
@@ -27,9 +30,13 @@ struct SettingsView: View {
                     if loggedIn {
                         LabeledContent("已登录", value: username ?? "…")
                         Button("退出登录", role: .destructive) {
-                            CookieStore.cookie = nil
-                            loggedIn = false
-                            username = nil
+                            if CookieStore.save(nil) {
+                                FavoriteManager.shared.resetForAuthenticationChange()
+                                loggedIn = false
+                                username = nil
+                                favFolders = []
+                                recommendFolderId = 0
+                            }
                         }
                     } else {
                         Button("扫码登录 B 站账号") { showLogin = true }
@@ -150,9 +157,13 @@ struct SettingsView: View {
             .navigationTitle("设置")
             .sheet(isPresented: $showLogin) {
                 QRLoginView {
+                    FavoriteManager.shared.resetForAuthenticationChange()
                     loggedIn = true
                     showLogin = false
-                    Task { await loadUsername() }
+                    Task {
+                        await loadUsername()
+                        await loadFolders()
+                    }
                 }
             }
             .task {
@@ -160,19 +171,45 @@ struct SettingsView: View {
                 await loadUsername()
                 await loadFolders()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .biliAuthenticationDidChange)) { _ in
+                // CookieStore.isLoggedIn 非响应式:登录态广播后手动同步 @State(只初始化一次)
+                loggedIn = CookieStore.isLoggedIn
+                if loggedIn {
+                    Task {
+                        await loadUsername()
+                        await loadFolders()
+                    }
+                } else {
+                    username = nil
+                    favFolders = []
+                }
+            }
         }
     }
 
     /// 登录后拉取并显示用户名。
     private func loadUsername() async {
-        guard loggedIn else { return }
-        username = try? await BiliClient().myInfo().uname
+        guard loggedIn, let accountID = CookieStore.mid else { return }
+        let loadedUsername = try? await BiliClient().myInfo().uname
+        guard loggedIn, CookieStore.mid == accountID else { return }
+        username = loadedUsername
     }
 
     /// 拉取收藏夹列表，用于「推荐种子收藏夹」选择器。
     private func loadFolders() async {
-        guard loggedIn else { return }
-        favFolders = (try? await BiliClient().favFolders()) ?? []
+        guard loggedIn, let accountID = CookieStore.mid else { return }
+        do {
+            let loadedFolders = try await BiliClient().favFolders()
+            guard loggedIn, CookieStore.mid == accountID else { return }
+            favFolders = loadedFolders
+            // 只在请求成功且确实不含该夹时才重置;请求失败不能把用户的选择误判为「不存在」
+            if recommendFolderId != 0,
+               !loadedFolders.contains(where: { $0.id == recommendFolderId }) {
+                recommendFolderId = 0
+            }
+        } catch {
+            // 请求失败:保留现有选择和列表,下次进入设置页会重试
+        }
     }
 
     private func runCDNProbe() async {
@@ -329,6 +366,7 @@ struct QRLoginView: View {
     @State private var status = "用 B 站 App 扫一扫"
     @State private var expired = false
     @State private var pollTask: Task<Void, Never>?
+    @State private var loginAttemptID = UUID()
 
     var body: some View {
         VStack(spacing: 20) {
@@ -353,34 +391,61 @@ struct QRLoginView: View {
         .padding(40)
         .presentationDetents([.medium])
         .onAppear { startLogin() }
-        .onDisappear { pollTask?.cancel() }
+        .onDisappear {
+            loginAttemptID = UUID()
+            pollTask?.cancel()
+        }
     }
 
     /// 生成二维码并开始轮询扫码结果，成功即存 Cookie 并回调。
     private func startLogin() {
+        let attemptID = UUID()
+        loginAttemptID = attemptID
         expired = false
+        qrImage = nil
         status = "用 B 站 App 扫一扫"
         pollTask?.cancel()
         pollTask = Task {
             do {
                 let client = BiliClient()
                 let qr = try await client.qrCodeGenerate()
+                guard !Task.isCancelled, loginAttemptID == attemptID else { return }
                 qrImage = makeQR(qr.url)
+                var consecutivePollFailures = 0
                 while !Task.isCancelled {
                     try await Task.sleep(for: .seconds(2))
-                    switch try await client.qrCodePoll(key: qr.qrcode_key) {
-                    case .success(let cookie):
-                        CookieStore.cookie = cookie
-                        onSuccess()
-                        return
-                    case .expired:
-                        expired = true
-                        return
-                    case .waiting:
-                        continue
+                    do {
+                        let result = try await client.qrCodePoll(key: qr.qrcode_key)
+                        guard !Task.isCancelled, loginAttemptID == attemptID else { return }
+                        consecutivePollFailures = 0
+                        switch result {
+                        case .success(let cookie):
+                            guard CookieStore.save(cookie) else {
+                                status = "登录信息无法写入钥匙串"
+                                return
+                            }
+                            onSuccess()
+                            return
+                        case .expired:
+                            expired = true
+                            return
+                        case .waiting:
+                            continue
+                        }
+                    } catch {
+                        guard !Task.isCancelled, loginAttemptID == attemptID else { return }
+                        // 单次轮询失败(网络抖动)不终止扫码流程:循环顶部的 2s sleep 兼作退避,
+                        // 连续 3 次失败才视为过期,露出刷新按钮
+                        consecutivePollFailures += 1
+                        if consecutivePollFailures >= 3 {
+                            expired = true
+                            status = "网络不稳定,请点击刷新重试"
+                            return
+                        }
                     }
                 }
             } catch {
+                guard !Task.isCancelled, loginAttemptID == attemptID else { return }
                 status = "出错了: \(error.localizedDescription)"
             }
         }

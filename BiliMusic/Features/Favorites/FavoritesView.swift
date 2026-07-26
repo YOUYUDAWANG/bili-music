@@ -7,6 +7,7 @@ struct FavoritesView: View {
     @State private var loading = false
     @State private var errorMessage: String?
     @State private var restoredLastFolder = false
+    @State private var authenticationGeneration = UUID()
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -65,6 +66,17 @@ struct FavoritesView: View {
                 }
             }
             .refreshable { await load() }
+            .onReceive(NotificationCenter.default.publisher(for: .biliAuthenticationDidChange)) { _ in
+                authenticationGeneration = UUID()
+                folders = []
+                path = []
+                loading = false
+                errorMessage = nil
+                restoredLastFolder = false
+                if CookieStore.isLoggedIn {
+                    Task { await load() }
+                }
+            }
         }
     }
 
@@ -98,12 +110,20 @@ struct FavoritesView: View {
 
     /// 拉取收藏夹列表，并在首次进入时恢复上次打开的夹。
     private func load() async {
-        guard CookieStore.isLoggedIn else { return }
+        guard let accountID = CookieStore.mid else { return }
+        let generation = authenticationGeneration
         loading = folders.isEmpty
-        defer { loading = false }
+        defer {
+            if authenticationGeneration == generation {
+                loading = false
+            }
+        }
         errorMessage = nil
         do {
-            folders = try await BiliClient().favFolders()
+            let loadedFolders = try await BiliClient().favFolders()
+            guard authenticationGeneration == generation,
+                  CookieStore.mid == accountID else { return }
+            folders = loadedFolders
             if !restoredLastFolder,
                path.isEmpty,
                let last = FavoriteManager.shared.lastFolderId,
@@ -112,6 +132,9 @@ struct FavoritesView: View {
             }
             restoredLastFolder = true
         } catch {
+            guard !Task.isCancelled,
+                  authenticationGeneration == generation,
+                  CookieStore.mid == accountID else { return }
             errorMessage = error.localizedDescription
         }
     }
@@ -132,7 +155,8 @@ struct FavFolderDetailView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                if let errorMessage {
+                // 首屏失败时在顶部提示;分页失败改在底部展示(用户正停在列表底部)
+                if let errorMessage, tracks.isEmpty {
                     Text(errorMessage)
                         .foregroundStyle(AppTheme.error)
                         .font(.caption)
@@ -147,7 +171,6 @@ struct FavFolderDetailView: View {
                         TrackRow(track: track, isPlaying: engine.current.map { track.key.matches($0) } ?? false)
                     }
                     .buttonStyle(MusicRowButtonStyle())
-                    .sensoryFeedback(.intent(.lightImpact), trigger: trackTapTrigger)
                     .contextMenu {
                         Button {
                             Task { await engine.playRadio(seed: track) }
@@ -173,12 +196,45 @@ struct FavFolderDetailView: View {
                     ProgressView()
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 18)
+                } else if let errorMessage, !tracks.isEmpty {
+                    // 分页失败:在底部就地提示并可重试(参照搜索页 paginationControl 的样式)
+                    VStack(spacing: 8) {
+                        Text("加载更多失败")
+                            .font(.caption.weight(.semibold))
+                        Text(errorMessage)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                        Button {
+                            Task { await loadMore() }
+                        } label: {
+                            Text("重试加载")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity, minHeight: 38)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, minHeight: 84)
+                    .background(AppTheme.background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                } else if hasMore, !tracks.isEmpty {
+                    // 连跳空页达到上限时 onAppear 不会对最后一行重新触发,提供手动继续入口
+                    Button {
+                        Task { await loadMore() }
+                    } label: {
+                        Text("加载更多")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(AppTheme.background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 16)
             .padding(.top, 14)
             .padding(.bottom, 96)
         }
+        .sensoryFeedback(.intent(.lightImpact), trigger: trackTapTrigger)
         .background(AppTheme.groupedBackground)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
@@ -193,28 +249,50 @@ struct FavFolderDetailView: View {
         .task {
             if tracks.isEmpty { await loadMore() }
         }
+        .refreshable { await reload() }
+    }
+
+    /// 下拉刷新：重置分页状态后从第一页重新加载。
+    private func reload() async {
+        guard !loading else { return }
+        page = 1
+        hasMore = true
+        tracks = []
+        errorMessage = nil
+        await loadMore()
     }
 
     /// 分页加载收藏夹内容，过滤失效稿件与非音乐。
+    /// 单页可能被「失效稿件 + 非音乐」双重过滤掏空:循环拉页直到有新曲目或没有更多,
+    /// 连续 3 页空页则先停(与 SearchStore 的连跳空批策略对齐),由底部「加载更多」继续。
     private func loadMore() async {
         guard hasMore, !loading else { return }
+        guard let accountID = CookieStore.mid else { return }
         loading = true
+        errorMessage = nil
         defer { loading = false }
         do {
-            let result = try await BiliClient().favItems(folderId: folderId, page: page)
-            page += 1
-            hasMore = result.has_more
-            let newTracks = (result.medias ?? [])
-                .filter { $0.attr == 0 }   // 跳过已失效的收藏
-                .map { item in
-                    Track(bvid: item.bvid, title: item.title, artist: item.upper.name,
-                          coverURL: URL(string: item.cover), duration: item.duration)
-                }
-                .filter(MusicFilter.isMusic)
+            var newTracks: [Track] = []
+            for _ in 0..<3 {
+                let result = try await BiliClient().favItems(folderId: folderId, page: page)
+                guard !Task.isCancelled, CookieStore.mid == accountID else { return }
+                page += 1
+                hasMore = result.has_more
+                newTracks = (result.medias ?? [])
+                    .filter { $0.attr == 0 }   // 跳过已失效的收藏
+                    .map { item in
+                        Track(bvid: item.bvid, title: item.title, artist: item.upper.name,
+                              coverURL: URL(string: item.cover), duration: item.duration)
+                    }
+                    .filter(MusicFilter.isMusic)
+                if !newTracks.isEmpty || !hasMore { break }
+            }
+            guard !newTracks.isEmpty else { return }
             tracks += newTracks
             FavoriteManager.shared.markLoaded(folderId: folderId, title: title, tracks: tracks)
             engine.preload(tracks: newTracks, limit: 2, delay: .milliseconds(700))
         } catch {
+            guard !Task.isCancelled, CookieStore.mid == accountID else { return }
             errorMessage = error.localizedDescription
         }
     }
