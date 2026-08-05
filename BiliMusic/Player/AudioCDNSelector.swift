@@ -35,7 +35,11 @@ enum AudioCDNSelector {
     }
 
     static func fallbackCandidates(from urls: [URL], excluding current: URL) -> [URL] {
-        deduped(urls).filter { $0.absoluteString != current.absoluteString }
+        let candidates = deduped(urls).filter { $0.absoluteString != current.absoluteString }
+        guard let currentHost = current.host()?.lowercased() else { return candidates }
+        let differentHosts = candidates.filter { $0.host()?.lowercased() != currentHost }
+        // 回退的目的是真正换线路。存在跨 host 候选时，不再被同 host 的签名 URL 抢先。
+        return differentHosts.isEmpty ? candidates : differentHosts
     }
 
     static func rankedCandidates(_ urls: [URL]) async -> [URL] {

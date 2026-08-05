@@ -64,6 +64,30 @@ final class PlaybackCriticalPathTests: XCTestCase {
         ])
     }
 
+    func testRemotePlaybackSourcePreservesMIMETypeAndCodec() async {
+        let track = Self.track()
+        let resolver = CriticalPathAudioResolver(
+            prepared: Self.stream(
+                url: URL(string: "https://example.invalid/audio.m4s")!,
+                cid: 1001,
+                duration: 211,
+                quality: 30280,
+                bandwidth: 192_000,
+                mimeType: "audio/mp4",
+                codecs: "mp4a.40.2"))
+        var capturedSource: PlaybackSource?
+        let engine = PlayerEngine(
+            streamResolver: resolver,
+            startupTestHooks: .init(
+                startPlaybackOverride: { source, _, _ in capturedSource = source },
+                reportFirstPlayingImmediately: false))
+
+        await engine.play(tracks: [track], startAt: 0)
+
+        XCTAssertEqual(capturedSource?.mimeType, "audio/mp4")
+        XCTAssertEqual(capturedSource?.codecs, "mp4a.40.2")
+    }
+
     func testFirstObservedPlayingSchedulesOnlyAllowedPostSoundWork() async {
         let track = Self.track()
         let cached = Self.stream(
@@ -169,7 +193,9 @@ final class PlaybackCriticalPathTests: XCTestCase {
         cid: Int,
         duration: Int,
         quality: Int,
-        bandwidth: Int
+        bandwidth: Int,
+        mimeType: String? = nil,
+        codecs: String? = nil
     ) -> StreamResolver.PreparedAudioStream {
         .init(
             url: url,
@@ -177,6 +203,8 @@ final class PlaybackCriticalPathTests: XCTestCase {
             duration: duration,
             quality: quality,
             bandwidth: bandwidth,
+            mimeType: mimeType,
+            codecs: codecs,
             fetchedAt: Date())
     }
 }
