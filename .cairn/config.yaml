@@ -1,0 +1,18 @@
+version: 0.1
+project:
+  name: "Bilibili Music"
+  summary: "面向个人自用的 SwiftUI iPhone 音乐客户端，以接近 Apple Music 的体验快速、稳定地播放和管理 B 站音乐内容。"
+cairn:
+  knowledge_dir: "cairn"
+  skill_spec_date: "2026-08-05"
+  git_policy: "track"
+  reference_git_policy: "ignore"
+  language: "zh"
+graduation:
+  provider: "obsidian"
+  vault: "Obsidian Vault"
+  target: "Knowledge/Bilibili Music"
+  index: "Knowledge/Bilibili Music/INDEX.md"
+  link_format: "wikilink"
+history:
+  migration_mode: "start_fresh"

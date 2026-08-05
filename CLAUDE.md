@@ -1,6 +1,91 @@
 # CLAUDE.md
 
-本文件为 Claude Code（claude.ai/code）在本仓库工作时提供指引。
+本文件是 Bilibili Music 的项目协作规则与架构主本。Claude Code 直接读取本文件；其他代理通过根目录 `AGENTS.md` 进入，并在开展实质工作前读取本文件。该 Claude-first 布局由用户于 2026-08-05 明确选择，是对 Project Cairn 默认 `AGENTS.md` 主本布局的项目级适配。
+
+## 项目一句话
+
+面向个人自用的 SwiftUI iPhone 音乐客户端，以接近 Apple Music 的体验快速、稳定地播放和管理 B 站音乐内容。
+
+> Project Cairn 已按本项目自身定位和 provider 配置初始化；其他项目不得直接复制本配置，应分别初始化。
+
+## 初始化配置
+
+- 毕业 provider：Obsidian（vault：`Obsidian Vault`）
+- 知识库索引：`Knowledge/Bilibili Music/INDEX.md`
+- 毕业目标：`Knowledge/Bilibili Music`
+- 项目知识：提交 `cairn/`；单独忽略可能含外部或敏感原始材料的 `cairn/Reference/`
+- 历史迁移：`start_fresh`
+- 文档语言：中文
+
+## 进入项目后的阅读顺序
+
+1. 先读本文件，获取项目规则、关键约束与架构导航。
+2. 在规划实质工作前，读 `.planning/PROJECT.md`、`.planning/STATE.md`、`.planning/ROADMAP.md` 和 `.planning/REQUIREMENTS.md`；它们是执行状态、阶段计划与需求追踪的当前权威来源。
+3. 读 `cairn/ROADMAP.md`，获取跨会话的精简焦点与开放问题；不得在其中复制完整执行计划。
+4. 读 `cairn/LOG.md` 顶部的最新记录，了解近期进展与关键决策。
+5. 按当前任务读取相关 `cairn/` 知识专题文档。
+
+## 文档职责
+
+| 文件 | 职责 | 维护方式 |
+|---|---|---|
+| `CLAUDE.md`（根目录） | 项目规则、导航与架构主本 | 有意识地更新；规则冲突时优先 |
+| `AGENTS.md`（根目录） | 非 Claude 代理的精简入口 | 很少改动，只桥接到本文件 |
+| `.planning/` | 执行状态、阶段计划、需求与追踪 | 按 GSD 工作流维护，作为计划权威来源 |
+| `cairn/ROADMAP.md` | 跨会话的精简路线图与开放问题 | 原地更新，避免复制 `.planning/ROADMAP.md` |
+| `cairn/LOG.md` | 反向时间顺序的进展日志 | 最新记录加在顶部；每条不超过 20 行，只写摘要与指针 |
+| `cairn/<topic>.md` | 知识专题文档，保存当前真相 | 原地更新；修订时在 LOG 留指针 |
+| `cairn/Reference/` | 外部原始输入 | 按需创建，只追加；本项目不提交 Git |
+| `cairn/Cited.md` | 知识库引用清单 | 仅保存指针，不复制来源正文 |
+
+> 只有出现具体信号时才创建其他 Cairn 文件：需要记录决策、解决可复用陷阱或目标跨越一个会话。代码或流程直接消费的合同、配置和规范仍留在工程目录，不放入 `cairn/`。
+
+## 冲突仲裁规则
+
+- 项目内同层文档的规则级冲突以本文件为准，不覆盖系统、开发者或当前用户指令；执行状态、阶段计划和需求追踪以 `.planning/` 为准。
+- 可复用的业务或设计结论以最新知识专题文档为准，优先级为 **知识专题文档 > LOG 历史**。
+- 不用较旧的 LOG 记录覆盖后续已确认的当前真相。
+
+## 知识库使用反射
+
+- 在开展任何其可复用内核——它产出或依赖的任何结论——够格毕业的工作之前，先检查 Obsidian 的 `Knowledge/Bilibili Music/INDEX.md`；只有知识库笔记确实影响了产出时，才在 `cairn/Cited.md` 添加指针，绝不复制来源正文。
+
+## 文档协作规则
+
+- 修改文档前，先判断用户要“讨论/建议”还是“直接编辑”；用户说“先看看/先评估”时，先给分析，不直接重写正式文档。
+- 修正过去判断时追加更正说明，不静默覆盖历史判断。
+- 未经确认的判断不得写成既定事实。
+
+## 知识沉淀规则
+
+- 每次取得实质进展后，在 `cairn/LOG.md` 顶部添加一条摘要与指针；稳定结论沉淀到相应知识专题文档。
+- **完成回复门禁：**在任何宣称工作已完成、已实现、已定稿、已更新、已同步或已验证，测试已通过，问题已修复或解决，交付物已可用，工作已结束，或使用语义等价表述之前，按 Project Cairn 技能的 `references/maintenance.md` 运行 Cairn 检查点；只更新触发矩阵要求的记录并验证后再回复。用户明确要求只读或不编辑时，禁止 Cairn 写入。
+- 跨项目可复用的经验通过毕业机制沉淀到 Obsidian 的 `Knowledge/Bilibili Music`。
+
+## 项目上下文与工作流
+
+- 当前状态：v1 的四个阶段已经完成；下一步是最终真机确认，再决定是否进入 v2 的 API、认证、缓存与音乐功能打磨。
+- 核心价值：让音乐尽快、稳定地响起来。播放启动速度和不中断播放优先于歌词、推荐、MV、图片、缓存工作和 UI 润色。
+- `.planning/ROADMAP.md` 与 `.planning/REQUIREMENTS.md` 是范围和追踪的权威来源；维护路线图或范围时必须保留需求可追踪性。
+
+### CodeGraph
+
+- 若仓库根目录存在 `.codegraph/`，定位或理解源码时先使用 `codegraph_explore`；查看特定符号用 `codegraph_node`；修改共享函数或回调前用 `codegraph_callers`。若索引不存在，则使用 `rg` 等常规工具，不自行创建索引。
+- 若 CodeGraph 报告编辑后的文件已过期，再直接读取那些具体文件。
+
+### GSD 工作流
+
+- 阶段工作使用当前阶段编号调用 `$gsd-discuss-phase <N>` 或 `$gsd-plan-phase <N>`，不得继续假定当前仍是 Phase 1。
+- v1 稳定化结果是后续工作的基线；未经明确范围决策，不把宽泛的 v2 API、认证或缓存重写混入窄范围稳定性工作。
+
+### Git 安全
+
+- 未经明确要求，不回退用户或先前代理的未提交修改。
+- 只暂存当前任务相关文件；规划文档与源码提交尽量分开。
+
+## 架构资料说明
+
+下方架构说明最初生成于 2026-06-24，保留为主本中的工程导航。文件数量、测试覆盖和具体 UI 行为可能随代码演进而过期；若与当前源码、CodeGraph 或 `.planning/` 冲突，以当前证据为准，并在确认后更新本文件。
 
 ## 模块结构
 
@@ -20,6 +105,8 @@ graph TD
     H --> M["Settings"];
     H --> N["Player (NowPlayingView)"];
     A --> O["BiliMusicTests"];
+    A --> P["Support"];
+    A --> Q["BiliMusicUITests"];
 
     click B "./BiliMusic/App/CLAUDE.md" "App"
     click C "./BiliMusic/API/CLAUDE.md" "API"
@@ -37,20 +124,23 @@ graph TD
 
 ## 模块索引
 
-| 模块 | 路径 | 入口 | 文件数 | 测试 |
-|------|------|------|--------|------|
-| App 入口 | `BiliMusic/App/` | `BiliMusicApp.swift` | 1 | 无 |
-| API 层 | `BiliMusic/API/` | `BiliClient.swift` | 3 | 无 |
-| 鉴权 | `BiliMusic/Auth/` | `CookieStore.swift` | 1 | 无 |
-| 缓存 | `BiliMusic/Cache/` | `CacheStore.swift` | 2 | 无 |
-| 设计 | `BiliMusic/Design/` | `AppTheme.swift` | 2 | 无 |
-| 播放器引擎 | `BiliMusic/Player/` | `PlayerEngine.swift` | 7 | 无 |
-| 首页推荐 | `BiliMusic/Features/Home/` | `HomeView.swift` | 2 | 无 |
-| 搜索 | `BiliMusic/Features/Search/` | `SearchView.swift` | 3 | `BiliMusicTests/SearchModelsTests.swift` |
-| 全屏播放器 | `BiliMusic/Features/Player/` | `NowPlayingView.swift` | 1 | 无 |
-| 收藏夹 | `BiliMusic/Features/Favorites/` | `FavoritesView.swift` | 2 | 无 |
-| 缓存列表 | `BiliMusic/Features/Library/` | `LibraryView.swift` | 1 | 无 |
-| 设置 | `BiliMusic/Features/Settings/` | `SettingsView.swift` | 1 | 无 |
+| 模块 | 路径 | 主要入口 |
+|------|------|----------|
+| App 入口 | `BiliMusic/App/` | `BiliMusicApp.swift` |
+| API 层 | `BiliMusic/API/` | `BiliClient.swift` |
+| 鉴权 | `BiliMusic/Auth/` | `CookieStore.swift` |
+| 缓存 | `BiliMusic/Cache/` | `CacheStore.swift` |
+| 设计 | `BiliMusic/Design/` | `AppTheme.swift` |
+| 播放器引擎 | `BiliMusic/Player/` | `PlayerEngine.swift` |
+| 首页推荐 | `BiliMusic/Features/Home/` | `HomeView.swift` |
+| 搜索 | `BiliMusic/Features/Search/` | `SearchView.swift` |
+| 全屏播放器 | `BiliMusic/Features/Player/` | `NowPlayingView.swift` |
+| 收藏夹 | `BiliMusic/Features/Favorites/` | `FavoritesView.swift` |
+| 缓存列表 | `BiliMusic/Features/Library/` | `LibraryView.swift` |
+| 设置 | `BiliMusic/Features/Settings/` | `SettingsView.swift` |
+| UI 测试支持 | `BiliMusic/Support/` | `UITestFixtures.swift` |
+| 单元测试 | `BiliMusicTests/` | 各领域 XCTest 文件 |
+| UI 回归测试 | `BiliMusicUITests/` | `PlayerChromeUITests.swift` |
 
 ## 构建与运行
 
@@ -68,7 +158,7 @@ cp Local.xcconfig.example Local.xcconfig   # 填入自己的 Apple 开发者 Tea
 
 所需 Xcode 版本见仓库根 `.xcode-version`（当前 26.5；iOS 26 部署目标需 Xcode 26 SDK）。
 
-编译检查（无交互式测试 —— 由用户在真机上验证）：
+编译检查：
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
@@ -76,7 +166,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
   -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO build
 ```
 
-没有测试 target。所有验证都通过 AltStore 在真机 iPhone 上完成（免费开发者账号，签名 7 天有效需续签）。
+`project.yml` 定义了 `BiliMusicTests` 与 `BiliMusicUITests` target；稳定性回归可在模拟器运行，日常播放路径仍需通过 AltStore 在用户自己的 iPhone 上做最终确认（免费开发者账号，签名 7 天有效需续签）。
 
 ## 架构
 
@@ -84,7 +174,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 
 ### 全局状态
 
-`PlayerEngine` 是唯一的 `@Observable` 类，由 `BiliMusicApp` 通过 `.environment(engine)` 注入。视图用 `@Environment(PlayerEngine.self)` 读取。`CacheStore.shared` 和 `FavoriteManager.shared` 是单例，直接访问。
+`PlayerEngine` 是唯一通过 SwiftUI environment 注入的全局播放状态，由 `BiliMusicApp` 通过 `.environment(engine)` 提供，视图用 `@Environment(PlayerEngine.self)` 读取。搜索、网络、历史、收藏、缓存和下载等功能使用各自的 observable store 或单例。
 
 ### 数据流
 
@@ -129,7 +219,7 @@ B 站视频可以有多个分 P（cid），缓存和去重不能只按 bvid。`T
 
 ### 设计（`BiliMusic/Design/`）
 
-- **`AppTheme`** —— `accent = Color.primary`（不用 B站红）。`playerGradient` 是中性的系统渐变（`secondarySystemBackground` → `systemBackground`）。全部用系统语义色值。
+- **`AppTheme`** —— `accent` 指向克制的 B 站蓝青 `brand`，并提供 pressed/soft 变体；无封面时的 `playerGradient` 在系统背景上加入轻微蓝青品牌感。
 - **`CachedAsyncImage`** —— 自定义图片加载 view（`CachedAsyncImage<Content, Placeholder>`）。2 层缓存：`ImageMemoryCache`（NSCache，cap 240 张/48MB）和 `ImageLoadCoordinator`（actor，URLSession + URLCache 32+128MB，同 URL 去重）。
 
 ### 功能页（`BiliMusic/Features/`）
@@ -138,9 +228,9 @@ B 站视频可以有多个分 P（cid），缓存和去重不能只按 bvid。`T
 - **`NowPlayingView`** —— 三页 `TabView`（队列 ← 当前歌曲 → 推荐）。三页：播放列表、正在播放、推荐歌曲。通过下滑手势关闭；阈值约 130pt 或预测约 260pt。包含：播放模式切换（音乐/MV）、音质选择、播放模式（顺序/随机/单曲循环/电台）、收藏（短按/长按选夹）、下载、歌词页、MV 全屏、合集检测（`upPlaylistContaining`）、迷你播放条上滑手势。内有独立子视图 `PlayerProgressBar` 限制 `currentTime` 订阅范围，防止全局重渲染。
 - **`HomeView`** —— 出现时触发 `RecommendationEngine(.home)`；每次点「换一批」累积 `shownBVIDs` 以避免重复。去重机制：`RecentHomeFeedStore`（bvid → Date, 3h TTL, JSON 落盘，跨重启生效）。未登录/无收藏夹时显示引导。
 - **`RecentHomeFeedStore`** —— 首页去重专用。bvid → 最近展示时间，JSON 落盘（`home-recent.json`），1s 防抖写盘。TTL 3h，max 400 条。
-- **`SearchView`** —— 搜索入口。`SearchStore` 驱动：历史记录（UserDefaults，20 条上限）、搜索缓存（`resultCache`，同 query+mode 可恢复）、分页加载（自动跳过无结果页，最多 30 页）、模式切换（音乐/更多）。结果按 `SearchResultSections` 分为最佳匹配、歌曲、MV。`TrackRow` 组件在各列表复用。
-- **`SearchStore`** —— `@Observable`。搜索状态管理：历史加载/记录、结果缓存、分页、模式切换。`searchBatch` 并发请求多个关键词+多页，`dedupeSearchTracks` 去重，`MusicFilter.isSearchResult` 过滤。`submitSearch` 调用 WBI 签名搜索。
-- **`SearchModels`** —— `SearchResultMode`（music/expanded）、`SearchCacheKey`（归一化后做缓存 key）、`SearchCachedSnapshot`（缓存快照）、`SearchResultSections`（最佳匹配/歌曲/MV 三段式）。
+- **`SearchView`** —— 搜索入口。聚焦空搜索框时只展示本地历史或空状态，不显示 Music/MV/expanded scope；结果合并为“最佳匹配 + 音乐结果”的单一可点击音乐表面，`TrackRow` 在列表间复用。
+- **`SearchStore`** —— `@Observable`。管理历史、结果缓存、请求身份、分页和内部 broaden 回退；`.expanded` 仍用于“更多结果”的内部搜索策略，不再作为可见 scope。`searchBatch` 并发请求多个关键词/页面，`dedupeSearchTracks` 去重，`MusicFilter.isSearchResult` 过滤。
+- **`SearchModels`** —— `SearchResultMode`（内部 music/expanded 策略）、`SearchCacheKey`（归一化后的缓存 key）、`SearchCachedSnapshot`（缓存快照）和 `SearchResultSections`（当前音乐结果分段）。
 - **`FavoritesView`** —— 收藏夹列表（B 站收藏夹当歌单用）。点击进入 `FavFolderDetailView` 分页加载，过滤失效稿件与非音乐。支持电台播放、随机播放、预加载。
 - **`FavoriteManager`** —— `@Observable` 单例。维护已收藏 bvid 全集（跨收藏夹合并，10 分钟缓存）。`toggle(track:)` CRUD，带 busy 去重。默认收藏夹记忆（`lastFavoriteFolderId` UserDefaults）。`syncAllFavoriteIDs()` 供推荐去重使用。
 - **`LibraryView`** —— 已缓存曲目列表。支持搜索、5 种排序（最近/标题/UP主/大小/音质）、删除（单个/swipe）、清空。缓存统计（数量+大小）。离线播放。
@@ -148,22 +238,22 @@ B 站视频可以有多个分 P（cid），缓存和去重不能只按 bvid。`T
 
 ### 测试策略
 
-- **没有交互式 UI 测试** —— 所有验证在真机 iPhone 上完成（AltStore，免费开发者账号，签名 7 天有效需续签）。
+- **UI 回归测试** —— `BiliMusicUITests/PlayerChromeUITests.swift` 覆盖播放器展开/收起、手势所有权、布局密度和搜索 chrome 等关键日常界面；真机仍负责最终体感确认。
 - **编译验证** —— `xcodebuild` 构建命令检查编译错误。
-- **单元测试** —— `BiliMusicTests/SearchModelsTests.swift` 是对 `SearchModels` 和 `SearchStore` 的纯逻辑测试，不依赖网络或 UIKit。测试要点：SearchCacheKey 归一化、SearchResultMode 值、SearchResultSections 三段拆分、MusicFilter 过滤逻辑、SearchStore 缓存恢复和模式切换。
+- **单元测试** —— `BiliMusicTests/` 覆盖搜索身份与分页、播放关键路径、推荐调度、图片内存和手势策略等高风险逻辑；新增回归应优先保持纯逻辑、确定性和无网络依赖。
 - **调试环境变量** —— `AUTOPLAY_BV` 环境变量可注入在模拟器上自动播放测试，`AUTOPLAY_TEST_NEXT` 可测切歌。
 - **脚本** —— `scripts/verify_audio.py`、`scripts/verify_search_rcmd.py` 用于验证 API 响应结构。
 
 ## 关键约束
 
-- **不做模拟器交互测试** —— 只做编译验证；真机测试由用户完成。
-- **不强加红色/品牌主色** —— `AppTheme.accent` 保持 `Color.primary`。
+- **保留窄范围模拟器 UI 回归** —— 自动化保护关键手势、搜索和播放器布局；真机测试负责最终交互体感。
+- **品牌色保持克制** —— `AppTheme.accent` 使用当前蓝青 `brand`，不要回退为高饱和粉色或 B 站红。
 - **不做专辑封面虚化背景** —— 用 `AppTheme.playerGradient`（中性）。
 - **封面是 16:9** —— B站封面是 16:9；用 `height: coverSize * 9/16`，不要用正方形。
 - **新增 Swift 文件要 `xcodegen generate`** —— `.xcodeproj` 是生成的；加文件不重新生成，Xcode 找不到。
 - **流 URL 不可持久化** —— 只把 bvid/cid 落盘；URL 约 2 小时后过期。
 - **不要在 URL 上二次 `addingPercentEncoding`** —— WBISigner 已做百分号编码；二次编码会把 `%E5` 变成 `%25E5`，服务器收到字面量而非中文。
-- **搜索只显示音乐内容** —— 默认 `.music` 模式过滤；用户可切换 `.expanded` 查看更多。
+- **搜索默认只显示音乐内容** —— 不暴露模式 scope；`.expanded` 只作为内部“更多结果”回退策略。
 - **不 fallback 到 B 站字幕** —— 自动 CC 会把伴奏标成「♪音乐♪」，只用 LRCLIB 在线歌词。
 
 ## 变更记录 (Changelog)
