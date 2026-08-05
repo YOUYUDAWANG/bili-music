@@ -150,6 +150,8 @@ graph TD
 xcodegen generate
 ```
 
+`docs/` 通过 `project.yml` 的顶层 `fileGroups` 显示在 Xcode Project Navigator，仅用于阅读，不加入任何 target 或 App bundle。不要在 Xcode 中手工拖入文档；生成工程时应始终以 `project.yml` 为准。
+
 **首次拉取**需要先建本地签名配置（签名 Team ID 不入库，各自维护）：
 
 ```bash
