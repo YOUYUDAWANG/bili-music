@@ -120,6 +120,8 @@ struct PlaybackSource {
     let kind: PlaybackDiagnosticEvent.SourceKind
     let quality: Int?
     let bandwidth: Int?
+    let mimeType: String?
+    let codecs: String?
 
     init(
         track: Track,
@@ -128,7 +130,9 @@ struct PlaybackSource {
         isLocal: Bool,
         kind: PlaybackDiagnosticEvent.SourceKind,
         quality: Int?,
-        bandwidth: Int?
+        bandwidth: Int?,
+        mimeType: String? = nil,
+        codecs: String? = nil
     ) {
         self.track = track
         self.url = url
@@ -137,6 +141,8 @@ struct PlaybackSource {
         self.kind = kind
         self.quality = quality
         self.bandwidth = bandwidth
+        self.mimeType = mimeType
+        self.codecs = codecs
     }
 }
 
@@ -848,7 +854,9 @@ final class PlayerEngine {
                 isLocal: false,
                 kind: .preparedRemote,
                 quality: prepared.quality,
-                bandwidth: prepared.bandwidth)
+                bandwidth: prepared.bandwidth,
+                mimeType: prepared.mimeType,
+                codecs: prepared.codecs)
         }
 
         let prepared = try await streamResolver.prepareAudio(
@@ -864,7 +872,9 @@ final class PlayerEngine {
             isLocal: false,
             kind: .freshRemote,
             quality: prepared.quality,
-            bandwidth: prepared.bandwidth)
+            bandwidth: prepared.bandwidth,
+            mimeType: prepared.mimeType,
+            codecs: prepared.codecs)
     }
 
     /// 电台选歌:用统一推荐引擎打分,避免 related 第一条把队列带偏。
@@ -1008,9 +1018,23 @@ final class PlayerEngine {
             return
         }
 
-        let asset = source.isLocal
-            ? AVURLAsset(url: source.url)
-            : AVURLAsset(url: source.url, options: ["AVURLAssetHTTPHeaderFieldsKey": BiliClient.headers])
+        let asset: AVURLAsset
+        if source.isLocal {
+            asset = AVURLAsset(url: source.url)
+        } else {
+            var options: [String: Any] = [
+                "AVURLAssetHTTPHeaderFieldsKey": BiliClient.headers
+            ]
+            if let userAgent = BiliClient.headers["User-Agent"] {
+                options[AVURLAssetHTTPUserAgentKey] = userAgent
+            }
+            if source.kind != .mvRemote, let mimeType = source.mimeType, !mimeType.isEmpty {
+                // Bilibili CDN 常把音频 m4s 返回为 application/octet-stream。
+                // 使用 playurl 声明的实际 MIME，保留 AAC/Hi-Res/未来杜比各自的格式。
+                options[AVURLAssetOverrideMIMETypeKey] = mimeType
+            }
+            asset = AVURLAsset(url: source.url, options: options)
+        }
         let item = AVPlayerItem(asset: asset)
         // 本地文件不需要前向缓冲;在线流缓冲 30s,降低弱网下播一半停住的概率。
         item.preferredForwardBufferDuration = source.isLocal ? 0 : 30
@@ -1055,6 +1079,11 @@ final class PlayerEngine {
                       self.playbackGeneration == generation,
                       self.player?.currentItem === item,
                       item.status == .failed else { return }
+                PlaybackFailureDiagnostics.report(
+                    trigger: .itemStatus,
+                    source: source,
+                    error: item.error,
+                    item: item)
                 await self.handlePlaybackItemFailure(
                     source: source,
                     generation: generation,
@@ -1070,6 +1099,11 @@ final class PlayerEngine {
                       self.playbackGeneration == generation,
                       self.player?.currentItem === item else { return }
                 let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
+                PlaybackFailureDiagnostics.report(
+                    trigger: .failedToEnd,
+                    source: source,
+                    error: error,
+                    item: item)
                 await self.handlePlaybackItemFailure(
                     source: source,
                     generation: generation,
@@ -1151,11 +1185,13 @@ final class PlayerEngine {
                 let retrySource = PlaybackSource(
                     track: source.track,
                     url: fallbackURL,
-                    candidateURLs: [fallbackURL],
+                    candidateURLs: source.candidateURLs,
                     isLocal: false,
                     kind: source.kind,
                     quality: source.quality,
-                    bandwidth: source.bandwidth)
+                    bandwidth: source.bandwidth,
+                    mimeType: source.mimeType,
+                    codecs: source.codecs)
                 self.startPlayback(
                     source: retrySource,
                     resumeAt: self.currentTime.isFinite ? self.currentTime : resumeAt,
@@ -1220,6 +1256,10 @@ final class PlayerEngine {
         }
 
         if let fallbackSource = await remoteFallbackSource(for: source, generation: generation) {
+            PlaybackFailureDiagnostics.reportRetry(
+                .candidateFallback,
+                source: source,
+                targetURL: fallbackSource.url)
             startPlayback(
                 source: fallbackSource,
                 resumeAt: resumeAt.isFinite ? resumeAt : currentTime,
@@ -1230,12 +1270,14 @@ final class PlayerEngine {
         guard source.kind == .preparedRemote,
               !retriedPreparedStreamGenerations.contains(generation) else {
             startupTestHooks.record(.failureSurfaced)
+            PlaybackFailureDiagnostics.reportRetry(.surfaceFailure, source: source)
             state = .failed(errorDescription ?? "播放失败")
             return
         }
 
         retriedPreparedStreamGenerations.insert(generation)
         startupTestHooks.record(.preparedStreamInvalidated)
+        PlaybackFailureDiagnostics.reportRetry(.invalidatePrepared, source: source)
         streamResolver.invalidateAudio(for: source.track)
 
         do {
@@ -1255,7 +1297,9 @@ final class PlayerEngine {
                 isLocal: false,
                 kind: .freshRemote,
                 quality: prepared.quality,
-                bandwidth: prepared.bandwidth)
+                bandwidth: prepared.bandwidth,
+                mimeType: prepared.mimeType,
+                codecs: prepared.codecs)
             currentAudioQuality = retrySource.quality
             currentAudioBandwidth = retrySource.bandwidth
             playbackDiagnostics.record(
@@ -1266,10 +1310,20 @@ final class PlayerEngine {
                 bandwidth: retrySource.bandwidth)
             startupTestHooks.record(.sourceResolved(retrySource.kind))
             startupTestHooks.record(.preparedStreamRetryRequested)
+            PlaybackFailureDiagnostics.reportRetry(
+                .freshResolved,
+                source: source,
+                targetURL: retrySource.url)
             startPlayback(source: retrySource, resumeAt: resumeAt.isFinite ? resumeAt : currentTime, generation: generation)
         } catch {
             guard playbackGeneration == generation else { return }
             startupTestHooks.record(.failureSurfaced)
+            PlaybackFailureDiagnostics.report(
+                trigger: .freshResolution,
+                source: source,
+                error: error,
+                item: nil)
+            PlaybackFailureDiagnostics.reportRetry(.surfaceFailure, source: source)
             state = .failed(error.localizedDescription)
         }
     }
@@ -1291,11 +1345,13 @@ final class PlayerEngine {
         return PlaybackSource(
             track: source.track,
             url: fallbackURL,
-            candidateURLs: [fallbackURL],
+            candidateURLs: source.candidateURLs,
             isLocal: false,
             kind: source.kind,
             quality: source.quality,
-            bandwidth: source.bandwidth)
+            bandwidth: source.bandwidth,
+            mimeType: source.mimeType,
+            codecs: source.codecs)
     }
 
     func simulateCurrentPlaybackItemFailureForTesting(message: String = "播放失败") async {

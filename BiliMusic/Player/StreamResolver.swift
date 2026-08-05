@@ -14,6 +14,8 @@ final class StreamResolver {
         let duration: Int
         let quality: Int
         let bandwidth: Int
+        let mimeType: String?
+        let codecs: String?
         let fetchedAt: Date
         let cdnWarmedAt: Date?
 
@@ -24,6 +26,8 @@ final class StreamResolver {
             duration: Int,
             quality: Int,
             bandwidth: Int,
+            mimeType: String? = nil,
+            codecs: String? = nil,
             fetchedAt: Date,
             cdnWarmedAt: Date? = nil
         ) {
@@ -33,6 +37,8 @@ final class StreamResolver {
             self.duration = duration
             self.quality = quality
             self.bandwidth = bandwidth
+            self.mimeType = mimeType
+            self.codecs = codecs
             self.fetchedAt = fetchedAt
             self.cdnWarmedAt = cdnWarmedAt
         }
@@ -103,6 +109,8 @@ final class StreamResolver {
                 duration: meta.duration,
                 quality: stream.quality,
                 bandwidth: stream.bandwidth,
+                mimeType: stream.mimeType,
+                codecs: stream.codecs,
                 fetchedAt: Date())
         }
 
@@ -145,6 +153,8 @@ final class StreamResolver {
                 duration: prepared.duration,
                 quality: prepared.quality,
                 bandwidth: prepared.bandwidth,
+                mimeType: prepared.mimeType,
+                codecs: prepared.codecs,
                 fetchedAt: prepared.fetchedAt,
                 cdnWarmedAt: Date())
             let resolvedKey = TrackKey(bvid: track.bvid, cid: prepared.cid)

@@ -3,6 +3,9 @@ options:
   bundleIdPrefix: com.fubuki
   deploymentTarget:
     iOS: "26.0"
+fileGroups:
+  # 仅显示在 Xcode Project Navigator，不加入任何 target 或 App bundle。
+  - docs
 targets:
   BiliMusic:
     type: application

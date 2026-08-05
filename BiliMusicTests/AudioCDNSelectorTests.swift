@@ -56,6 +56,29 @@ final class AudioCDNSelectorTests: XCTestCase {
         XCTAssertEqual(audio.backupUrl, ["https://backup.example/audio.m4a"])
     }
 
+    func testPlayInfoDecodesAudioMIMETypeAndCodec() throws {
+        let data = Data("""
+        {
+          "dash": {
+            "audio": [{
+              "id": 30280,
+              "base_url": "https://base.example/audio.m4s",
+              "backup_url": [],
+              "bandwidth": 192000,
+              "mime_type": "audio/mp4",
+              "codecs": "mp4a.40.2"
+            }]
+          }
+        }
+        """.utf8)
+
+        let info = try JSONDecoder().decode(BiliClient.PlayInfo.self, from: data)
+        let audio = try XCTUnwrap(info.dash?.audio?.first)
+
+        XCTAssertEqual(audio.mimeType, "audio/mp4")
+        XCTAssertEqual(audio.codecs, "mp4a.40.2")
+    }
+
     func testPreparedAudioStreamDedupesPrimaryAndBackupCandidates() throws {
         let primary = try XCTUnwrap(URL(string: "https://base.example/audio.m4a"))
         let backup = try XCTUnwrap(URL(string: "https://backup.example/audio.m4a"))
@@ -82,6 +105,18 @@ final class AudioCDNSelectorTests: XCTestCase {
             excluding: primary)
 
         XCTAssertEqual(candidates, [backupA, backupB])
+    }
+
+    func testFallbackCandidatesPreferDifferentHostOverSameHostSignedVariant() throws {
+        let primary = try XCTUnwrap(URL(string: "https://primary.example/audio.m4s?token=1"))
+        let sameHost = try XCTUnwrap(URL(string: "https://primary.example/audio.m4s?token=2"))
+        let otherHost = try XCTUnwrap(URL(string: "https://backup.example/audio.m4s?token=3"))
+
+        let candidates = AudioCDNSelector.fallbackCandidates(
+            from: [primary, sameHost, otherHost],
+            excluding: primary)
+
+        XCTAssertEqual(candidates, [otherHost])
     }
 
     func testRankedCandidatesPreserveUnknownHostOrder() async throws {
