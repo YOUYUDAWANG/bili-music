@@ -6,7 +6,7 @@
 
 - GitHub Actions 从单 target、强制 x86_64 改为 `BiliMusic` shared scheme + generic iOS Simulator，避免各 vendored Package 的 generated module map 落入分离 build root。
 - `Vendor/**` 纳入 PR 与 main push 的构建触发路径。
-- Xcode 27 Beta 本地执行同一 scheme/generic simulator 命令通过，同时覆盖 arm64 与 x86_64。
+- Xcode 27 Beta 本地执行同一 scheme/generic simulator 命令通过，同时覆盖 arm64 与 x86_64；GitHub Actions Xcode 26.3 远程门禁随后通过。
 - 详情：见 `cairn/ci-build.md`。
 
 ## 2026-08-14 · 收敛歌曲列表当前播放态
