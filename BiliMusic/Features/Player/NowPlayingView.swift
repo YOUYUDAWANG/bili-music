@@ -468,28 +468,41 @@ struct NowPlayingView: View {
         GeometryReader { proxy in
             let isCompact = proxy.size.height < 760
             let activeCoverSize = min(coverSize, proxy.size.width - (isCompact ? 40 : 32))
-            let rhythm = min(max((proxy.size.height - 680) / 180, 0), 1)
+            let bottomInset: CGFloat = isCompact ? 16 : 36
+            let fixedContentHeight = activeCoverSize * 9 / 16 + 237 + bottomInset
+                + (favorites.lastError == nil ? 0 : 32)
+            let minimumGapBudget: CGFloat = isCompact ? 64 : 84
+            let gapBudget = max(minimumGapBudget, proxy.size.height - fixedContentHeight)
 
             VStack(spacing: 0) {
                 mediaView(coverSize: activeCoverSize)
-                    .padding(.top, isCompact ? 4 : 10)
-                    .padding(.bottom, 22 + 10 * rhythm)
+
+                Spacer()
+                    .frame(height: gapBudget * 0.17)
 
                 appleMusicMetadataRow(compact: isCompact)
                     .padding(.horizontal, 30)
 
+                Spacer()
+                    .frame(height: gapBudget * 0.16)
+
                 progressView
-                    .padding(.top, 22 + 8 * rhythm)
+
+                Spacer()
+                    .frame(height: gapBudget * 0.19)
 
                 transportControls
-                    .padding(.top, 18 + 8 * rhythm)
+
+                Spacer()
+                    .frame(height: gapBudget * 0.31)
 
                 appleMusicVolumeControl
-                    .padding(.top, 30 + 12 * rhythm)
                     .padding(.horizontal, 30)
 
+                Spacer()
+                    .frame(height: gapBudget * 0.17)
+
                 appleMusicUtilityBar
-                    .padding(.top, 18 + 8 * rhythm)
                     .padding(.horizontal, 56)
 
                 if let favoriteError = favorites.lastError {
@@ -501,9 +514,8 @@ struct NowPlayingView: View {
                         .padding(.top, 8)
                         .padding(.horizontal, 30)
                 }
-
-                Spacer(minLength: isCompact ? 8 : 18)
             }
+            .padding(.bottom, bottomInset)
             .playerContentReveal(opacity: playerContentOpacity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
@@ -888,6 +900,7 @@ struct NowPlayingView: View {
                     HStack {
                         Text("Queue")
                             .font(.headline)
+                            .foregroundStyle(PlayerSurface.primaryText)
                         Spacer()
                         Text("\(engine.queue.count) 首")
                             .font(.subheadline)
@@ -1073,11 +1086,11 @@ struct NowPlayingView: View {
         guard !isLandscape else { return Layout.contentTopInset }
         switch queuePresentationState {
         case .collapsed:
-            return max(64, safeAreaTop + 20)
+            return max(12, safeAreaTop - 12)
         case .split:
-            return max(48, safeAreaTop + 10)
+            return max(12, safeAreaTop - 12)
         case .fullQueue:
-            return max(68, safeAreaTop + 24)
+            return max(12, safeAreaTop - 12)
         }
     }
 
