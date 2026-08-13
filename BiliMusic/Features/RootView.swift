@@ -23,7 +23,9 @@ struct RootView: View {
             .popupInteractionStyle(.automatic)
             .popupBarStyle(.floatingCompact)
             .popupBarInheritsBottomBarMetrics(true)
-            .popupCloseButtonStyle(.none)
+            // Let LNPopup choose the current system close treatment. On iOS 27 this
+            // is the native Liquid Glass control and tracks the popup transition.
+            .popupCloseButtonStyle(.default)
             .popupContentAllowsContentTransition(true)
             .popupBarProgressViewStyle(.none)
             .popupBarShineEnabled(false)

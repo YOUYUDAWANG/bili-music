@@ -22,7 +22,7 @@
 | 播放器模式选择器 | 音乐/MV 切换 |
 | 封面/视频 | 16:9 封面或 AVPlayer 视频播放器 |
 | 曲目信息 | 标题、歌手、错误信息 |
-| PlayerProgressBar | 进度条（独立子视图限制 currentTime 订阅范围） |
+| PlayerProgressBar | 原生 `Slider` 进度条（独立子视图限制 currentTime 订阅范围，并桥接 scrub 生命周期） |
 | 控制按钮 | 上一曲、播放/暂停、下一曲 |
 | 操作栏 | 收藏（短按/长按）、下载、音乐/MV 切换、更多 |
 | 底部抽屉 | 当前列表 / 合集 / 推荐，支持 collapsed → split → full 两段式展开 |

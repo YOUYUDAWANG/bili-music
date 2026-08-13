@@ -148,7 +148,7 @@ private struct PlayerToolbarActionVisual: View {
 
     private var foregroundColor: Color {
         guard isEnabled else { return Color.white.opacity(0.40) }
-        return isActive ? AppTheme.accent : Color.white.opacity(0.76)
+        return isActive ? Color.white.opacity(0.96) : Color.white.opacity(0.72)
     }
 }
 
@@ -161,50 +161,24 @@ struct PlayerProgressBar: View {
     var onScrubChanged: (Bool) -> Void = { _ in }
     @State private var scrubValue: Double = 0
     @State private var isScrubbing = false
-    @State private var rejectedCurrentDrag = false
     @State private var scrubHapticTrigger = 0
 
     private enum Metrics {
-        static let horizontalPadding: CGFloat = 28
-        static let interactionHeight: CGFloat = 24
-    }
-
-    private var displayProgress: CGFloat {
-        let current = isScrubbing ? scrubValue : engine.currentTime
-        guard engine.duration > 0 else { return 0 }
-        return CGFloat(min(current, engine.duration) / engine.duration)
+        static let horizontalPadding: CGFloat = 30
+        static let sliderHeight: CGFloat = 22
     }
 
     var body: some View {
-        VStack(spacing: 6) {
-            GeometryReader { geo in
-                let trackWidth = geo.size.width
-                ZStack(alignment: .leading) {
-                    // 底槽
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(Color.white.opacity(0.22))
-                        .frame(height: 3)
-
-                    // 进度轨
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(Color.white.opacity(0.92))
-                        .frame(width: max(0, trackWidth * displayProgress), height: 3)
-
-                    // 拇指球
-                    Circle()
-                        .fill(Color.white)
-                        .frame(width: 12, height: 12)
-                        .offset(x: max(0, trackWidth * displayProgress - 6))
-                        .scaleEffect(isScrubbing ? 1.15 : 1.0)
-                        .shadow(color: .black.opacity(0.15), radius: 3, y: 1)
-                        .animation(.spring(response: 0.2, dampingFraction: 0.8), value: isScrubbing)
-                }
-                .frame(height: Metrics.interactionHeight)
-                .contentShape(Rectangle())
-                .sensoryFeedback(.selection, trigger: scrubHapticTrigger)
-                .highPriorityGesture(progressDragGesture(trackWidth: trackWidth), including: .all)
-            }
-            .frame(height: Metrics.interactionHeight)
+        VStack(spacing: 4) {
+            Slider(
+                value: progressBinding,
+                in: 0...max(engine.duration, 1),
+                onEditingChanged: handleEditingChanged
+            )
+            .sliderThumbVisibility(.hidden)
+            .tint(Color.white.opacity(0.94))
+            .frame(height: Metrics.sliderHeight)
+            .sensoryFeedback(.selection, trigger: scrubHapticTrigger)
 
             HStack {
                 Text(MusicFormatters.playbackTime(isScrubbing ? scrubValue : engine.currentTime))
@@ -234,53 +208,45 @@ struct PlayerProgressBar: View {
             }
             guard isScrubbing else { return }
             isScrubbing = false
-            rejectedCurrentDrag = false
             onScrubChanged(false)
         }
     }
 
-    private func progressDragGesture(trackWidth: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: ProgressScrubMath.minimumDragDistance)
-            .onChanged { value in
-                if !isScrubbing {
-                    guard !rejectedCurrentDrag else { return }
-                    guard ProgressScrubMath.shouldBeginScrub(translation: value.translation) else {
-                        rejectedCurrentDrag = true
-                        return
-                    }
-                    scrubValue = min(engine.currentTime, engine.duration)
-                    isScrubbing = true
-                    engine.beginScrub()
-                    onScrubChanged(true)
-                    scrubHapticTrigger += 1
-                }
-                let progress = ProgressScrubMath.progress(locationX: value.location.x, trackWidth: trackWidth)
-                scrubValue = progress * engine.duration
+    private var progressBinding: Binding<Double> {
+        Binding(
+            get: {
+                isScrubbing
+                    ? scrubValue
+                    : ProgressScrubMath.clampedTime(engine.currentTime, duration: engine.duration)
+            },
+            set: { value in
+                scrubValue = ProgressScrubMath.clampedTime(value, duration: engine.duration)
             }
-            .onEnded { _ in
-                defer { rejectedCurrentDrag = false }
-                guard isScrubbing else { return }
-                engine.endScrub(to: scrubValue)
-                isScrubbing = false
-                onScrubChanged(false)
-                scrubHapticTrigger += 1
-            }
+        )
     }
 
+    private func handleEditingChanged(_ editing: Bool) {
+        if editing {
+            guard !isScrubbing else { return }
+            scrubValue = ProgressScrubMath.clampedTime(engine.currentTime, duration: engine.duration)
+            isScrubbing = true
+            engine.beginScrub()
+            onScrubChanged(true)
+            scrubHapticTrigger += 1
+        } else {
+            guard isScrubbing else { return }
+            engine.endScrub(to: scrubValue)
+            isScrubbing = false
+            onScrubChanged(false)
+            scrubHapticTrigger += 1
+        }
+    }
 }
 
 enum ProgressScrubMath {
-    static let minimumDragDistance: CGFloat = 8
-
-    static func shouldBeginScrub(translation: CGSize) -> Bool {
-        let horizontal = abs(translation.width)
-        let vertical = abs(translation.height)
-        return horizontal >= minimumDragDistance && horizontal > vertical * 1.6
-    }
-
-    static func progress(locationX: CGFloat, trackWidth: CGFloat) -> CGFloat {
-        guard trackWidth > 0 else { return 0 }
-        return max(0, min(1, locationX / trackWidth))
+    static func clampedTime(_ time: Double, duration: Double) -> Double {
+        guard time.isFinite, duration.isFinite, duration > 0 else { return 0 }
+        return min(max(time, 0), duration)
     }
 }
 

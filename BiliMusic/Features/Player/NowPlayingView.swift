@@ -251,12 +251,10 @@ struct NowPlayingView: View {
     private var favorites: FavoriteManager { .shared }
 
     private enum Layout {
-        static let topChromeBottomPadding: CGFloat = 0
         static let contentTopInset: CGFloat = 0
-        static let centerHorizontalPadding: CGFloat = 26
         static let bottomSheetRowHeight: CGFloat = 52
-        static let collapsedDrawerTopPadding: CGFloat = 36
-        static let compactCollapsedDrawerTopPadding: CGFloat = 28
+        static let collapsedDrawerTopPadding: CGFloat = 30
+        static let compactCollapsedDrawerTopPadding: CGFloat = 24
         static let fullQueueMiniHeaderHeight: CGFloat = 66
     }
 
@@ -400,7 +398,7 @@ struct NowPlayingView: View {
             return min(max(168, size.width * 0.24), max(168, availableHeight * 0.48), 250)
         }
 
-        return min(max(320, size.width - 20), max(330, availableHeight * 0.58), 430)
+        return min(max(296, size.width - 48), max(320, availableHeight * 0.52), 390)
     }
 
     @ViewBuilder
@@ -472,7 +470,9 @@ struct NowPlayingView: View {
             let topPadding = portraitTopPadding(height: proxy.size.height, isCompact: isCompact)
             let coverBottomSpacing = portraitCoverBottomSpacing(isCompact: isCompact)
             let metadataBottomSpacing = portraitMetadataBottomSpacing(isCompact: isCompact)
-            let bottomFloor: CGFloat = queuePresentationState == .fullQueue ? 0 : (isCompact ? 16 : 26)
+            let bottomFloor: CGFloat = queuePresentationState == .collapsed
+                ? (isCompact ? 78 : 94)
+                : (queuePresentationState == .fullQueue ? 0 : 20)
             let maxRows = bottomContextMaxRows(for: proxy.size, isCompact: isCompact)
             let drawerTopOffset = fullQueueDrawerTopOffset(for: proxy.size.height)
             let drawerHeight = max(420, proxy.size.height - drawerTopOffset)
@@ -499,8 +499,8 @@ struct NowPlayingView: View {
                             playerMetadata(
                                 compact: isCompact || queuePresentationState.isExpanded,
                                 centered: false)
-                                .padding(.horizontal, 34)
-                                .padding(.bottom, metadataBottomSpacing + (queuePresentationState == .collapsed ? 4 : 0))
+                                .padding(.horizontal, 30)
+                                .padding(.bottom, metadataBottomSpacing)
                                 .playerContentReveal(opacity: playerContentOpacity)
 
                             portraitPlayerControls(
@@ -520,8 +520,6 @@ struct NowPlayingView: View {
                                     .playerContentReveal(opacity: playerContentOpacity)
                             }
                         }
-                        .offset(y: queuePresentationState == .collapsed ? 20 : 0)
-
                         Spacer(minLength: bottomFloor)
                     }
                 }
@@ -636,7 +634,7 @@ struct NowPlayingView: View {
     private func portraitTopPadding(height: CGFloat, isCompact: Bool) -> CGFloat {
         switch queuePresentationState {
         case .collapsed:
-            return isCompact ? 16 : min(34, max(22, height * 0.032))
+            return isCompact ? 4 : min(12, max(6, height * 0.012))
         case .split:
             return isCompact ? 4 : 8
         case .fullQueue:
@@ -647,7 +645,7 @@ struct NowPlayingView: View {
     private func portraitCoverBottomSpacing(isCompact: Bool) -> CGFloat {
         switch queuePresentationState {
         case .collapsed:
-            return isCompact ? 28 : 58
+            return isCompact ? 20 : 34
         case .split:
             return isCompact ? 8 : 10
         case .fullQueue:
@@ -658,7 +656,7 @@ struct NowPlayingView: View {
     private func portraitMetadataBottomSpacing(isCompact: Bool) -> CGFloat {
         switch queuePresentationState {
         case .collapsed:
-            return isCompact ? 10 : 14
+            return isCompact ? 16 : 20
         case .split:
             return isCompact ? 8 : 10
         case .fullQueue:
@@ -678,9 +676,9 @@ struct NowPlayingView: View {
     }
 
     private func playerMetadata(compact: Bool, centered: Bool = true) -> some View {
-        VStack(alignment: centered ? .center : .leading, spacing: compact ? 3 : 6) {
+        VStack(alignment: centered ? .center : .leading, spacing: compact ? 4 : 7) {
             Text(displayTitle)
-                .font(.system(size: compact ? 19 : 22, weight: .semibold))
+                .font(.system(size: compact ? 19 : 21, weight: .semibold))
                 .foregroundStyle(Color.white)
                 .multilineTextAlignment(centered ? .center : .leading)
                 .lineLimit(compact ? 1 : 2)
@@ -691,8 +689,8 @@ struct NowPlayingView: View {
                 .accessibilityIdentifier("nowPlayingTitle")
 
             Text(displayArtist)
-                .font(.system(size: compact ? 13 : 16, weight: .regular))
-                .foregroundStyle(Color.white.opacity(0.62))
+                .font(.system(size: compact ? 15 : 17, weight: .regular))
+                .foregroundStyle(Color.white.opacity(0.68))
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: centered ? .center : .leading)
 
@@ -753,7 +751,7 @@ struct NowPlayingView: View {
     private func portraitTransportTopPadding(isCompact: Bool) -> CGFloat {
         switch queuePresentationState {
         case .collapsed:
-            return isCompact ? 18 : 24
+            return isCompact ? 14 : 20
         case .split:
             return isCompact ? 10 : 12
         case .fullQueue:
@@ -764,7 +762,7 @@ struct NowPlayingView: View {
     private func portraitToolbarTopPadding(isCompact: Bool) -> CGFloat {
         switch queuePresentationState {
         case .collapsed:
-            return isCompact ? 14 : 18
+            return isCompact ? 12 : 16
         case .split:
             return isCompact ? 8 : 10
         case .fullQueue:
@@ -806,8 +804,12 @@ struct NowPlayingView: View {
         .clipped()
         .contentShape(Rectangle())
         .overlay(alignment: .top) {
-            playerTopChrome(safeAreaTop: safeAreaTop)
-                .playerContentReveal(opacity: playerContentOpacity)
+            Color.clear
+                .frame(height: max(54, safeAreaTop + 28))
+                .allowsHitTesting(false)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("下滑收起播放器")
+                .accessibilityIdentifier("playerTopChrome")
         }
     }
 
@@ -815,11 +817,11 @@ struct NowPlayingView: View {
         guard !isLandscape else { return Layout.contentTopInset }
         switch queuePresentationState {
         case .collapsed:
-            return max(108, safeAreaTop + 48)
+            return max(64, safeAreaTop + 20)
         case .split:
-            return max(58, safeAreaTop + 18)
+            return max(48, safeAreaTop + 10)
         case .fullQueue:
-            return max(92, safeAreaTop + 42)
+            return max(68, safeAreaTop + 24)
         }
     }
 
@@ -929,45 +931,51 @@ struct NowPlayingView: View {
     }
 
     private var transportControls: some View {
-        HStack(spacing: 48) {
+        HStack(spacing: 0) {
             PlayerIconButton(systemName: "backward.fill", size: 30, accessibilityLabel: "上一曲") {
                 prevHapticTrigger += 1
                 Task { await engine.playPrevious() }
             }
+            .frame(maxWidth: .infinity)
             .sensoryFeedback(.impact(weight: .medium), trigger: prevHapticTrigger)
             Button {
                 playHapticTrigger += 1
                 engine.togglePlayPause()
             } label: {
                 Image(systemName: engine.state == .playing ? "pause.fill" : "play.fill")
-                    .font(.system(size: 34, weight: .bold))
+                    .font(.system(size: 48, weight: .semibold))
                     .contentTransition(.symbolEffect(.replace))
                     .frame(width: 72, height: 72)
-                    .foregroundStyle(Color.black.opacity(0.92))
-                    .background(Color.white, in: Circle())
-                    .shadow(color: .black.opacity(0.16), radius: 14, y: 7)
+                    .foregroundStyle(Color.white.opacity(0.96))
+                    .contentShape(Circle())
             }
-            .overlay { if engine.state == .loading { ProgressView().tint(Color.black.opacity(0.80)) } }
+            .frame(maxWidth: .infinity)
+            .buttonStyle(.plain)
+            .overlay { if engine.state == .loading { ProgressView().tint(Color.white.opacity(0.82)) } }
             .accessibilityIdentifier("playerTransportControls")
             .sensoryFeedback(.impact(weight: .medium), trigger: playHapticTrigger)
             PlayerIconButton(systemName: "forward.fill", size: 30, accessibilityLabel: "下一曲") {
                 nextHapticTrigger += 1
                 Task { await engine.playNext() }
             }
+            .frame(maxWidth: .infinity)
             .disabled(!engine.hasNext)
             .sensoryFeedback(.impact(weight: .medium), trigger: nextHapticTrigger)
         }
+        .frame(maxWidth: 330)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 22)
         .foregroundStyle(Color.white.opacity(0.94))
     }
 
     private var playerToolbarButtons: some View {
-        HStack(spacing: 20) {
+        HStack(spacing: 24) {
             favoriteButton
             downloadButton
             mvSwitchButton
             moreMenu
         }
-        .frame(maxWidth: 246)
+        .frame(maxWidth: 270)
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 18)
     }
@@ -1243,22 +1251,6 @@ struct NowPlayingView: View {
         .buttonStyle(.plain)
     }
 
-    private func playerTopChrome(safeAreaTop: CGFloat) -> some View {
-        VStack(spacing: 4) {
-            Color.clear
-                .frame(height: max(safeAreaTop - 6, 12))
-                .accessibilityHidden(true)
-            Capsule(style: .continuous)
-                .fill(Color.white.opacity(0.58))
-                .frame(width: 60, height: 5)
-                .accessibilityLabel("下滑收起播放器")
-            .padding(.bottom, Layout.topChromeBottomPadding)
-        }
-        .frame(maxWidth: .infinity)
-        .contentShape(Rectangle())
-        .accessibilityIdentifier("playerTopChrome")
-    }
-
     private func setPlaybackMode(_ mode: PlayerEngine.PlaybackMode) {
         guard mode != engine.playbackMode, !switchingMode else { return }
         guard mode == .music || engine.videoAvailable else { return }
@@ -1376,7 +1368,11 @@ struct NowPlayingView: View {
             .frame(maxWidth: .infinity, maxHeight: queuePresentationState == .fullQueue ? .infinity : nil, alignment: .top)
             .background(alignment: .top) {
                 RoundedRectangle(cornerRadius: bottomContextCornerRadius, style: .continuous)
-                    .fill(Color.white.opacity(bottomContextBackgroundOpacity))
+                    .fill(.thinMaterial)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: bottomContextCornerRadius, style: .continuous)
+                            .fill(Color.black.opacity(bottomContextBackgroundOpacity))
+                    }
                     .overlay {
                         RoundedRectangle(cornerRadius: bottomContextCornerRadius, style: .continuous)
                             .stroke(Color.white.opacity(bottomContextStrokeOpacity), lineWidth: 1)
@@ -1426,8 +1422,7 @@ struct NowPlayingView: View {
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(Color.white.opacity(0.80))
                                 .frame(width: 42, height: 38)
-                                .background(Color.white.opacity(0.10), in: Capsule())
-                                .contentShape(Capsule())
+                                .contentShape(Circle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(bottomContextFullListLabel)
@@ -1542,11 +1537,11 @@ struct NowPlayingView: View {
     private var bottomContextBackgroundOpacity: Double {
         switch queuePresentationState {
         case .collapsed:
-            return 0.055
+            return 0.02
         case .split:
-            return 0.078
+            return 0.16
         case .fullQueue:
-            return 0.108
+            return 0.22
         }
     }
 
@@ -1566,12 +1561,12 @@ struct NowPlayingView: View {
 
     private var bottomContextHandle: some View {
         RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-            .fill(Color.white.opacity(queuePresentationState.isExpanded ? 0.30 : 0.24))
-            .frame(width: 34, height: 3)
+            .fill(Color.white.opacity(queuePresentationState.isExpanded ? 0.36 : 0.28))
+            .frame(width: 36, height: 4)
     }
 
     private var bottomContextTabPicker: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 18) {
             ForEach(BottomContextTab.allCases) { tab in
                 Button {
                     animate(contextTransitionAnimation) {
@@ -1580,16 +1575,17 @@ struct NowPlayingView: View {
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: tab.icon)
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.system(size: 13, weight: .semibold))
                         Text(tab.title)
-                            .font(.caption.weight(.semibold))
+                            .font(.subheadline.weight(.semibold))
                     }
                     .foregroundStyle(bottomContextTab == tab ? Color.white : PlayerSurface.secondaryText)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 30)
-                    .background {
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(bottomContextTab == tab ? Color.white.opacity(0.14) : Color.white.opacity(0.045))
+                    .frame(height: 38)
+                    .overlay(alignment: .bottom) {
+                        Rectangle()
+                            .fill(bottomContextTab == tab ? Color.white.opacity(0.90) : Color.clear)
+                            .frame(height: 2)
                     }
                 }
                 .buttonStyle(.plain)
