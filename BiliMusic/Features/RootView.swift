@@ -23,9 +23,10 @@ struct RootView: View {
             .popupInteractionStyle(.automatic)
             .popupBarStyle(.floatingCompact)
             .popupBarInheritsBottomBarMetrics(true)
-            // Let LNPopup choose the current system close treatment. On iOS 27 this
-            // is the native Liquid Glass control and tracks the popup transition.
-            .popupCloseButtonStyle(.default)
+            // Pin the Apple Music-style treatment explicitly. `.default` resolves
+            // to a trailing glass X on the current iOS 27 runtime.
+            .popupCloseButtonStyle(.grabber)
+            .popupCloseButtonPositioning(.center)
             .popupContentAllowsContentTransition(true)
             .popupBarProgressViewStyle(.none)
             .popupBarShineEnabled(false)

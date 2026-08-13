@@ -231,6 +231,7 @@ struct NowPlayingView: View {
     @State private var playlistLookupTask: Task<Void, Never>?
     @State private var scheduledPlaylistBVID: String?
     @State private var showLyrics = false
+    @State private var showQueue = false
     @State private var showMVFullscreen = false
     @State private var showUPPlaylists = false
     @State private var showFavoriteFolders = false
@@ -466,74 +467,45 @@ struct NowPlayingView: View {
     private func portraitNowPlayingPage(coverSize: CGFloat, pageWidth: CGFloat) -> some View {
         GeometryReader { proxy in
             let isCompact = proxy.size.height < 760
-            let activeCoverSize = portraitCoverSize(base: coverSize, isCompact: isCompact)
-            let topPadding = portraitTopPadding(height: proxy.size.height, isCompact: isCompact)
-            let coverBottomSpacing = portraitCoverBottomSpacing(isCompact: isCompact)
-            let metadataBottomSpacing = portraitMetadataBottomSpacing(isCompact: isCompact)
-            let bottomFloor: CGFloat = queuePresentationState == .collapsed
-                ? (isCompact ? 78 : 94)
-                : (queuePresentationState == .fullQueue ? 0 : 20)
-            let maxRows = bottomContextMaxRows(for: proxy.size, isCompact: isCompact)
-            let drawerTopOffset = fullQueueDrawerTopOffset(for: proxy.size.height)
-            let drawerHeight = max(420, proxy.size.height - drawerTopOffset)
-            let drawerFrameHeight: CGFloat? = queuePresentationState == .fullQueue ? drawerHeight : nil
-            let drawerAlignment: Alignment = queuePresentationState == .fullQueue ? .top : .bottom
-            let drawerOffsetY: CGFloat = queuePresentationState == .fullQueue ? drawerTopOffset : 0
-            let drawerBottomPadding: CGFloat = queuePresentationState == .collapsed
-                ? (isCompact ? 24 : 30)
-                : 0
+            let activeCoverSize = min(coverSize, proxy.size.width - (isCompact ? 40 : 32))
+            let rhythm = min(max((proxy.size.height - 680) / 180, 0), 1)
 
-            ZStack(alignment: .top) {
-                if queuePresentationState == .fullQueue {
-                    fullQueueMiniPlayerHeader
-                        .padding(.horizontal, 24)
-                        .frame(height: Layout.fullQueueMiniHeaderHeight, alignment: .center)
-                        .playerContentReveal(opacity: playerContentOpacity)
-                } else {
-                    VStack(spacing: 0) {
-                        mediaView(coverSize: activeCoverSize)
-                            .padding(.top, topPadding)
-                            .padding(.bottom, coverBottomSpacing)
+            VStack(spacing: 0) {
+                mediaView(coverSize: activeCoverSize)
+                    .padding(.top, isCompact ? 4 : 10)
+                    .padding(.bottom, 22 + 10 * rhythm)
 
-                        VStack(spacing: 0) {
-                            playerMetadata(
-                                compact: isCompact || queuePresentationState.isExpanded,
-                                centered: false)
-                                .padding(.horizontal, 30)
-                                .padding(.bottom, metadataBottomSpacing)
-                                .playerContentReveal(opacity: playerContentOpacity)
+                appleMusicMetadataRow(compact: isCompact)
+                    .padding(.horizontal, 30)
 
-                            portraitPlayerControls(
-                                isCompact: isCompact,
-                                maxRows: maxRows,
-                                includeBottomContext: false)
-                                .playerContentReveal(opacity: playerContentOpacity)
+                progressView
+                    .padding(.top, 22 + 8 * rhythm)
 
-                            if let favoriteError = favorites.lastError {
-                                Text(favoriteError)
-                                    .font(.caption2)
-                                    .foregroundStyle(AppTheme.error)
-                                    .lineLimit(2)
-                                    .multilineTextAlignment(.center)
-                                    .padding(.top, 8)
-                                    .padding(.horizontal, 28)
-                                    .playerContentReveal(opacity: playerContentOpacity)
-                            }
-                        }
-                        Spacer(minLength: bottomFloor)
-                    }
+                transportControls
+                    .padding(.top, 18 + 8 * rhythm)
+
+                appleMusicVolumeControl
+                    .padding(.top, 30 + 12 * rhythm)
+                    .padding(.horizontal, 30)
+
+                appleMusicUtilityBar
+                    .padding(.top, 18 + 8 * rhythm)
+                    .padding(.horizontal, 56)
+
+                if let favoriteError = favorites.lastError {
+                    Text(favoriteError)
+                        .font(.caption2)
+                        .foregroundStyle(AppTheme.error)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 8)
+                        .padding(.horizontal, 30)
                 }
 
-                bottomContextDrawer(maxRows: maxRows)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: drawerAlignment)
-                    .frame(height: drawerFrameHeight, alignment: .top)
-                    .offset(y: drawerOffsetY)
-                    .padding(.bottom, drawerBottomPadding)
-                    .layoutPriority(queuePresentationState == .fullQueue ? 1 : 0)
-                    .playerContentReveal(opacity: playerContentOpacity)
+                Spacer(minLength: isCompact ? 8 : 18)
             }
+            .playerContentReveal(opacity: playerContentOpacity)
         }
-        .animation(contextTransitionAnimation, value: queuePresentationState)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
@@ -716,6 +688,281 @@ struct NowPlayingView: View {
         return TrackTitleFormatter.displayMetadata(for: current, clean: cleanListTitles).artist
     }
 
+    private func appleMusicMetadataRow(compact: Bool) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(displayTitle)
+                    .font(.system(size: compact ? 20 : 22, weight: .semibold))
+                    .foregroundStyle(Color.white.opacity(0.96))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+                    .accessibilityIdentifier("nowPlayingTitle")
+
+                Text(displayArtist)
+                    .font(.system(size: compact ? 16 : 18, weight: .regular))
+                    .foregroundStyle(Color.white.opacity(0.64))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            favoriteButton
+            moreMenu
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("nowPlayingMetadata")
+    }
+
+    private var appleMusicVolumeControl: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "speaker.fill")
+                .font(.system(size: 13, weight: .semibold))
+            SystemVolumeSlider()
+                .frame(height: 28)
+            Image(systemName: "speaker.wave.3.fill")
+                .font(.system(size: 15, weight: .semibold))
+        }
+        .foregroundStyle(Color.white.opacity(0.72))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("系统音量")
+    }
+
+    private var appleMusicUtilityBar: some View {
+        HStack {
+            Button {
+                guard !engine.lyrics.isEmpty else { return }
+                showLyrics = true
+            } label: {
+                Image(systemName: engine.lyrics.isEmpty ? "quote.bubble" : "quote.bubble.fill")
+                    .font(.system(size: 22, weight: .medium))
+                    .frame(width: 52, height: 48)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(engine.lyrics.isEmpty)
+            .opacity(engine.lyrics.isEmpty ? 0.34 : 0.76)
+            .accessibilityLabel(engine.lyrics.isEmpty ? "暂无歌词" : "歌词")
+
+            Spacer()
+
+            SystemRoutePicker()
+                .frame(width: 52, height: 48)
+                .accessibilityLabel("AirPlay")
+
+            Spacer()
+
+            Button {
+                animate(contextTransitionAnimation) {
+                    showQueue.toggle()
+                    queuePresentationState = showQueue ? .fullQueue : .collapsed
+                }
+            } label: {
+                Image(systemName: "list.bullet")
+                    .font(.system(size: 24, weight: .medium))
+                    .frame(width: 52, height: 48)
+                    .foregroundStyle(showQueue ? Color.black.opacity(0.78) : Color.white.opacity(0.74))
+                    .background(showQueue ? Color.white.opacity(0.72) : Color.clear, in: Circle())
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("接下来播放")
+            .accessibilityIdentifier("playerQueueButton")
+        }
+        .foregroundStyle(Color.white.opacity(0.74))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("playerUtilityBar")
+    }
+
+    private func appleMusicQueuePage(pageWidth: CGFloat) -> some View {
+        GeometryReader { proxy in
+            let isCompact = proxy.size.height < 760
+            VStack(spacing: 0) {
+                appleMusicQueueHeader
+                    .padding(.horizontal, 30)
+                    .padding(.top, isCompact ? 2 : 8)
+
+                appleMusicQueueModeControls
+                    .padding(.horizontal, 30)
+                    .padding(.top, 14)
+
+                appleMusicQueueList
+                    .padding(.top, 14)
+                    .frame(maxWidth: min(pageWidth, 520), maxHeight: .infinity)
+
+                progressView
+                    .padding(.top, 8)
+
+                transportControls
+                    .padding(.top, isCompact ? 8 : 12)
+
+                appleMusicVolumeControl
+                    .padding(.top, isCompact ? 14 : 20)
+                    .padding(.horizontal, 30)
+
+                appleMusicUtilityBar
+                    .padding(.top, isCompact ? 8 : 12)
+                    .padding(.horizontal, 56)
+                    .padding(.bottom, isCompact ? 4 : 10)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .onAppear {
+            queuePresentationState = .fullQueue
+            ensureRecommendationsLoadedIfVisible()
+        }
+    }
+
+    private var appleMusicQueueHeader: some View {
+        HStack(spacing: 12) {
+            fullQueueHeaderArtwork
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(displayTitle)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(PlayerSurface.primaryText)
+                    .lineLimit(1)
+                Text(displayArtist)
+                    .font(.system(size: 15))
+                    .foregroundStyle(PlayerSurface.secondaryText)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            favoriteButton
+            moreMenu
+        }
+        .frame(height: 56)
+    }
+
+    private var appleMusicQueueModeControls: some View {
+        HStack(spacing: 12) {
+            appleMusicQueueModeButton(
+                systemName: "shuffle",
+                isActive: engine.queueMode == .shuffle,
+                accessibilityLabel: "随机播放"
+            ) {
+                engine.setQueueMode(engine.queueMode == .shuffle ? .sequential : .shuffle)
+            }
+
+            appleMusicQueueModeButton(
+                systemName: "repeat",
+                isActive: engine.queueMode == .repeatOne,
+                accessibilityLabel: "单曲循环"
+            ) {
+                engine.setQueueMode(engine.queueMode == .repeatOne ? .sequential : .repeatOne)
+            }
+
+            appleMusicQueueModeButton(
+                systemName: "infinity",
+                isActive: engine.queueMode == .radio,
+                accessibilityLabel: "自动播放推荐"
+            ) {
+                engine.setQueueMode(engine.queueMode == .radio ? .sequential : .radio)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func appleMusicQueueModeButton(
+        systemName: String,
+        isActive: Bool,
+        accessibilityLabel: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(isActive ? Color.black.opacity(0.78) : Color.white.opacity(0.82))
+                .frame(maxWidth: .infinity)
+                .frame(height: 42)
+                .background(isActive ? Color.white.opacity(0.74) : Color.white.opacity(0.12), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
+    }
+
+    private var appleMusicQueueList: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                LazyVStack(spacing: 0) {
+                    HStack {
+                        Text("Queue")
+                            .font(.headline)
+                        Spacer()
+                        Text("\(engine.queue.count) 首")
+                            .font(.subheadline)
+                            .foregroundStyle(PlayerSurface.secondaryText)
+                    }
+                    .padding(.bottom, 8)
+
+                    ForEach(engine.queue.indices, id: \.self) { index in
+                        guardedPlayerRowButton {
+                            Task { await engine.jump(to: index) }
+                        } label: {
+                            bottomSheetTrackRow(track: engine.queue[index], index: index)
+                                .id(index)
+                        }
+                        if index != engine.queue.indices.last {
+                            playerDivider.padding(.leading, 54)
+                        }
+                    }
+
+                    HStack(spacing: 7) {
+                        Image(systemName: "infinity")
+                        Text("AutoPlay")
+                    }
+                    .font(.headline)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 18)
+                    .padding(.bottom, 8)
+
+                    appleMusicAutoPlayRows
+                }
+                .padding(.horizontal, 30)
+                .padding(.bottom, 16)
+            }
+            .onAppear {
+                scrollCurrentQueue(proxy)
+                ensureRecommendationsLoadedIfVisible()
+            }
+            .onChange(of: engine.queueIndex) { _, _ in
+                scrollCurrentQueue(proxy)
+            }
+        }
+        .accessibilityIdentifier("playerAppleMusicQueue")
+    }
+
+    @ViewBuilder
+    private var appleMusicAutoPlayRows: some View {
+        if recommendationsLoading || !recommendationsMatchCurrentTrack {
+            HStack(spacing: 10) {
+                ProgressView().tint(.white)
+                Text("正在准备当前歌曲推荐")
+                    .foregroundStyle(PlayerSurface.secondaryText)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: Layout.bottomSheetRowHeight)
+        } else if recommendedTracks.isEmpty {
+            Text(recommendationsError ?? "暂无相关歌曲")
+                .font(.subheadline)
+                .foregroundStyle(PlayerSurface.secondaryText)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: Layout.bottomSheetRowHeight)
+        } else {
+            ForEach(recommendedTracks.indices, id: \.self) { index in
+                guardedPlayerRowButton {
+                    suppressNextRecommendationRefresh = true
+                    Task { await engine.play(tracks: recommendedTracks, startAt: index, queueMode: .radio) }
+                } label: {
+                    bottomSheetTrackRow(track: recommendedTracks[index], index: index)
+                }
+                if index != recommendedTracks.indices.last {
+                    playerDivider.padding(.leading, 54)
+                }
+            }
+        }
+    }
+
     private func portraitPlayerControls(
         isCompact: Bool,
         maxRows: Int,
@@ -797,9 +1044,18 @@ struct NowPlayingView: View {
     }
 
     private func playerPages(coverSize: CGFloat, width: CGFloat, safeAreaTop: CGFloat, isLandscape: Bool) -> some View {
-        nowPlayingPage(coverSize: coverSize, pageWidth: width, isLandscape: isLandscape)
+        Group {
+            if showQueue && !isLandscape {
+                appleMusicQueuePage(pageWidth: width)
+                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
+            } else {
+                nowPlayingPage(coverSize: coverSize, pageWidth: width, isLandscape: isLandscape)
+                    .transition(.opacity.combined(with: .scale(scale: 1.015)))
+            }
+        }
             .padding(.top, playerContentTopInset(safeAreaTop: safeAreaTop, isLandscape: isLandscape))
             .contentShape(Rectangle())
+            .animation(contextTransitionAnimation, value: showQueue)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .clipped()
         .contentShape(Rectangle())
@@ -987,7 +1243,7 @@ struct NowPlayingView: View {
 
         return PlayerToolbarActionButton(
             title: isFavorite ? "已收藏" : "收藏",
-            systemName: isFavorite ? "heart.fill" : "heart",
+            systemName: isFavorite ? "star.fill" : "star",
             isActive: isFavorite,
             isEnabled: track != nil,
             isBusy: isBusy,
@@ -1187,8 +1443,34 @@ struct NowPlayingView: View {
 
     private var moreMenu: some View {
         let hasLyrics = !engine.lyrics.isEmpty
+        let track = engine.current
+        let downloads = DownloadManager.shared
+        let isCached = track.map { CacheStore.shared.entry(for: $0) != nil } ?? false
+        let isMV = engine.playbackMode == .mv
+        let canSwitchMode = isMV || engine.videoAvailable
 
         return Menu {
+            Section("操作") {
+                Button {
+                    guard let track, !isCached else { return }
+                    downloadTrigger += 1
+                    Task { await downloads.download(track: track) }
+                } label: {
+                    Label(isCached ? "已缓存" : "缓存", systemImage: isCached ? "checkmark.circle.fill" : "arrow.down.circle")
+                }
+                .disabled(track == nil || isCached)
+
+                Button {
+                    guard canSwitchMode, !switchingMode else { return }
+                    setPlaybackMode(isMV ? .music : .mv)
+                } label: {
+                    Label(
+                        isMV ? "切回音乐" : "切换 MV",
+                        systemImage: isMV ? "headphones" : "play.rectangle")
+                }
+                .disabled(!canSwitchMode || switchingMode)
+            }
+
             Section("歌词") {
                 Button {
                     showLyrics = true
@@ -1273,7 +1555,7 @@ struct NowPlayingView: View {
         }
         // sheet 与 fullScreenCover 不能同时呈现；有 sheet 时不消费 key，
         // 留待 sheet 关闭后再次旋转仍可触发。
-        guard !showLyrics, !showFavoriteFolders, !showUPPlaylists else { return }
+        guard !showLyrics, !showQueue, !showFavoriteFolders, !showUPPlaylists else { return }
         guard landscapeMVFullscreenKey?.matches(current) != true else { return }
         landscapeMVFullscreenKey = current.key
         showMVFullscreen = true
@@ -1962,7 +2244,7 @@ struct NowPlayingView: View {
     }
 
     private var isRecommendationContextVisible: Bool {
-        queuePresentationState.isExpanded && bottomContextTab == .recommendations
+        showQueue || (queuePresentationState.isExpanded && bottomContextTab == .recommendations)
     }
 
     private func ensureRecommendationsLoadedIfVisible() {

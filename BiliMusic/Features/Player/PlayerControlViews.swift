@@ -1,3 +1,5 @@
+import AVKit
+import MediaPlayer
 import SwiftUI
 
 // MARK: - Playback Controls
@@ -247,6 +249,47 @@ enum ProgressScrubMath {
     static func clampedTime(_ time: Double, duration: Double) -> Double {
         guard time.isFinite, duration.isFinite, duration > 0 else { return 0 }
         return min(max(time, 0), duration)
+    }
+}
+
+// MARK: - System Media Controls
+
+/// Uses the same system volume control as the Now Playing experience.
+struct SystemVolumeSlider: UIViewRepresentable {
+    func makeUIView(context: Context) -> MPVolumeView {
+        let view = MPVolumeView(frame: .zero)
+        view.showsRouteButton = false
+        view.showsVolumeSlider = true
+        configure(view)
+        return view
+    }
+
+    func updateUIView(_ uiView: MPVolumeView, context: Context) {
+        configure(uiView)
+    }
+
+    private func configure(_ view: MPVolumeView) {
+        view.tintColor = UIColor.white.withAlphaComponent(0.92)
+        guard let slider = view.subviews.compactMap({ $0 as? UISlider }).first else { return }
+        slider.minimumTrackTintColor = UIColor.white.withAlphaComponent(0.92)
+        slider.maximumTrackTintColor = UIColor.white.withAlphaComponent(0.26)
+        slider.thumbTintColor = .white
+    }
+}
+
+/// Keeps AirPlay routing in the system-owned picker rather than recreating it.
+struct SystemRoutePicker: UIViewRepresentable {
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let picker = AVRoutePickerView(frame: .zero)
+        picker.prioritizesVideoDevices = false
+        picker.tintColor = UIColor.white.withAlphaComponent(0.72)
+        picker.activeTintColor = .white
+        return picker
+    }
+
+    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {
+        uiView.tintColor = UIColor.white.withAlphaComponent(0.72)
+        uiView.activeTintColor = .white
     }
 }
 
