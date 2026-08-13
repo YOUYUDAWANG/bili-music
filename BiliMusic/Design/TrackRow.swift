@@ -172,7 +172,7 @@ struct TrackRow: View {
                 trailingControlSize: 44,
                 progressScale: 0.84,
                 verticalPadding: 5,
-                horizontalPadding: 8,
+                horizontalPadding: 0,
                 minHeight: nil)
         case .prominent:
             return Metrics(
@@ -189,7 +189,7 @@ struct TrackRow: View {
                 trailingControlSize: 36,
                 progressScale: 0.74,
                 verticalPadding: 8,
-                horizontalPadding: 10,
+                horizontalPadding: 0,
                 minHeight: 58)
         case .player:
             return Metrics(

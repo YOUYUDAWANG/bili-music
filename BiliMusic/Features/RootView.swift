@@ -114,7 +114,7 @@ struct RootView: View {
 
     private var baseTabs: some View {
         TabView(selection: $selectedTab) {
-            Tab("推荐", systemImage: "music.note.house", value: 0) {
+            Tab("音乐", systemImage: "square.grid.2x2", value: 0) {
                 HomeView(showSettings: $showSettings)
             }
 

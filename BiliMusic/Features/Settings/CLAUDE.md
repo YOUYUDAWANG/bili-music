@@ -2,7 +2,7 @@
 
 ## 模块职责
 
-设置页面：账号登录/登出、推荐种子收藏夹、播放/下载音质、缓存策略、MV 偏好和播放历史管理。
+设置页面：账号登录/登出、首页音乐收藏夹、播放/下载音质、缓存策略、MV 偏好和播放历史管理。
 
 ## 入口与启动
 
@@ -19,7 +19,7 @@
 | 区段 | 选项 | 存储 |
 |------|------|------|
 | 账号 | 扫码登录 / 退出登录 | Keychain (CookieStore) |
-| 推荐 | 推荐种子收藏夹选择器 | `UserDefaults.recommendFolderId` |
+| 音乐资料库 | 首页音乐收藏夹选择器 | `UserDefaults.recommendFolderId` |
 | 音质 | 播放音质、下载音质 | `UserDefaults.playbackQuality` / `downloadQuality` |
 | 缓存 | 自动缓存开关 | `UserDefaults.autoCache` |
 | 播放 | Wi-Fi 优先 MV、播放历史入口 | `UserDefaults.preferMVOnWiFi` |
@@ -40,7 +40,7 @@
 - `CookieStore` — 登录态管理。
 - `BiliClient.qrCodeGenerate()` / `qrCodePoll(key:)` — 扫码登录接口。
 - `BiliClient.myInfo()` — 登录后获取用户名。
-- `BiliClient.favFolders()` — 推荐种子收藏夹列表。
+- `BiliClient.favFolders()` — 首页音乐收藏夹列表。
 - `UserDefaults` — 各偏好设置的持久化存储。
 - `CIFilter.qrCodeGenerator()` — 二维码生成（CoreImage）。
 

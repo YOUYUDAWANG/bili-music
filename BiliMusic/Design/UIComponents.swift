@@ -14,9 +14,8 @@ struct MiniPlayerControlButtonStyle: ButtonStyle {
 struct MusicRowButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.985 : 1)
-            .opacity(configuration.isPressed ? 0.78 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .opacity(configuration.isPressed ? 0.62 : 1)
+            .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
     }
 }
 
@@ -63,38 +62,19 @@ struct MusicStatusBlock<ActionLabel: View>: View {
     var action: (() -> Void)?
 
     var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: systemImage)
-                .font(.system(size: 30, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 52, height: 52)
-                .background(AppTheme.secondaryBackground, in: Circle())
-
-            VStack(spacing: 6) {
-                Text(title)
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                Text(message)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
+        ContentUnavailableView {
+            Label(title, systemImage: systemImage)
+        } description: {
+            Text(message)
+        } actions: {
             if let action {
                 Button(action: action) {
                     actionLabel()
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .padding(.horizontal, 16)
-                        .frame(height: 36)
-                        .background(AppTheme.secondaryBackground, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderedProminent)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 220)
-        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity, minHeight: 240)
     }
 }
 

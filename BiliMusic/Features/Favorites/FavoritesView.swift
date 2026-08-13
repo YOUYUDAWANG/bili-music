@@ -11,37 +11,25 @@ struct FavoritesView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    if let errorMessage {
-                        Text(errorMessage)
-                            .foregroundStyle(AppTheme.error)
-                            .font(.caption)
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 10)
-                    }
-                    ForEach(Array(folders.enumerated()), id: \.element.id) { index, folder in
-                        NavigationLink(value: folder.id) {
-                            favoriteFolderRow(folder)
-                        }
-                        .buttonStyle(MusicRowButtonStyle())
-                        .simultaneousGesture(TapGesture().onEnded {
-                            FavoriteManager.shared.remember(folderId: folder.id, title: folder.title)
-                        })
-
-                        if index != folders.count - 1 {
-                            Divider()
-                                .padding(.leading, 76)
-                        }
-                    }
+            List {
+                if let errorMessage {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(AppTheme.error)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 96)
+
+                ForEach(folders) { folder in
+                    NavigationLink(value: folder.id) {
+                        favoriteFolderRow(folder)
+                    }
+                    .simultaneousGesture(TapGesture().onEnded {
+                        FavoriteManager.shared.remember(folderId: folder.id, title: folder.title)
+                    })
+                }
             }
-            .background(AppTheme.groupedBackground)
+            .listStyle(.plain)
             .navigationTitle("收藏夹")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(.large)
             .navigationDestination(for: Int.self) { folderId in
                 FavFolderDetailView(
                     folderId: folderId,
@@ -100,11 +88,8 @@ struct FavoritesView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, 4)
         .contentShape(Rectangle())
     }
 
@@ -153,89 +138,65 @@ struct FavFolderDetailView: View {
     @State private var trackTapTrigger = 0
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                // 首屏失败时在顶部提示;分页失败改在底部展示(用户正停在列表底部)
-                if let errorMessage, tracks.isEmpty {
-                    Text(errorMessage)
-                        .foregroundStyle(AppTheme.error)
-                        .font(.caption)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 10)
-                }
-                ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                    Button {
-                        trackTapTrigger += 1
-                        Task { await engine.play(tracks: tracks, startAt: index) }
-                    } label: {
-                        TrackRow(track: track, isPlaying: engine.current.map { track.key.matches($0) } ?? false)
-                    }
-                    .buttonStyle(MusicRowButtonStyle())
-                    .contextMenu {
-                        Button {
-                            Task { await engine.playRadio(seed: track) }
-                        } label: {
-                            Label("电台播放", systemImage: PlayerEngine.QueueMode.radio.icon)
-                        }
-                        Button {
-                            Task { await engine.play(tracks: tracks, startAt: index, queueMode: .shuffle) }
-                        } label: {
-                            Label("随机播放这个收藏夹", systemImage: PlayerEngine.QueueMode.shuffle.icon)
-                        }
-                    }
-                    .onAppear {
-                        if track == tracks.last { Task { await loadMore() } }
-                    }
+        List {
+            if let errorMessage, tracks.isEmpty {
+                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(AppTheme.error)
+            }
 
-                    if index != tracks.count - 1 {
-                        Divider()
-                            .padding(.leading, 82)
+            ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                Button {
+                    trackTapTrigger += 1
+                    Task { await engine.play(tracks: tracks, startAt: index) }
+                } label: {
+                    TrackRow(track: track, isPlaying: engine.current.map { track.key.matches($0) } ?? false)
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    Button {
+                        Task { await engine.playRadio(seed: track) }
+                    } label: {
+                        Label("电台播放", systemImage: PlayerEngine.QueueMode.radio.icon)
+                    }
+                    Button {
+                        Task { await engine.play(tracks: tracks, startAt: index, queueMode: .shuffle) }
+                    } label: {
+                        Label("随机播放这个收藏夹", systemImage: PlayerEngine.QueueMode.shuffle.icon)
                     }
                 }
-                if loading {
-                    ProgressView()
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 18)
-                } else if let errorMessage, !tracks.isEmpty {
-                    // 分页失败:在底部就地提示并可重试(参照搜索页 paginationControl 的样式)
-                    VStack(spacing: 8) {
-                        Text("加载更多失败")
-                            .font(.caption.weight(.semibold))
-                        Text(errorMessage)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                        Button {
-                            Task { await loadMore() }
-                        } label: {
-                            Text("重试加载")
-                                .font(.subheadline.weight(.semibold))
-                                .frame(maxWidth: .infinity, minHeight: 38)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, minHeight: 84)
-                    .background(AppTheme.background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                } else if hasMore, !tracks.isEmpty {
-                    // 连跳空页达到上限时 onAppear 不会对最后一行重新触发,提供手动继续入口
-                    Button {
-                        Task { await loadMore() }
-                    } label: {
-                        Text("加载更多")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .background(AppTheme.background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
+                .onAppear {
+                    if track == tracks.last { Task { await loadMore() } }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 96)
+
+            if loading {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                }
+            } else if let errorMessage, !tracks.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("加载更多失败", systemImage: "exclamationmark.arrow.triangle.2.circlepath")
+                        .font(.headline)
+                    Text(errorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Button("重试加载") {
+                        Task { await loadMore() }
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .padding(.vertical, 6)
+            } else if hasMore, !tracks.isEmpty {
+                Button("加载更多", systemImage: "arrow.down.circle") {
+                    Task { await loadMore() }
+                }
+            }
         }
+        .listStyle(.plain)
         .sensoryFeedback(.intent(.lightImpact), trigger: trackTapTrigger)
-        .background(AppTheme.groupedBackground)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .overlay {

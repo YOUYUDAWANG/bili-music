@@ -425,7 +425,7 @@ final class PlayerChromeUITests: XCTestCase {
     }
 
     @MainActor
-    func testTappingRecommendationKeepsHomeListStable() throws {
+    func testTappingCoverKeepsMusicLibraryStable() throws {
         try assertFixtureHomeRowStableWhileStartingPlayback()
     }
 
@@ -505,15 +505,15 @@ final class PlayerChromeUITests: XCTestCase {
     @MainActor
     private func assertFixtureHomeRowStableWhileStartingPlayback(rowIdentifier: String = "homeTrackRow0") throws {
         let firstRow = app.buttons[rowIdentifier]
-        XCTAssertTrue(firstRow.waitForExistence(timeout: 5), "Fixture recommendation row should be visible.")
+        XCTAssertTrue(firstRow.waitForExistence(timeout: 5), "Fixture cover should be visible.")
         let frameBefore = firstRow.frame
 
         firstRow.tap()
 
         let miniPlayer = element("miniPlayer")
         XCTAssertTrue(miniPlayer.waitForExistence(timeout: 3), "Tapping a recommendation should start the fixture player.")
-        XCTAssertTrue(firstRow.waitForExistence(timeout: 2), "The recommendation list should not disappear after tapping a song.")
-        XCTAssertEqual(firstRow.frame.minY, frameBefore.minY, accuracy: 12, "The recommendation list should not jump after tapping a song.")
+        XCTAssertTrue(firstRow.waitForExistence(timeout: 2), "The cover library should not disappear after tapping a song.")
+        XCTAssertEqual(firstRow.frame.minY, frameBefore.minY, accuracy: 12, "The cover library should not jump after tapping a song.")
     }
 
     @MainActor

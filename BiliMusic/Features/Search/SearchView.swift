@@ -28,12 +28,12 @@ struct SearchView: View {
                     .padding(.bottom, 28)
             }
             .accessibilityIdentifier("searchList")
-            .background(AppTheme.groupedBackground.ignoresSafeArea())
+            .background(AppTheme.background.ignoresSafeArea())
             .navigationTitle("搜索")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(.large)
             .searchable(
                 text: $query,
-                placement: .navigationBarDrawer(displayMode: .automatic),
+                placement: .automatic,
                 prompt: "歌名或艺人"
             ) {
                 searchSuggestions
@@ -165,35 +165,43 @@ struct SearchView: View {
         if !terms.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 MusicSectionHeader(title: "最近搜索")
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(terms, id: \.self) { term in
-                            Button {
-                                query = term
-                                submitSearch()
-                            } label: {
-                                Label(term, systemImage: "clock")
-                                    .font(.subheadline)
-                                    .lineLimit(1)
-                                    .padding(.horizontal, 12)
-                                    .frame(height: 34)
-                                    .background(AppTheme.background, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                            }
-                            .buttonStyle(.plain)
-                        }
-
-                        Button(role: .destructive) {
-                            store.clearHistory()
+                VStack(spacing: 0) {
+                    ForEach(Array(terms.prefix(8).enumerated()), id: \.element) { index, term in
+                        Button {
+                            query = term
+                            submitSearch()
                         } label: {
-                            Image(systemName: "trash")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 34, height: 34)
-                                .background(AppTheme.background, in: Circle())
+                            HStack(spacing: 12) {
+                                Image(systemName: "clock")
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 22)
+                                Text(term)
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                Spacer()
+                                Image(systemName: "arrow.up.left")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .frame(minHeight: 46)
+                            .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(MusicRowButtonStyle())
+
+                        if index != min(terms.count, 8) - 1 {
+                            Divider()
+                                .padding(.leading, 34)
+                        }
                     }
-                    .padding(.horizontal, 1)
+
+                    Button(role: .destructive) {
+                        store.clearHistory()
+                    } label: {
+                        Label("清除搜索历史", systemImage: "trash")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(minHeight: 46)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -213,7 +221,7 @@ struct SearchView: View {
         if !tracks.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 MusicSectionHeader(title: title, subtitle: subtitle)
-                LazyVStack(spacing: 8) {
+                LazyVStack(spacing: 0) {
                     ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
                         Button {
                             searchResultTapTrigger += 1
@@ -227,6 +235,11 @@ struct SearchView: View {
                         }
                         .contentShape(Rectangle())
                         .buttonStyle(MusicRowButtonStyle())
+
+                        if index != tracks.indices.last {
+                            Divider()
+                                .padding(.leading, 84)
+                        }
                     }
                 }
             }
@@ -254,15 +267,11 @@ struct SearchView: View {
                             }
                         }
                     } label: {
-                        Text("重试加载")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity, minHeight: 38)
+                        Label("重试加载", systemImage: "arrow.clockwise")
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.bordered)
                 }
-                .padding(14)
-                .frame(maxWidth: .infinity, minHeight: 84)
-                .background(AppTheme.background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .frame(maxWidth: .infinity, minHeight: 96)
             } else if store.hasMoreResults {
                 Button {
                     Task {
@@ -271,12 +280,9 @@ struct SearchView: View {
                         }
                     }
                 } label: {
-                    Text("加载更多")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(AppTheme.background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    Label("加载更多", systemImage: "arrow.down.circle")
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bordered)
             } else {
                 Text("没有更多结果")
                     .font(.caption)

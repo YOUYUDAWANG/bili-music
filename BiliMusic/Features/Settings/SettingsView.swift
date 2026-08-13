@@ -1,11 +1,12 @@
 import CoreImage.CIFilterBuiltins
 import SwiftUI
 
-/// 设置页：账号登录/登出、推荐种子夹、音质、缓存、播放偏好、播放历史入口。
+/// 设置页：账号登录/登出、首页音乐收藏夹、音质、缓存、播放偏好、播放历史入口。
 struct SettingsView: View {
-    /// 与 RecommendationEngine.swift 中读取的 UserDefaults key 保持一致(后续统一收敛到此常量)
+    /// 保留旧 key，已有用户升级后无需重新选择收藏夹。
     static let recommendFolderKey = "recommendFolderId"
 
+    @Environment(\.dismiss) private var dismiss
     @Environment(PlayerEngine.self) private var engine
     @State private var loggedIn = CookieStore.isLoggedIn
     @State private var username: String?
@@ -25,8 +26,8 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section("账号") {
+            Form {
+                Section {
                     if loggedIn {
                         LabeledContent("已登录", value: username ?? "…")
                         Button("退出登录", role: .destructive) {
@@ -40,25 +41,29 @@ struct SettingsView: View {
                         }
                     } else {
                         Button("扫码登录 B 站账号") { showLogin = true }
-                        Text("登录后可获得更高音质、个性化推荐和收藏夹")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("账号")
+                } footer: {
+                    if !loggedIn {
+                        Text("登录后可获得更高音质、收藏夹和封面资料库。")
                     }
                 }
                 if loggedIn {
-                    Section("推荐") {
-                        Picker("推荐种子收藏夹", selection: $recommendFolderId) {
+                    Section {
+                        Picker("首页音乐收藏夹", selection: $recommendFolderId) {
                             Text("默认收藏夹").tag(0)
                             ForEach(favFolders) { folder in
-                                Text("\(folder.title)(\(folder.media_count))").tag(folder.id)
+                                Text("\(folder.title)（\(folder.media_count)）").tag(folder.id)
                             }
                         }
-                        Text("首页推荐会从这个收藏夹随机取歌当种子,建议选你的音乐收藏夹")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    } header: {
+                        Text("音乐资料库")
+                    } footer: {
+                        Text("首页会直接展示这个收藏夹的封面。建议选择一个只保存音乐的收藏夹。")
                     }
                 }
-                Section("音质") {
+                Section {
                     Picker("播放音质", selection: $playbackQuality) {
                         ForEach(BiliClient.qualityOptions, id: \.id) { option in
                             Text(option.title).tag(option.id)
@@ -69,11 +74,12 @@ struct SettingsView: View {
                             Text(option.title).tag(option.id)
                         }
                     }
-                    Text("\"自动(最高)\"含 Hi-Res 无损(需大会员);流量紧张选低档")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("音质")
+                } footer: {
+                    Text("“自动（最高）”会选择账号可用的最高音质，包括可能需要大会员的 Hi-Res。")
                 }
-                Section("CDN 线路") {
+                Section {
                     Picker("音频 CDN", selection: $preferredAudioCDNHost) {
                         Text("自动").tag("")
                         if !preferredAudioCDNHost.isEmpty,
@@ -126,35 +132,40 @@ struct SettingsView: View {
                         .buttonStyle(.plain)
                         .disabled(!row.reachable)
                     }
-                    Text("选择某个 host 后,若本次 playurl 返回该 CDN 会优先使用;播放失败或慢启动仍会自动切换备用线路")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("CDN 线路")
+                } footer: {
+                    Text("指定线路仅在本次播放地址包含该 CDN 时优先使用；播放失败或启动缓慢时仍会自动切换备用线路。")
                 }
-                Section("缓存") {
+                Section {
                     Toggle("自动缓存播放过的歌曲", isOn: $autoCache)
-                    Text("在线播放的歌曲会在后台存到本地,下次播放不再消耗流量")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("缓存")
+                } footer: {
+                    Text("在线播放的歌曲会在后台保存到本地，下次播放不再消耗流量。")
                 }
-                Section("播放") {
+                Section {
                     Toggle("连接 Wi-Fi 时优先播放 MV", isOn: $preferMVOnWiFi)
-                    Text("进入后台会自动切回纯音乐流,保持锁屏播放体验")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                     Toggle("清洗列表标题", isOn: $cleanListTitles)
-                    Text("实验功能。打开后会尝试去掉 4K、修复、官方 MV 等噪声词,并从标题提取歌手;关闭后显示 B 站原标题和 UP 主")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                     NavigationLink {
                         PlaybackHistoryView()
                     } label: {
                         Label("播放历史", systemImage: "clock.arrow.circlepath")
                     }
+                } header: {
+                    Text("播放")
+                } footer: {
+                    Text("进入后台时 MV 会切回纯音乐流。标题清洗是实验功能，关闭时显示 B 站原标题和 UP 主。")
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(AppTheme.groupedBackground)
+            .formStyle(.grouped)
             .navigationTitle("设置")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
             .sheet(isPresented: $showLogin) {
                 QRLoginView {
                     FavoriteManager.shared.resetForAuthenticationChange()
@@ -195,7 +206,7 @@ struct SettingsView: View {
         username = loadedUsername
     }
 
-    /// 拉取收藏夹列表，用于「推荐种子收藏夹」选择器。
+    /// 拉取收藏夹列表，用于首页音乐资料库选择器。
     private func loadFolders() async {
         guard loggedIn, let accountID = CookieStore.mid else { return }
         do {
@@ -345,8 +356,6 @@ private struct PlaybackHistoryView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
-        .background(AppTheme.groupedBackground)
         .navigationTitle("播放历史")
         .task {
             await history.loadIfNeeded()
@@ -390,6 +399,7 @@ struct QRLoginView: View {
         }
         .padding(40)
         .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
         .onAppear { startLogin() }
         .onDisappear {
             loginAttemptID = UUID()

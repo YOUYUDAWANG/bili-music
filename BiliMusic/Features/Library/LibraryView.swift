@@ -48,16 +48,9 @@ struct LibraryView: View {
         let entries = visibleEntries
         let isFiltered = !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         NavigationStack {
-            ScrollView {
+            List {
                 if !cache.entries.isEmpty {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        CacheSummaryView(count: entries.count,
-                                         totalCount: cache.entries.count,
-                                         bytes: entries.reduce(0) { $0 + $1.fileSize },
-                                         isFiltered: isFiltered)
-                        .padding(.horizontal, 2)
-                        .padding(.bottom, 12)
-
+                    Section {
                         ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
                             Button {
                                 let tracks = entries.map(\.track)
@@ -65,7 +58,7 @@ struct LibraryView: View {
                             } label: {
                                 cacheRow(entry)
                             }
-                            .buttonStyle(MusicRowButtonStyle())
+                            .buttonStyle(.plain)
                             .contextMenu {
                                 Button {
                                     Task { await engine.playRadio(seed: entry.track) }
@@ -85,21 +78,26 @@ struct LibraryView: View {
                                     Label("删除缓存", systemImage: "trash")
                                 }
                             }
-
-                            if index != entries.count - 1 {
-                                Divider()
-                                    .padding(.leading, 82)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    cache.remove(entry)
+                                } label: {
+                                    Label("删除", systemImage: "trash")
+                                }
                             }
                         }
+                    } header: {
+                        CacheSummaryView(count: entries.count,
+                                         totalCount: cache.entries.count,
+                                         bytes: entries.reduce(0) { $0 + $1.fileSize },
+                                         isFiltered: isFiltered)
+                            .textCase(nil)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 14)
-                    .padding(.bottom, 96)
                 }
             }
-            .background(AppTheme.groupedBackground)
+            .listStyle(.plain)
             .navigationTitle("缓存")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(.large)
             .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "搜索缓存")
             .task {
                 await cache.loadIfNeeded()
@@ -119,8 +117,9 @@ struct LibraryView: View {
                             }
                         }
                     } label: {
-                        Label("排序与操作", systemImage: "ellipsis.circle")
+                        Image(systemName: "ellipsis.circle")
                     }
+                    .accessibilityLabel("排序与操作")
                     .disabled(cache.entries.isEmpty)
                 }
             }

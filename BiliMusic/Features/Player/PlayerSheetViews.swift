@@ -24,7 +24,6 @@ struct LyricsSheetView: View {
                     .padding(.horizontal, 24)
                     .padding(.vertical, 28)
                 }
-                .background(AppTheme.background)
                 .navigationTitle("歌词")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -131,9 +130,8 @@ struct MVFullscreenView: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 12)
                 .frame(height: 42)
-                .background(.black.opacity(0.48), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.glass)
             .simultaneousGesture(TapGesture().onEnded { revealChrome() })
             .accessibilityLabel("MV 画质")
             .accessibilityIdentifier("mvFullscreenQualityButton")
@@ -147,9 +145,8 @@ struct MVFullscreenView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 42, height: 42)
-                    .background(.black.opacity(0.48), in: Circle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.glass)
             .accessibilityLabel("退出全屏 MV")
             .accessibilityIdentifier("mvFullscreenCloseButton")
         }
@@ -215,8 +212,6 @@ struct FavoriteFolderPickerView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
-            .background(AppTheme.groupedBackground)
             .navigationTitle("选择收藏夹")
             .navigationBarTitleDisplayMode(.inline)
             .overlay {
@@ -241,6 +236,7 @@ struct FavoriteFolderPickerView: View {
 
 struct UPPlaylistsView: View {
     @Environment(PlayerEngine.self) private var engine
+    @Environment(\.dismiss) private var dismiss
     @State private var playlists: [BiliClient.UPPlaylist] = []
     @State private var loading = false
     @State private var errorMessage: String?
@@ -266,8 +262,6 @@ struct UPPlaylistsView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
-            .background(AppTheme.groupedBackground)
             .navigationTitle("合集")
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: BiliClient.UPPlaylist.self) { playlist in
@@ -276,6 +270,11 @@ struct UPPlaylistsView: View {
                         playlist: playlist,
                         ownerMid: sourceOwnerMid,
                         artist: sourceArtist)
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
                 }
             }
             .overlay {
@@ -364,8 +363,6 @@ struct UPPlaylistDetailView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
-        .background(AppTheme.groupedBackground)
         .navigationTitle(playlist.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
