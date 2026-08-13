@@ -183,7 +183,7 @@ struct MagazineArtwork: View {
     }
 }
 
-/// 收藏夹目录封面的 2x2 拼贴。少于四张时用克制的系统占位补齐版面。
+/// 收藏夹目录封面的自适应拼贴：按 0...4 张内容重排，不用空白格凑版面。
 struct MagazineArtworkCollage: View {
     let urls: [URL]
 
