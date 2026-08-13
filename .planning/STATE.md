@@ -6,9 +6,9 @@ current_phase: 4
 current_phase_name: Interface Cohesion and Search Polish
 status: complete
 stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-07-25T00:00:00Z"
-last_activity: 2026-07-25
-last_activity_desc: Completed post-milestone deep stability review and P1 hardening
+last_updated: "2026-08-14T00:00:00Z"
+last_activity: 2026-08-14
+last_activity_desc: Reframed Home as a cover-driven private music library
 progress:
   total_phases: 4
   completed_phases: 4
@@ -24,7 +24,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-27)
 
 **Core value:** 让音乐尽快、稳定地响起来；当功能冲突时，播放启动速度和不中断播放优先于推荐、歌词、MV、UI 动效和其他增强体验。
-**Current focus:** Post-milestone stabilization audit — preserve first sound and playback correctness
+**Current focus:** Preserve first sound and playback correctness while making the cover library the primary entry experience
 
 ## Current Position
 
@@ -129,6 +129,8 @@ Recent decisions affecting current work:
 - [Phase 03-01]: The UI fixture uses mini-player-relative drag coordinates to avoid simulator-global coordinate drift while preserving deliberate-open and shallow-cancel coverage.
 - [Current player model]: Queue, playlist context, and current-track recommendations live in one bottom drawer; the earlier horizontal side-page navigation was removed to avoid gesture conflicts.
 - [Current player model]: MV/music switching remains in the persistent toolbar and does not block initial audio playback.
+- [Current Home model]: Home no longer runs discovery recommendations; it renders a persisted favorite-cover snapshot first, then merges cache/history and refreshes the selected Bilibili folder in the background.
+- [Current Home model]: Recommendation remains a secondary player/radio capability and is intentionally absent from the app-launch surface.
 - [Phase 03-player-interaction-and-regression-coverage]: Recommendation tap stability is protected by a regression assertion that suppression is assigned before related playback starts.
 - [Current player model]: LNPopup owns mini/full vertical presentation; queue, playlist, and recommendation list bodies keep their own scrolling inside the bottom drawer.
 - [Phase 03-03]: Progress scrub owns the full progress block, including label hit targets, so page swipes cannot steal scrub gestures.
