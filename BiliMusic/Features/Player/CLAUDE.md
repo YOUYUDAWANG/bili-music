@@ -14,7 +14,6 @@
 
 ### NowPlayingView
 
-- `onDismiss: (() -> Void)?` — 关闭回调（RootView 中使用）。
 
 ### 页面组成
 

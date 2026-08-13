@@ -155,6 +155,21 @@ final class PlayerGesturePolicyTests: XCTestCase {
         XCTAssertEqual(ProgressScrubMath.progress(locationX: 120, trackWidth: 0), 0)
     }
 
+    func testProgressScrubRequiresClearHorizontalIntent() {
+        XCTAssertTrue(ProgressScrubMath.shouldBeginScrub(
+            translation: CGSize(width: 18, height: 4)
+        ))
+        XCTAssertFalse(ProgressScrubMath.shouldBeginScrub(
+            translation: CGSize(width: 4, height: 18)
+        ))
+        XCTAssertFalse(ProgressScrubMath.shouldBeginScrub(
+            translation: CGSize(width: 10, height: 8)
+        ))
+        XCTAssertFalse(ProgressScrubMath.shouldBeginScrub(
+            translation: CGSize(width: 6, height: 0)
+        ))
+    }
+
     func testHorizontalListDragSuppressesRowTapWithoutBlockingVerticalScroll() {
         XCTAssertFalse(PlayerGesturePolicy.shouldSuppressListRowTap(
             translation: CGSize(width: 6, height: 2),

@@ -6,6 +6,9 @@ options:
 fileGroups:
   # 仅显示在 Xcode Project Navigator，不加入任何 target 或 App bundle。
   - docs
+packages:
+  LNPopupUI:
+    path: Vendor/LNPopupUI
 targets:
   BiliMusic:
     type: application
@@ -14,6 +17,8 @@ targets:
       - path: BiliMusic
         excludes:
           - "**/CLAUDE.md"
+    dependencies:
+      - package: LNPopupUI
     # 签名 Team ID 不入库：各自维护本地 Local.xcconfig（见 Local.xcconfig.example）
     configFiles:
       Debug: Local.xcconfig
@@ -32,6 +37,7 @@ targets:
       properties:
         UILaunchScreen: {}
         UIBackgroundModes: [audio]
+        CADisableMinimumFrameDurationOnPhone: true
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
   BiliMusicTests:
