@@ -13,6 +13,7 @@ enum WBISigner {
     ]
 
     private static var cachedKey: (key: String, fetchedAt: Date)?
+    private static var inFlightKeyTask: Task<String, Error>?
 
     /// 对参数签名,返回完整 query string(含 wts 和 w_rid)。
     static func sign(_ params: [String: String]) async throws -> String {
@@ -20,7 +21,11 @@ enum WBISigner {
         var all = params
         all["wts"] = String(Int(Date().timeIntervalSince1970))
         let query = all.sorted { $0.key < $1.key }
-            .map { "\(encode($0.key))=\(encode($0.value))" }
+            .map { key, value in
+                // 参考实现要求:签名前把 value 中的 !'()* 五个字符**删除**（不是编码）
+                let filtered = value.filter { !"!'()*".contains($0) }
+                return "\(encode(key))=\(encode(filtered))"
+            }
             .joined(separator: "&")
         let digest = Insecure.MD5.hash(data: Data((query + mixinKey).utf8))
         let wRid = digest.map { String(format: "%02x", $0) }.joined()
@@ -32,11 +37,35 @@ enum WBISigner {
         _ = try? await mixinKey()
     }
 
+    /// 服务端明确拒绝签名时丢弃旧 key；下一次 sign 会与其他请求共用一次 nav 刷新。
+    static func invalidateCachedKey() {
+        cachedKey = nil
+    }
+
     /// 取（并缓存 12 小时）mixin key：nav 接口的 img/sub key 经 64 位重排表混淆得到。
     private static func mixinKey() async throws -> String {
         if let cached = cachedKey, Date().timeIntervalSince(cached.fetchedAt) < 12 * 3600 {
             return cached.key
         }
+        if let inFlightKeyTask {
+            return try await inFlightKeyTask.value
+        }
+        let task = Task<String, Error> {
+            try await fetchMixinKey()
+        }
+        inFlightKeyTask = task
+        do {
+            let key = try await task.value
+            cachedKey = (key, Date())
+            inFlightKeyTask = nil
+            return key
+        } catch {
+            inFlightKeyTask = nil
+            throw error
+        }
+    }
+
+    private static func fetchMixinKey() async throws -> String {
         // nav 接口未登录时 code=-101,但 data.wbi_img 仍有效,所以不走统一信封校验
         struct Nav: Decodable {
             struct D: Decodable {
@@ -46,15 +75,19 @@ enum WBISigner {
             let data: D
         }
         var req = URLRequest(url: URL(string: "https://api.bilibili.com/x/web-interface/nav")!)
+        req.timeoutInterval = 12
         BiliClient.headers.forEach { req.setValue($1, forHTTPHeaderField: $0) }
         if let cookie = CookieStore.cookie { req.setValue(cookie, forHTTPHeaderField: "Cookie") }
-        let (data, _) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode) else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            throw BiliClient.APIError(code: status, message: "WBI 密钥请求失败")
+        }
         let nav = try JSONDecoder().decode(Nav.self, from: data)
         let raw = keyPart(nav.data.wbi_img.img_url) + keyPart(nav.data.wbi_img.sub_url)
         let chars = Array(raw)
-        let key = String(mixinKeyTable.compactMap { $0 < chars.count ? chars[$0] : nil }.prefix(32))
-        cachedKey = (key, Date())
-        return key
+        return String(mixinKeyTable.compactMap { $0 < chars.count ? chars[$0] : nil }.prefix(32))
     }
 
     /// 从 URL 取文件名主体（去掉目录与扩展名）。

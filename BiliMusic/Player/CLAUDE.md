@@ -2,13 +2,13 @@
 
 ## 模块职责
 
-播放引擎核心。管理音频/视频播放、播放队列、推荐算法、音乐内容判定、网络监测和播放历史。是全局状态的核心。
+播放引擎核心。管理音频/视频播放、播放队列、推荐算法、音乐内容判定、CDN 选择、播放诊断、网络监测和播放历史。是全局状态的核心。
 
 ## 入口与启动
 
 - **文件**: `PlayerEngine.swift`（主入口）
 - `PlayerEngine` 由 `BiliMusicApp` 创建并通过 `.environment(engine)` 注入。
-- 其他文件：`QueueController.swift`, `RecommendationEngine.swift`, `MusicFilter.swift`, `StreamResolver.swift`, `NetworkMonitor.swift`, `PlaybackHistoryStore.swift`
+- 其他文件：`QueueController.swift`, `RecommendationEngine.swift`, `MusicFilter.swift`, `StreamResolver.swift`, `AudioCDNSelector.swift`, `PlaybackDiagnostics.swift`, `NetworkMonitor.swift`, `PlaybackHistoryStore.swift`
 
 ## 对外接口
 
@@ -32,7 +32,6 @@
 | `playRadio(seed:)` | 电台播放 |
 | `playNext()` / `playPrevious()` | 上下曲 |
 | `jump(to:)` | 跳到队列中指定位置 |
-| `removeFromQueue(at:)` | 从队列移除 |
 | `appendToQueue(_:)` | 追加到队列尾部 |
 | `togglePlayPause()` / `play()` / `pause()` | 播放/暂停 |
 | `seek(to:)` | 跳转到指定秒 |
@@ -41,16 +40,20 @@
 | `setPlaybackQuality(_:)` | 切换音质 |
 | `preload(tracks:)` | 批量预取（5 首，无延迟） |
 | `preload(tracks:limit:delay:)` | 批量预取（自定义） |
-| `schedulePreload(_:)` | 单曲预加载（列表滚动时） |
-| `play(bvid:)` | 直接按 BV 号播放（调试） |
+| `play(bvid:)` | `AUTOPLAY_BV` 诊断入口按 BV 号直播放 |
 | `upgradeMVForFullscreen()` | 全屏时提升 MV 画质 |
 | `handleScenePhase(isBackground:)` | 场景切换处理 |
+| `installUITestFixture(tracks:startAt:)` | UI 测试下注入 fixture 队列（`BILIMUSIC_UITEST_FIXTURE=1` 时走此路径，不建真实 AVPlayer 流） |
+
+行为要点：
+- freshRemote 起播失败时会失效 StreamResolver 缓存并重取流重试。
+- repeatOne 自动循环直接 `seek(to: .zero)`，不重建 AVPlayer（避免静音间隙）；item 失效才走完整 `startCurrent` 重启。
+- `tearDownPlayerObservers()` 集中拆除 KVO/时间观察器/通知；`deinit`（非 MainActor）兜底清理，token 只在 init 阶段写入以避开 `@Observable` 访问器。
 
 ### QueueController（static 枚举）
 
-- `nextIndex(mode:queueCount:currentIndex:)` — 计算下一曲下标
-- `appendUnique(_:to:)` — 去重追加
-- `remove(at:from:currentIndex:)` — 删除并维护下标
+- `nextIndex(mode:queueCount:currentIndex:automatic:)` — 计算下一曲下标。repeatOne 下 `automatic: true`（自然播完）返回原下标；手动切歌在队尾回绕到 0（`hasNext` 在单曲循环下恒为 true，锁屏「下一曲」按钮保持可用）。
+- `appendUnique(_:to:)` — 去重追加，返回实际新增的曲目。
 
 ### RecommendationEngine（无状态 struct）
 
@@ -75,6 +78,17 @@
 - `prepareAudio(for:preferredQuality:)` — 准备音频流（补全 cid → 取 playurl → 缓存 90 分钟）
 - `cachedAudio(for:)` — 查内存缓存
 - `invalidateAudio(for:)` — 失效缓存
+
+### AudioCDNSelector（static 枚举）
+
+- 音频 CDN 竞速选择器：对 playurl 返回的多个 CDN 候选 URL 去重（`deduped(_:)`）、并发探测可达性与延迟。
+- 记录 host 健康度（`AudioCDNHostHealth`），优选 host 持久化在 `UserDefaults`（key `preferredAudioCDNHost`）。
+- 测量结果暴露为 `Measurement`（host、毫秒、可达性），OSLog category `cdn`。
+
+### PlaybackDiagnostics
+
+- `PlaybackDiagnosticEvent` — 起播链路诊断事件。checkpoint：tap → currentAssigned → sourceResolved → playerItemCreated → playRequested → firstPlaying。
+- 记录来源（localCache / preparedRemote / freshRemote / mvRemote）、音质、带宽与各阶段耗时，OSLog category `playback-diagnostics`。
 
 ### NetworkMonitor（`@Observable` 单例）
 
@@ -111,11 +125,13 @@
 
 ## 相关文件清单
 
-- `PlayerEngine.swift`（851 行）
+- `PlayerEngine.swift`
 - `QueueController.swift`
 - `RecommendationEngine.swift`
 - `MusicFilter.swift`
 - `StreamResolver.swift`
+- `AudioCDNSelector.swift`
+- `PlaybackDiagnostics.swift`
 - `NetworkMonitor.swift`
 - `PlaybackHistoryStore.swift`
 
@@ -123,4 +139,5 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-27 | 全项目 review 修复 + 文档同步：新增 AudioCDNSelector / PlaybackDiagnostics；QueueController 签名改 `nextIndex(mode:queueCount:currentIndex:automatic:)`（repeatOne 手动切歌队尾回绕）；PlayerEngine freshRemote 重试、repeatOne 免重建、观察器清理、UI 测试 fixture 注入。 |
 | 2026-06-24 | 初始文档创建。 |

@@ -4,44 +4,26 @@ import UIKit
 /// 全局主题。结构参考 Apple Music 的克制层级，品牌强调色使用更耐看的 B 站蓝青。
 enum AppTheme {
     static let brand = Color(red: 0.000, green: 0.631, blue: 0.839)
-    static let brandPressed = Color(red: 0.000, green: 0.541, blue: 0.753)
-    static let brandSoft = Color(red: 0.906, green: 0.973, blue: 1.000)
+    /// 品牌色的柔和背景（正在播放行高亮等）。动态色：
+    /// 浅色模式用近白的浅青，深色模式用低亮度品牌色调，保证 `.secondary` 文字可读。
+    static let brandSoft = Color(uiColor: UIColor { trait in
+        if trait.userInterfaceStyle == .dark {
+            return UIColor(red: 0.055, green: 0.145, blue: 0.180, alpha: 1)
+        }
+        return UIColor(red: 0.906, green: 0.973, blue: 1.000, alpha: 1)
+    })
     static let accent = brand
     static let background = Color(uiColor: .systemBackground)
     static let groupedBackground = Color(uiColor: .systemGroupedBackground)
     static let secondaryBackground = Color(uiColor: .secondarySystemGroupedBackground)
-    static let elevatedBackground = Color(uiColor: .tertiarySystemGroupedBackground)
-    static let rowBackground = Color(uiColor: .secondarySystemGroupedBackground)
-    static let rowPressedBackground = Color(uiColor: .tertiarySystemGroupedBackground)
     static let separator = Color(uiColor: .separator)
     static let label = Color(uiColor: .label)
-    static let secondaryLabel = Color(uiColor: .secondaryLabel)
 
     /// 语义颜色
     static let error = Color.red
     static let success = Color.green
 
-    /// 通用圆角半径
-    static let cardRadius: CGFloat = 12
-    static let controlRadius: CGFloat = 12
-    static let coverRadius: CGFloat = 6
     static let playerCoverRadius: CGFloat = 14
-
-    /// 封面缩略图尺寸
-    static let listCoverSize: CGFloat = 56
-    static let miniCoverWidth: CGFloat = 52
-    static let miniCoverHeight: CGFloat = 30
-
-    /// 没有封面时的中性兜底背景,带很轻的 B 站蓝青品牌感。
-    static let playerGradient = LinearGradient(
-        colors: [
-            brand.opacity(0.18),
-            Color(uiColor: .secondarySystemBackground),
-            Color(uiColor: .systemBackground)
-        ],
-        startPoint: .top,
-        endPoint: .bottom
-    )
 }
 
 struct PlayerArtworkPalette: Equatable {
@@ -50,9 +32,9 @@ struct PlayerArtworkPalette: Equatable {
     let bottom: UIColor
 
     static let fallback = PlayerArtworkPalette(
-        top: UIColor(red: 0.19, green: 0.20, blue: 0.23, alpha: 1),
-        middle: UIColor(red: 0.10, green: 0.11, blue: 0.13, alpha: 1),
-        bottom: UIColor(red: 0.02, green: 0.02, blue: 0.03, alpha: 1)
+        top: UIColor(red: 0.42, green: 0.53, blue: 0.60, alpha: 1),
+        middle: UIColor(red: 0.24, green: 0.32, blue: 0.39, alpha: 1),
+        bottom: UIColor(red: 0.13, green: 0.17, blue: 0.22, alpha: 1)
     )
 
     static func == (lhs: PlayerArtworkPalette, rhs: PlayerArtworkPalette) -> Bool {
@@ -63,13 +45,14 @@ struct PlayerArtworkPalette: Equatable {
 
     static func from(_ image: UIImage?) -> PlayerArtworkPalette {
         guard let base = image?.averageColor else { return .fallback }
-        let readable = base
-            .boostedSaturation(1.22)
-            .limitedBrightness(maximum: 0.44)
+        let ambient = base
+            .boostedSaturation(1.16)
+            .limitedSaturation(minimum: 0.18, maximum: 0.72)
+            .limitedBrightness(minimum: 0.34, maximum: 0.68)
         return PlayerArtworkPalette(
-            top: readable.mixed(with: .white, amount: 0.10),
-            middle: readable.mixed(with: .black, amount: 0.18),
-            bottom: readable.mixed(with: .black, amount: 0.76)
+            top: ambient.mixed(with: .white, amount: 0.24),
+            middle: ambient.mixed(with: UIColor(red: 0.28, green: 0.30, blue: 0.34, alpha: 1), amount: 0.18),
+            bottom: ambient.mixed(with: .black, amount: 0.46)
         )
     }
 
@@ -82,6 +65,19 @@ struct PlayerArtworkPalette: Equatable {
             ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
+        )
+    }
+
+    var glow: RadialGradient {
+        RadialGradient(
+            colors: [
+                Color(uiColor: top).opacity(0.92),
+                Color(uiColor: middle).opacity(0.50),
+                Color.clear
+            ],
+            center: .topLeading,
+            startRadius: 24,
+            endRadius: 520
         )
     }
 }
@@ -161,7 +157,23 @@ private extension UIColor {
         )
     }
 
-    func limitedBrightness(maximum: CGFloat) -> UIColor {
+    func limitedSaturation(minimum: CGFloat = 0.16, maximum: CGFloat) -> UIColor {
+        var hue: CGFloat = 0
+        var saturation: CGFloat = 0
+        var brightness: CGFloat = 0
+        var alpha: CGFloat = 0
+        guard getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha) else {
+            return self
+        }
+        return UIColor(
+            hue: hue,
+            saturation: min(maximum, max(minimum, saturation)),
+            brightness: brightness,
+            alpha: alpha
+        )
+    }
+
+    func limitedBrightness(minimum: CGFloat = 0.18, maximum: CGFloat) -> UIColor {
         var hue: CGFloat = 0
         var saturation: CGFloat = 0
         var brightness: CGFloat = 0
@@ -172,7 +184,7 @@ private extension UIColor {
         return UIColor(
             hue: hue,
             saturation: saturation,
-            brightness: min(maximum, max(0.18, brightness)),
+            brightness: min(maximum, max(minimum, brightness)),
             alpha: alpha
         )
     }

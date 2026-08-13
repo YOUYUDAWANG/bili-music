@@ -7,7 +7,7 @@
 
 | 决策 | 选择 | 原因 |
 |---|---|---|
-| 平台 | iOS 17+, SwiftUI, Swift 5.10+ | 单人开发,最新 API 省代码 |
+| 平台 | iOS 26+, SwiftUI, Swift 5.10+ | 使用 iOS 26 的系统 Tab accessory 等原生界面能力 |
 | 安装方式 | 免费开发者账号 + AltStore 自动续签 | 无付费账号,7 天签名靠 AltStore 续 |
 | 架构 | 单 Module,MVVM,`@Observable` | 自用 app,不做分层框架 |
 | 数据库 | JSON 索引文件(P4 实测够用) | 缓存索引单表,JSON 最简;等 P5 歌单需要关系模型再考虑 SwiftData |
@@ -51,13 +51,17 @@ BiliMusic/
 ├── API/              BiliClient(URLSession 封装)、WBISigner、各接口的请求/响应模型
 ├── Auth/             扫码登录、Cookie 管理(Keychain)
 ├── Player/           PlayerEngine(AVPlayer 封装)、播放模式、播放历史、NowPlaying(锁屏/控制中心)
+│                     AudioCDNSelector(音频 CDN 竞速选择:多候选探测延迟/健康度,优选 host 落 UserDefaults)
+│                     PlaybackDiagnostics(起播链路诊断事件:tap→firstPlaying 各 checkpoint 耗时与来源,OSLog)
 ├── Cache/            CacheStore(JSON 索引)、DownloadManager、本地文件(Documents/audio/{bvid}_{cid}.m4a)
-├── Design/           AppTheme(Apple Music 风格的系统背景/控件色)
+├── Design/           AppTheme(B 站蓝青品牌强调色 + 系统背景/控件色)
+├── Support/          UITestFixtures(BILIMUSIC_UITEST_FIXTURE=1 时注入的确定性曲目数据,UI 测试不走真实网络)
 └── Features/         各页面 View + ViewModel
     ├── Home/         音乐发现(相关推荐/缓存种子/关键词兜底,经 MusicFilter)
     ├── Search/
     ├── Favorites/    收藏夹 + FavoriteManager(短按默认夹/长按选夹)
-    ├── Player/       正在播放页(歌词入口、左右滑队列/推荐列表、音乐/MV 切换)+ mini bar
+    ├── Player/       正在播放页(歌词入口、底部队列/合集/推荐抽屉、音乐/MV 切换)+ mini bar
+    │                 LazyVStack(完整队列按需创建可见行)
     └── Library/      缓存管理
 ```
 
@@ -79,8 +83,9 @@ Track(bvid, cid)
   → CachedAudio 存在? → 本地文件 URL
   → 否则 playurl 现取流 URL → AVURLAsset(options: [AVURLAssetHTTPHeaderFieldsKey: headers])
   → AVPlayer
-播放器 → 左滑/右滑三页:左侧当前播放列表,中间当前歌曲,右侧当前歌曲的推荐歌曲列表
+播放器 → 底部两段式抽屉:在当前队列、所属合集和当前歌曲推荐之间切换
 MV 切换 → 音乐模式下预取当前歌曲视频 URL,切换时优先复用缓存 URL
+Wi-Fi 优先 MV → 先启动音频保证首响,视频流准备完成且 app 在前台时再无缝切换
 MV 全屏 → 可点播放器内全屏按钮;手机横屏时自动用视频铺满播放器
 播完 → 按 QueueMode 推进:顺序 / 随机 / 单曲循环 / 电台
 电台模式 → 立即用当前 Track 的 related 接口取下一首(按音乐过滤),不等当前列表播完
@@ -91,7 +96,7 @@ MV 全屏 → 可点播放器内全屏按钮;手机横屏时自动用视频铺�
 ### 缓存策略
 
 - 整曲下载(不做边播边缓存):playurl 取最高音质 → URLSession downloadTask → 移入 Documents/audio/
-- 手动下载 + 可选"自动缓存播放过的曲目"开关
+- 手动下载 + 可选"自动缓存播放过的曲目"开关;自动缓存延后到首响之后执行
 - 缓存管理页:按大小排序、单删、清空
 
 ## 路线图
@@ -101,7 +106,7 @@ MV 全屏 → 可点播放器内全屏按钮;手机横屏时自动用视频铺�
 - [x] **P3 可用**:扫码登录、搜索页、播放队列 + 正在播放页、相关推荐自动连播(电台)。真机验证:扫码登录、搜索播放、锁屏播放/控制均稳定
 - [x] **P4 缓存**:整曲下载(带进度)、自动缓存开关、缓存优先播放(离线可用)、缓存管理页(删除/清空/占用)。模拟器验证:自动缓存落盘 + 索引正确、重启后走本地文件播放
 - [x] **P5 推荐与收藏**:收藏 tab(收藏夹→歌单,分页、过滤失效稿件)、推荐 tab(推荐流按时长 1~11 分钟过滤,换一批);另修复下载慢(改 URLSessionDownloadTask,3MB 约 1~2 秒)、新增音质选择(设置页,同时作用于播放与下载,缓存条目记录音质)。真机验证:本地缓存与离线播放稳定
-- [~] **P6 打磨**:已实现并通过模拟器构建 — UI 向 Apple Music 看齐(系统背景 + grouped 列表)、队列管理、播放器左/中/右三页(队列/当前歌曲/推荐)、顺序/随机/单曲循环/电台播放模式、收藏(短按默认夹/长按选夹)、在线歌词入口(LRCLIB 匹配到才显示)、音乐/MV 切换、MV 全屏/横屏铺满、Wi-Fi 优先 MV、音乐内容过滤(MusicFilter)、预取提速、搜索历史、播放历史/播放次数。**待真机验证**:歌词匹配质量、MV 切换与后台、横屏体验、收藏写入、UP 合集。未做:定时关闭、错误提示打磨、缓存搜索/排序。详见 [TODO.md](TODO.md)。CarPlay 不做(用户明确不需要)
+- [~] **P6 打磨**:已实现并通过构建验证 — UI 向 Apple Music 看齐(系统背景 + grouped 列表)、队列管理、播放器底部队列/合集/推荐抽屉、顺序/随机/单曲循环/电台播放模式、收藏(短按默认夹/长按选夹)、在线歌词入口(LRCLIB 匹配到才显示)、音乐/MV 切换、MV 全屏/横屏铺满、Wi-Fi 优先 MV、音乐内容过滤(MusicFilter)、预取提速、搜索历史、播放历史/播放次数。**待真机验证**:歌词匹配质量、MV 切换与后台、横屏体验、收藏写入、UP 合集。未做:定时关闭、错误提示打磨、缓存搜索/排序。详见 [TODO.md](TODO.md)。CarPlay 不做(用户明确不需要)
 
 ## 风险
 

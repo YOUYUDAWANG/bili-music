@@ -21,4 +21,17 @@ enum UITestFixtures {
         Track(typeID: 3, bvid: "BVUITEST009", cid: 1009, title: "Fixture Song Nine", artist: "UI Test", coverURL: nil, duration: 214),
         Track(typeID: 3, bvid: "BVUITEST010", cid: 1010, title: "Fixture Song Ten", artist: "UI Test", coverURL: nil, duration: 202)
     ]
+
+    static func relatedPanelTracks(current: Track?, excludedKeys: Set<TrackKey>, limit: Int) -> [Track] {
+        homeTracks
+            .filter { track in
+                guard let current else { return true }
+                return !track.key.matches(current)
+            }
+            .filter { track in
+                !excludedKeys.contains { $0.matches(track) }
+            }
+            .prefix(max(0, limit))
+            .map { $0 }
+    }
 }
