@@ -159,6 +159,23 @@ final class PlayerChromeUITests: XCTestCase {
     }
 
     @MainActor
+    func testVerticalDragOnProgressDoesNotStartScrubbing() throws {
+        try openFullPlayerFromMini()
+
+        let progress = element("nowPlayingProgress")
+        XCTAssertTrue(progress.waitForExistence(timeout: 2), "The progress bar should be visible before testing vertical intent.")
+        let valueBefore = progress.value as? String
+        let start = progress.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let end = start.withOffset(CGVector(dx: 10, dy: -90))
+        start.press(forDuration: 0.05, thenDragTo: end)
+
+        XCTAssertEqual(progress.value as? String, valueBefore, "A mostly vertical drag that starts near progress must not seek playback.")
+        XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 1), "Vertical intent near progress should not dismiss the player.")
+        XCTAssertFalse(element("playerQueuePage").isHittable, "Vertical intent near progress should not change pages.")
+        XCTAssertFalse(element("playerRecommendationsPage").isHittable, "Vertical intent near progress should not change pages.")
+    }
+
+    @MainActor
     func testHorizontalPageSwipeChangesPageWithoutDismissing() throws {
         try openFullPlayerFromMini()
 
@@ -233,6 +250,48 @@ final class PlayerChromeUITests: XCTestCase {
     }
 
     @MainActor
+    func testInlineMiniPlayerMatchesCollapsedTabButtonHeight() throws {
+        let miniPlayer = element("miniPlayer")
+        XCTAssertTrue(miniPlayer.waitForExistence(timeout: 5), "Fixture mini player should be visible.")
+
+        for _ in 0..<3 {
+            app.swipeUp(velocity: .slow)
+        }
+
+        let searchButton = app.tabBars.buttons["搜索"]
+        XCTAssertTrue(searchButton.waitForExistence(timeout: 2), "Collapsed tab bar should retain the search button.")
+        XCTAssertEqual(
+            miniPlayer.frame.height,
+            searchButton.frame.height,
+            accuracy: 2,
+            "Inline mini player should use the same 48pt system height as adjacent tab controls."
+        )
+    }
+
+    @MainActor
+    func testHomeWithoutCurrentTrackDoesNotReserveEmptyMiniPlayerSlot() throws {
+        app.terminate()
+        app = XCUIApplication()
+        app.launchArguments = ["-searchHistory", "[]"]
+        app.launchEnvironment["BILIMUSIC_UITEST_FIXTURE"] = "1"
+        app.launchEnvironment["BILIMUSIC_UITEST_NO_CURRENT"] = "1"
+        app.launch()
+
+        let tabBar = app.tabBars.firstMatch
+        XCTAssertTrue(tabBar.waitForExistence(timeout: 3), "Home should show its regular tab bar.")
+        let initialFrame = tabBar.frame
+        XCTAssertFalse(element("miniPlayer").exists, "No mini player should exist before the first track starts.")
+
+        for _ in 0..<3 {
+            app.swipeUp(velocity: .slow)
+        }
+
+        XCTAssertFalse(element("miniPlayer").exists, "Scrolling without a current track must not create an empty mini-player slot.")
+        XCTAssertEqual(tabBar.frame.minY, initialFrame.minY, accuracy: 2, "The regular tab bar should not collapse around an empty center slot.")
+        XCTAssertEqual(tabBar.frame.height, initialFrame.height, accuracy: 2, "The regular tab bar height should remain stable without playback.")
+    }
+
+    @MainActor
     func testSearchTabUsesFocusedHistoryWithoutModeScopes() throws {
         app.tabBars.buttons["搜索"].tap()
 
@@ -255,17 +314,24 @@ final class PlayerChromeUITests: XCTestCase {
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before dense layout verification.")
 
         let pageHint = element("playerPageHint")
+        let dismissIndicator = element("playerDismissIndicator")
         let metadata = metadataElement()
         let progress = element("nowPlayingProgress")
         let transport = element("playerTransportControls")
         let toolbar = element("playerToolbar")
 
-        let elements = [pageHint, metadata, progress, transport, toolbar]
+        let elements = [dismissIndicator, pageHint, metadata, progress, transport, toolbar]
         for element in elements {
             XCTAssertTrue(element.waitForExistence(timeout: 2), "Dense player layout element should exist: \(element)")
             XCTAssertFalse(element.frame.isEmpty, "Dense player layout element should have a measurable frame: \(element)")
         }
 
+        XCTAssertFalse(element("playerBottomQueuePanel").exists, "The center page should not duplicate the queue preview from the queue page.")
+        XCTAssertFalse(element("playerBottomPlaylistPanel").exists, "The center page should not duplicate the collection from the queue page.")
+
+        XCTAssertLessThanOrEqual(dismissIndicator.frame.maxY, pageHint.frame.minY, "The downward-dismiss indicator should sit above the player page hint.")
+        XCTAssertEqual(dismissIndicator.frame.width, 60, accuracy: 2, "The dismiss indicator should match the wider Apple Music grabber.")
+        XCTAssertLessThanOrEqual(dismissIndicator.frame.midY, app.frame.minY + 100, "The dismiss indicator should stay near the top safe-area boundary instead of being pushed down twice.")
         let coverArea = centerPlayerCoverArea()
         XCTAssertGreaterThanOrEqual(coverArea.screenPoint.y, pageHint.frame.maxY + 80, "Cover area should stay below the page hint.")
         XCTAssertLessThanOrEqual(coverArea.screenPoint.y, metadata.frame.minY - 24, "Cover area should stay above title metadata.")

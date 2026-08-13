@@ -161,10 +161,12 @@ struct PlayerProgressBar: View {
     var onScrubChanged: (Bool) -> Void = { _ in }
     @State private var scrubValue: Double = 0
     @State private var isScrubbing = false
+    @State private var rejectedCurrentDrag = false
     @State private var scrubHapticTrigger = 0
 
     private enum Metrics {
         static let horizontalPadding: CGFloat = 28
+        static let interactionHeight: CGFloat = 24
     }
 
     private var displayProgress: CGFloat {
@@ -197,12 +199,12 @@ struct PlayerProgressBar: View {
                         .shadow(color: .black.opacity(0.15), radius: 3, y: 1)
                         .animation(.spring(response: 0.2, dampingFraction: 0.8), value: isScrubbing)
                 }
-                .frame(height: 44)
+                .frame(height: Metrics.interactionHeight)
                 .contentShape(Rectangle())
                 .sensoryFeedback(.selection, trigger: scrubHapticTrigger)
                 .highPriorityGesture(progressDragGesture(trackWidth: trackWidth), including: .all)
             }
-            .frame(height: 44)
+            .frame(height: Metrics.interactionHeight)
 
             HStack {
                 Text(format(isScrubbing ? scrubValue : engine.currentTime))
@@ -227,9 +229,14 @@ struct PlayerProgressBar: View {
     }
 
     private func progressDragGesture(trackWidth: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 0)
+        DragGesture(minimumDistance: ProgressScrubMath.minimumDragDistance)
             .onChanged { value in
                 if !isScrubbing {
+                    guard !rejectedCurrentDrag else { return }
+                    guard ProgressScrubMath.shouldBeginScrub(translation: value.translation) else {
+                        rejectedCurrentDrag = true
+                        return
+                    }
                     scrubValue = min(engine.currentTime, engine.duration)
                     isScrubbing = true
                     engine.beginScrub()
@@ -240,6 +247,8 @@ struct PlayerProgressBar: View {
                 scrubValue = progress * engine.duration
             }
             .onEnded { _ in
+                defer { rejectedCurrentDrag = false }
+                guard isScrubbing else { return }
                 engine.endScrub(to: scrubValue)
                 isScrubbing = false
                 onScrubChanged(false)
@@ -254,6 +263,14 @@ struct PlayerProgressBar: View {
 }
 
 enum ProgressScrubMath {
+    static let minimumDragDistance: CGFloat = 8
+
+    static func shouldBeginScrub(translation: CGSize) -> Bool {
+        let horizontal = abs(translation.width)
+        let vertical = abs(translation.height)
+        return horizontal >= minimumDragDistance && horizontal > vertical * 1.6
+    }
+
     static func progress(locationX: CGFloat, trackWidth: CGFloat) -> CGFloat {
         guard trackWidth > 0 else { return 0 }
         return max(0, min(1, locationX / trackWidth))

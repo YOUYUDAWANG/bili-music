@@ -84,12 +84,6 @@ struct TrackRow: View {
         }
         .padding(.vertical, 5)
         .padding(.horizontal, 8)
-        .background {
-            if isPlaying {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(rowHighlightFill)
-            }
-        }
         .contentShape(Rectangle())
     }
 
@@ -131,15 +125,6 @@ struct TrackRow: View {
             return AppTheme.secondaryBackground
         case .player:
             return Color.white.opacity(0.08)
-        }
-    }
-
-    private var rowHighlightFill: Color {
-        switch appearance {
-        case .standard:
-            return AppTheme.brandSoft
-        case .player:
-            return AppTheme.accent.opacity(0.14)
         }
     }
 

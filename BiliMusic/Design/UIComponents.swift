@@ -282,12 +282,6 @@ struct MusicTrackRow: View {
         .padding(.vertical, 8)
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
-        .background {
-            if isPlaying {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(AppTheme.accent.opacity(0.12))
-            }
-        }
         .contentShape(Rectangle())
     }
 

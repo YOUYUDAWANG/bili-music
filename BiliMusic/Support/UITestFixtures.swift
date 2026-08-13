@@ -5,6 +5,10 @@ enum UITestFixtures {
         ProcessInfo.processInfo.environment["BILIMUSIC_UITEST_FIXTURE"] == "1"
     }
 
+    static var startsWithoutCurrentTrack: Bool {
+        ProcessInfo.processInfo.environment["BILIMUSIC_UITEST_NO_CURRENT"] == "1"
+    }
+
     static let homeTracks: [Track] = [
         Track(typeID: 3, bvid: "BVUITEST001", cid: 1001, title: "Fixture Song One", artist: "UI Test", coverURL: nil, duration: 211),
         Track(typeID: 3, bvid: "BVUITEST002", cid: 1002, title: "Fixture Song Two", artist: "UI Test", coverURL: nil, duration: 197),

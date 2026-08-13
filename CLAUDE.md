@@ -172,7 +172,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 
 ## 架构
 
-单 Module 的 SwiftUI app，iOS 26.0+（部署目标有意保持 26.0），`@Observable` MVVM。无第三方依赖 —— 只用 URLSession + AVPlayer。
+单 Module 的 SwiftUI app，iOS 26.0+（部署目标有意保持 26.0），`@Observable` MVVM。网络和播放层只用 URLSession + AVPlayer；播放器纵向开合使用项目内 vendored 的 MIT 依赖 LNPopupUI/LNPopupController。
 
 ### 全局状态
 
@@ -226,8 +226,8 @@ B 站视频可以有多个分 P（cid），缓存和去重不能只按 bvid。`T
 
 ### 功能页（`BiliMusic/Features/`）
 
-- **`RootView`** —— tab bar（推荐/搜索/收藏/缓存/设置）+ 自定义全屏播放器浮层（不是 `.fullScreenCover`）。全屏播放器是 `NowPlayingView`，用 `.offset(y:).ignoresSafeArea()` 实现从 mini bar 上滑出现。`ScenePhase.background` 时 flush CacheStore + PlaybackHistoryStore。启动时 `AUTOPLAY_BV` 环境变量支持调试自动播。
-- **`NowPlayingView`** —— 三页 `TabView`（队列 ← 当前歌曲 → 推荐）。三页：播放列表、正在播放、推荐歌曲。通过下滑手势关闭；阈值约 130pt 或预测约 260pt。包含：播放模式切换（音乐/MV）、音质选择、播放模式（顺序/随机/单曲循环/电台）、收藏（短按/长按选夹）、下载、歌词页、MV 全屏、合集检测（`upPlaylistContaining`）、迷你播放条上滑手势。内有独立子视图 `PlayerProgressBar` 限制 `currentTime` 订阅范围，防止全局重渲染。
+- **`RootView`** —— tab bar（推荐/搜索/收藏/缓存/设置）+ LNPopupUI 标准紧凑浮动播放条。LNPopupController 以 `.floatingCompact + .automatic` 承载 `NowPlayingView` 的展开、跟手惯性和收回；48pt mini bar 与折叠底栏按钮同高，封面是唯一 popup transition target。只有存在当前歌曲时才允许 `.onScrollDown` 底栏最小化，无歌曲时保持 `.never`，避免空 inline accessory 槽位。popup item 不订阅播放进度，避免首页滚动期间由 `currentTime` 驱动根视图刷新。`ScenePhase.background` 时 flush CacheStore + PlaybackHistoryStore。启动时 `AUTOPLAY_BV` 环境变量支持调试自动播。
+- **`NowPlayingView`** —— 三页播放器（队列 ← 当前歌曲 → 推荐），横向由 `UIPageViewController` 原生分页承载，纵向开合由外层 LNPopupController 单独拥有。顶部安全区内有 60×5pt 下滑收起提示条；慢速交互式下滑期间由 vendored LNPopupController 将整页临时栅格化为单一合成层。包含：播放模式切换（音乐/MV）、音质选择、播放模式（顺序/随机/单曲循环/电台）、收藏（短按/长按选夹）、下载、歌词页、MV 全屏、合集检测（`upPlaylistContaining`）。内有独立子视图 `PlayerProgressBar` 限制 `currentTime` 订阅范围，防止全局重渲染。
 - **`HomeView`** —— 出现时触发 `RecommendationEngine(.home)`；每次点「换一批」累积 `shownBVIDs` 以避免重复。去重机制：`RecentHomeFeedStore`（bvid → Date, 3h TTL, JSON 落盘，跨重启生效）。未登录/无收藏夹时显示引导。
 - **`RecentHomeFeedStore`** —— 首页去重专用。bvid → 最近展示时间，JSON 落盘（`home-recent.json`），1s 防抖写盘。TTL 3h，max 400 条。
 - **`SearchView`** —— 搜索入口。聚焦空搜索框时只展示本地历史或空状态，不显示 Music/MV/expanded scope；结果合并为“最佳匹配 + 音乐结果”的单一可点击音乐表面，`TrackRow` 在列表间复用。
@@ -250,6 +250,7 @@ B 站视频可以有多个分 P（cid），缓存和去重不能只按 bvid。`T
 
 - **保留窄范围模拟器 UI 回归** —— 自动化保护关键手势、搜索和播放器布局；真机测试负责最终交互体感。
 - **品牌色保持克制** —— `AppTheme.accent` 使用当前蓝青 `brand`，不要回退为高饱和粉色或 B 站红。
+- **歌曲播放态只高亮文字** —— `TrackRow` 与 `MusicTrackRow` 的当前歌曲标题使用 `AppTheme.accent`，不要为整行添加主题色背景或描边。
 - **不做专辑封面虚化背景** —— 用 `AppTheme.playerGradient`（中性）。
 - **封面是 16:9** —— B站封面是 16:9；用 `height: coverSize * 9/16`，不要用正方形。
 - **新增 Swift 文件要 `xcodegen generate`** —— `.xcodeproj` 是生成的；加文件不重新生成，Xcode 找不到。
