@@ -83,8 +83,8 @@ struct SearchView: View {
                     if !content.historyTerms.isEmpty {
                         historySection(content.historyTerms)
                     }
-                    trackSection(title: "最近播放", subtitle: "继续听上次打开过的歌曲", tracks: content.recentTracks)
-                    trackSection(title: "已缓存", subtitle: "离线也能播放", tracks: content.cachedTracks)
+                    coverShelf(title: "最近播放", subtitle: "继续听上次打开过的歌曲", tracks: content.recentTracks)
+                    coverShelf(title: "已缓存", subtitle: "离线也能播放", tracks: content.cachedTracks)
                 }
             } else if store.searching {
                 loadingRow
@@ -242,6 +242,36 @@ struct SearchView: View {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func coverShelf(title: String, subtitle: String? = nil, tracks: [Track]) -> some View {
+        if !tracks.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                MusicSectionHeader(title: title, subtitle: subtitle)
+                ScrollView(.horizontal) {
+                    LazyHStack(alignment: .top, spacing: 10) {
+                        ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                            Button {
+                                searchResultTapTrigger += 1
+                                play(tracks: tracks, startAt: index, selected: track)
+                            } label: {
+                                MagazineTrackTile(
+                                    track: track,
+                                    isPlaying: engine.current.map { track.key.matches($0) } ?? false)
+                                    .frame(width: 196)
+                            }
+                            .buttonStyle(MusicRowButtonStyle())
+                        }
+                    }
+                    .scrollTargetLayout()
+                }
+                .contentMargins(.horizontal, 0, for: .scrollContent)
+                .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
+                .scrollIndicators(.hidden)
+                .accessibilityIdentifier("searchShelf-\(title)")
             }
         }
     }

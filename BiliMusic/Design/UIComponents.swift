@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Mini 播放器控制按钮按压缩放
 
@@ -152,6 +153,159 @@ struct FeaturedTrackCard: View {
         .contentShape(Rectangle())
     }
 
+}
+
+// MARK: - Cover Magazine Components
+
+/// 杂志式页面的统一封面。固定 16:9、8pt 圆角，避免各页面形成不同的图片语言。
+struct MagazineArtwork: View {
+    let url: URL?
+    var pixelWidth = 640
+    var fallbackImage: UIImage?
+
+    var body: some View {
+        CachedAsyncImage(
+            url: BiliArtworkURL.widescreenThumbnail(url, width: pixelWidth),
+            targetSize: CGSize(width: pixelWidth / 2, height: pixelWidth * 9 / 32),
+            fallbackImage: fallbackImage
+        ) { image in
+            image.resizable().aspectRatio(contentMode: .fill)
+        } placeholder: {
+            ZStack {
+                Color.secondary.opacity(0.10)
+                Image(systemName: "music.note")
+                    .font(.title3)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .aspectRatio(16 / 9, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+/// 收藏夹目录封面的 2x2 拼贴。少于四张时用克制的系统占位补齐版面。
+struct MagazineArtworkCollage: View {
+    let urls: [URL]
+
+    var body: some View {
+        GeometryReader { proxy in
+            let gap: CGFloat = 2
+            let halfWidth = (proxy.size.width - gap) / 2
+            let halfHeight = (proxy.size.height - gap) / 2
+            switch urls.count {
+            case 0:
+                emptyCollage
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+            case 1:
+                collageCell(index: 0, width: proxy.size.width, height: proxy.size.height)
+            case 2:
+                HStack(spacing: gap) {
+                    collageCell(index: 0, width: halfWidth, height: proxy.size.height)
+                    collageCell(index: 1, width: halfWidth, height: proxy.size.height)
+                }
+            case 3:
+                HStack(spacing: gap) {
+                    collageCell(index: 0, width: halfWidth, height: proxy.size.height)
+                    VStack(spacing: gap) {
+                        collageCell(index: 1, width: halfWidth, height: halfHeight)
+                        collageCell(index: 2, width: halfWidth, height: halfHeight)
+                    }
+                }
+            default:
+                VStack(spacing: gap) {
+                    collageRow(start: 0, width: halfWidth, height: halfHeight)
+                    collageRow(start: 2, width: halfWidth, height: halfHeight)
+                }
+            }
+        }
+        .aspectRatio(16 / 9, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func collageRow(start: Int, width: CGFloat, height: CGFloat) -> some View {
+        HStack(spacing: 2) {
+            collageCell(index: start, width: width, height: height)
+            collageCell(index: start + 1, width: width, height: height)
+        }
+    }
+
+    @ViewBuilder
+    private func collageCell(index: Int, width: CGFloat, height: CGFloat) -> some View {
+        CachedAsyncImage(
+            url: BiliArtworkURL.widescreenThumbnail(urls[safe: index], width: 360),
+            targetSize: CGSize(width: width, height: height)
+        ) { image in
+            image.resizable().aspectRatio(contentMode: .fill)
+        } placeholder: {
+            collagePlaceholder
+        }
+        .frame(width: width, height: height)
+        .clipped()
+    }
+
+    private var collagePlaceholder: some View {
+        ZStack {
+            AppTheme.secondaryBackground
+            Image(systemName: "music.note")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private var emptyCollage: some View {
+        ZStack {
+            AppTheme.secondaryBackground
+            Image(systemName: "rectangle.stack")
+                .font(.title3.weight(.medium))
+                .foregroundStyle(.tertiary)
+        }
+    }
+}
+
+/// 专题页和横向书架共用的曲目卡。图片是第一层，文字仅作为索引信息。
+struct MagazineTrackTile: View {
+    @AppStorage(TrackTitleFormatter.cleanListTitlesDefaultsKey) private var cleanListTitles = false
+    let track: Track
+    var isPlaying = false
+    var prominent = false
+
+    var body: some View {
+        let display = TrackTitleFormatter.displayMetadata(for: track, clean: cleanListTitles)
+        VStack(alignment: .leading, spacing: prominent ? 10 : 7) {
+            MagazineArtwork(url: track.coverURL, pixelWidth: prominent ? 960 : 560)
+                .overlay(alignment: .bottomTrailing) {
+                    if isPlaying {
+                        Image(systemName: "waveform")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(9)
+                            .shadow(color: .black.opacity(0.55), radius: 4)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .overlay {
+                    if isPlaying {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(.white.opacity(0.82), lineWidth: 2)
+                    }
+                }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(TrackTitleFormatter.listTitle(for: track, clean: cleanListTitles))
+                    .font(prominent ? .headline.weight(.bold) : .subheadline.weight(.semibold))
+                    .foregroundStyle(isPlaying ? AppTheme.accent : .primary)
+                    .lineLimit(prominent ? 2 : 1)
+                Text(display.artist)
+                    .font(prominent ? .subheadline : .caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 2)
+        }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(isPlaying ? "正在播放" : "")
+    }
 }
 
 enum MusicFormatters {

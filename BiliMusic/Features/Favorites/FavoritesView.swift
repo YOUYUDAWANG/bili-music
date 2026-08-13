@@ -6,28 +6,42 @@ struct FavoritesView: View {
     @State private var path: [Int] = []
     @State private var loading = false
     @State private var errorMessage: String?
+    @State private var requestInFlight = false
     @State private var restoredLastFolder = false
     @State private var authenticationGeneration = UUID()
+    @State private var folderPreviewURLs: [Int: [URL]] = [:]
 
     var body: some View {
         NavigationStack(path: $path) {
-            List {
-                if let errorMessage {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                        .font(.footnote)
-                        .foregroundStyle(AppTheme.error)
-                }
-
-                ForEach(folders) { folder in
-                    NavigationLink(value: folder.id) {
-                        favoriteFolderRow(folder)
+            ScrollView {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: 10),
+                        GridItem(.flexible(), spacing: 10)
+                    ],
+                    alignment: .leading,
+                    spacing: 18
+                ) {
+                    ForEach(folders) { folder in
+                        NavigationLink(value: folder.id) {
+                            favoriteFolderTile(folder)
+                        }
+                        .buttonStyle(MusicRowButtonStyle())
+                        .simultaneousGesture(TapGesture().onEnded {
+                            FavoriteManager.shared.remember(folderId: folder.id, title: folder.title)
+                        })
+                        .accessibilityIdentifier("favoriteFolder-\(folder.id)")
+                        .task(id: authenticationGeneration) {
+                            await loadPreview(for: folder)
+                        }
                     }
-                    .simultaneousGesture(TapGesture().onEnded {
-                        FavoriteManager.shared.remember(folderId: folder.id, title: folder.title)
-                    })
                 }
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
+                .padding(.bottom, 28)
             }
-            .listStyle(.plain)
+            .accessibilityIdentifier("favoritesGrid")
+            .background(AppTheme.background.ignoresSafeArea())
             .navigationTitle("收藏夹")
             .navigationBarTitleDisplayMode(.large)
             .navigationDestination(for: Int.self) { folderId in
@@ -41,6 +55,11 @@ struct FavoritesView: View {
                 } else if !CookieStore.isLoggedIn {
                     ContentUnavailableView("需要登录", systemImage: "person.crop.circle.badge.questionmark",
                                            description: Text("去设置页扫码登录后,这里会显示你的 B 站收藏夹"))
+                } else if let errorMessage, folders.isEmpty {
+                    ContentUnavailableView(
+                        "收藏夹加载失败",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text(errorMessage))
                 } else if folders.isEmpty && errorMessage == nil {
                     ContentUnavailableView("没有收藏夹", systemImage: "star",
                                            description: Text("在 B 站收藏的视频会出现在这里"))
@@ -57,8 +76,10 @@ struct FavoritesView: View {
             .onReceive(NotificationCenter.default.publisher(for: .biliAuthenticationDidChange)) { _ in
                 authenticationGeneration = UUID()
                 folders = []
+                folderPreviewURLs = [:]
                 path = []
                 loading = false
+                requestInFlight = false
                 errorMessage = nil
                 restoredLastFolder = false
                 if CookieStore.isLoggedIn {
@@ -68,39 +89,33 @@ struct FavoritesView: View {
         }
     }
 
-    private func favoriteFolderRow(_ folder: BiliClient.FavFolder) -> some View {
-        HStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(AppTheme.accent.opacity(0.12))
-                .frame(width: 46, height: 46)
-                .overlay {
-                    Image(systemName: "music.note.list")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(AppTheme.accent)
-                }
+    private func favoriteFolderTile(_ folder: BiliClient.FavFolder) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            MagazineArtworkCollage(urls: folderPreviewURLs[folder.id] ?? [])
             VStack(alignment: .leading, spacing: 2) {
                 Text(folder.title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 Text("\(folder.media_count) 个内容")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Spacer()
+            .padding(.horizontal, 2)
         }
-        .padding(.vertical, 4)
         .contentShape(Rectangle())
     }
 
     /// 拉取收藏夹列表，并在首次进入时恢复上次打开的夹。
     private func load() async {
-        guard let accountID = CookieStore.mid else { return }
+        guard !requestInFlight, let accountID = CookieStore.mid else { return }
         let generation = authenticationGeneration
+        requestInFlight = true
         loading = folders.isEmpty
         defer {
             if authenticationGeneration == generation {
                 loading = false
+                requestInFlight = false
             }
         }
         errorMessage = nil
@@ -123,6 +138,21 @@ struct FavoritesView: View {
             errorMessage = error.localizedDescription
         }
     }
+
+    /// 只为已经进入可视区域的收藏夹取前四张图，避免目录页抢占详情与播放请求。
+    private func loadPreview(for folder: BiliClient.FavFolder) async {
+        guard folder.media_count > 0,
+              folderPreviewURLs[folder.id] == nil,
+              let accountID = CookieStore.mid else { return }
+        let generation = authenticationGeneration
+        let page = try? await BiliClient().favItems(folderId: folder.id, page: 1, pageSize: 4)
+        guard !Task.isCancelled,
+              authenticationGeneration == generation,
+              CookieStore.mid == accountID else { return }
+        folderPreviewURLs[folder.id] = (page?.medias ?? [])
+            .filter { $0.attr == 0 }
+            .compactMap { URL(string: $0.cover) }
+    }
 }
 
 /// 收藏夹内容,分页加载,点击播放。
@@ -138,64 +168,57 @@ struct FavFolderDetailView: View {
     @State private var trackTapTrigger = 0
 
     var body: some View {
-        List {
-            if let errorMessage, tracks.isEmpty {
-                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                    .font(.footnote)
-                    .foregroundStyle(AppTheme.error)
-            }
-
-            ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                Button {
-                    trackTapTrigger += 1
-                    Task { await engine.play(tracks: tracks, startAt: index) }
-                } label: {
-                    TrackRow(track: track, isPlaying: engine.current.map { track.key.matches($0) } ?? false)
-                }
-                .buttonStyle(.plain)
-                .contextMenu {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 24) {
+                if let first = tracks.first {
                     Button {
-                        Task { await engine.playRadio(seed: track) }
+                        playTrack(at: 0)
                     } label: {
-                        Label("电台播放", systemImage: PlayerEngine.QueueMode.radio.icon)
+                        MagazineTrackTile(
+                            track: first,
+                            isPlaying: isCurrent(first),
+                            prominent: true)
                     }
-                    Button {
-                        Task { await engine.play(tracks: tracks, startAt: index, queueMode: .shuffle) }
-                    } label: {
-                        Label("随机播放这个收藏夹", systemImage: PlayerEngine.QueueMode.shuffle.icon)
-                    }
+                    .buttonStyle(MusicRowButtonStyle())
+                    .contextMenu { trackMenu(first, index: 0) }
                 }
-                .onAppear {
-                    if track == tracks.last { Task { await loadMore() } }
-                }
-            }
 
-            if loading {
-                HStack {
-                    Spacer()
-                    ProgressView()
-                    Spacer()
-                }
-            } else if let errorMessage, !tracks.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("加载更多失败", systemImage: "exclamationmark.arrow.triangle.2.circlepath")
-                        .font(.headline)
-                    Text(errorMessage)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    Button("重试加载") {
-                        Task { await loadMore() }
+                if tracks.count > 1 {
+                    VStack(alignment: .leading, spacing: 12) {
+                        MusicSectionHeader(title: "曲目", subtitle: "\(tracks.count) 首已加载")
+                        LazyVGrid(
+                            columns: [
+                                GridItem(.flexible(), spacing: 10),
+                                GridItem(.flexible(), spacing: 10)
+                            ],
+                            alignment: .leading,
+                            spacing: 18
+                        ) {
+                            ForEach(Array(tracks.dropFirst().enumerated()), id: \.element.id) { offset, track in
+                                let index = offset + 1
+                                Button {
+                                    playTrack(at: index)
+                                } label: {
+                                    MagazineTrackTile(track: track, isPlaying: isCurrent(track))
+                                }
+                                .buttonStyle(MusicRowButtonStyle())
+                                .contextMenu { trackMenu(track, index: index) }
+                                .onAppear {
+                                    if track == tracks.last { Task { await loadMore() } }
+                                }
+                            }
+                        }
                     }
-                    .buttonStyle(.bordered)
                 }
-                .padding(.vertical, 6)
-            } else if hasMore, !tracks.isEmpty {
-                Button("加载更多", systemImage: "arrow.down.circle") {
-                    Task { await loadMore() }
-                }
+
+                loadingAndErrorFooter
             }
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+            .padding(.bottom, 32)
         }
-        .listStyle(.plain)
+        .accessibilityIdentifier("favoriteFolderDetail")
+        .background(AppTheme.background.ignoresSafeArea())
         .sensoryFeedback(.intent(.lightImpact), trigger: trackTapTrigger)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
@@ -211,6 +234,60 @@ struct FavFolderDetailView: View {
             if tracks.isEmpty { await loadMore() }
         }
         .refreshable { await reload() }
+    }
+
+    @ViewBuilder
+    private var loadingAndErrorFooter: some View {
+        if loading && !tracks.isEmpty {
+            HStack {
+                Spacer()
+                ProgressView()
+                Spacer()
+            }
+            .frame(minHeight: 64)
+        } else if let errorMessage, !tracks.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("加载更多失败", systemImage: "exclamationmark.arrow.triangle.2.circlepath")
+                    .font(.headline)
+                Text(errorMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Button("重试加载") {
+                    Task { await loadMore() }
+                }
+                .buttonStyle(.bordered)
+            }
+        } else if hasMore, !tracks.isEmpty {
+            Button("加载更多", systemImage: "arrow.down.circle") {
+                Task { await loadMore() }
+            }
+            .buttonStyle(.bordered)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func playTrack(at index: Int) {
+        guard tracks.indices.contains(index) else { return }
+        trackTapTrigger += 1
+        Task { await engine.play(tracks: tracks, startAt: index) }
+    }
+
+    private func isCurrent(_ track: Track) -> Bool {
+        engine.current.map { track.key.matches($0) } ?? false
+    }
+
+    @ViewBuilder
+    private func trackMenu(_ track: Track, index: Int) -> some View {
+        Button {
+            Task { await engine.playRadio(seed: track) }
+        } label: {
+            Label("电台播放", systemImage: PlayerEngine.QueueMode.radio.icon)
+        }
+        Button {
+            Task { await engine.play(tracks: tracks, startAt: index, queueMode: .shuffle) }
+        } label: {
+            Label("随机播放这个收藏夹", systemImage: PlayerEngine.QueueMode.shuffle.icon)
+        }
     }
 
     /// 下拉刷新：重置分页状态后从第一页重新加载。

@@ -579,9 +579,10 @@ struct BiliClient {
     }
 
     /// 分页取某收藏夹的内容。
-    func favItems(folderId: Int, page: Int) async throws -> FavPage {
-        try await get(
-            "https://api.bilibili.com/x/v3/fav/resource/list?media_id=\(folderId)&pn=\(page)&ps=40&platform=web")
+    func favItems(folderId: Int, page: Int, pageSize: Int = 40) async throws -> FavPage {
+        let pageSize = min(40, max(1, pageSize))
+        return try await get(
+            "https://api.bilibili.com/x/v3/fav/resource/list?media_id=\(folderId)&pn=\(page)&ps=\(pageSize)&platform=web")
     }
 
     /// resource/ids 一次返回整个收藏夹的全部条目 id(只含 bvid,极轻量),
