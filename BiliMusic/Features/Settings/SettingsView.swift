@@ -373,7 +373,7 @@ struct QRLoginView: View {
     let onSuccess: () -> Void
     @State private var qrImage: UIImage?
     @State private var status = "用 B 站 App 扫一扫"
-    @State private var expired = false
+    @State private var refreshPrompt: String?
     @State private var pollTask: Task<Void, Never>?
     @State private var loginAttemptID = UUID()
 
@@ -386,12 +386,12 @@ struct QRLoginView: View {
                         .resizable()
                         .interpolation(.none)
                         .frame(width: 220, height: 220)
-                        .opacity(expired ? 0.2 : 1)
+                        .opacity(refreshPrompt == nil ? 1 : 0.2)
                 } else {
                     ProgressView().frame(width: 220, height: 220)
                 }
-                if expired {
-                    Button("已过期,点击刷新") { startLogin() }
+                if let refreshPrompt {
+                    Button(refreshPrompt) { startLogin() }
                         .buttonStyle(.borderedProminent)
                 }
             }
@@ -411,7 +411,7 @@ struct QRLoginView: View {
     private func startLogin() {
         let attemptID = UUID()
         loginAttemptID = attemptID
-        expired = false
+        refreshPrompt = nil
         qrImage = nil
         status = "用 B 站 App 扫一扫"
         pollTask?.cancel()
@@ -436,27 +436,38 @@ struct QRLoginView: View {
                             }
                             onSuccess()
                             return
+                        case .scanned:
+                            status = "已扫码，请在手机上确认"
+                            continue
                         case .expired:
-                            expired = true
+                            refreshPrompt = "已过期，点击刷新"
+                            status = "二维码已过期"
                             return
                         case .waiting:
                             continue
                         }
-                    } catch {
+                    } catch let error as URLError {
                         guard !Task.isCancelled, loginAttemptID == attemptID else { return }
                         // 单次轮询失败(网络抖动)不终止扫码流程:循环顶部的 2s sleep 兼作退避,
                         // 连续 3 次失败才视为过期,露出刷新按钮
                         consecutivePollFailures += 1
                         if consecutivePollFailures >= 3 {
-                            expired = true
-                            status = "网络不稳定,请点击刷新重试"
+                            refreshPrompt = "网络异常，点击重试"
+                            status = "连续轮询失败：\(error.localizedDescription)"
                             return
                         }
+                        status = "网络波动，正在重试（\(consecutivePollFailures)/3）"
+                    } catch {
+                        guard !Task.isCancelled, loginAttemptID == attemptID else { return }
+                        refreshPrompt = "登录失败，点击重试"
+                        status = error.localizedDescription
+                        return
                     }
                 }
             } catch {
                 guard !Task.isCancelled, loginAttemptID == attemptID else { return }
-                status = "出错了: \(error.localizedDescription)"
+                refreshPrompt = "加载失败，点击重试"
+                status = error.localizedDescription
             }
         }
     }

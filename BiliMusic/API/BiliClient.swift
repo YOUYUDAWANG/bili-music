@@ -500,45 +500,96 @@ struct BiliClient {
 
     /// 扫码轮询结果：等待 / 过期 / 成功（带 Cookie）。
     enum QRPollResult {
-        case waiting          // 未扫码 (86101) 或已扫码待确认 (86090)
+        case waiting          // 未扫码 (86101)
+        case scanned          // 已扫码待确认 (86090)
         case expired          // 二维码过期 (86038)
         case success(cookie: String)
     }
 
-    /// 轮询扫码状态；成功时从回调 URL 解出 SESSDATA/bili_jct/DedeUserID 拼成 Cookie。
+    /// 轮询扫码状态。登录成功时响应头才是 Cookie 的权威来源，回调 URL 仅用于补缺。
     func qrCodePoll(key: String) async throws -> QRPollResult {
         struct Poll: Decodable {
             let url: String
             let code: Int
             let message: String
         }
-        let poll: Poll = try await get(
-            "https://passport.bilibili.com/x/passport-login/web/qrcode/poll?qrcode_key=\(key)")
+        var components = URLComponents(
+            string: "https://passport.bilibili.com/x/passport-login/web/qrcode/poll")!
+        components.queryItems = [URLQueryItem(name: "qrcode_key", value: key)]
+        guard let url = components.url else {
+            throw APIError(code: -1, message: "扫码轮询 URL 无效")
+        }
+        var request = URLRequest(url: url)
+        Self.headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+
+        let (data, response) = try await Self.session.data(for: request)
+        try await Self.validateHTTPResponse(response, data: data)
+        let envelope = try await Self.decode(Envelope<Poll>.self, from: data)
+        guard envelope.code == 0, let poll = envelope.data else {
+            throw APIError(code: envelope.code, message: envelope.message)
+        }
         switch poll.code {
         case 0:
-            // url 形如 https://passport.biligame.com/crossDomain?DedeUserID=..&SESSDATA=..&bili_jct=..
-            // 新版 SESSDATA 含 %2C/%2A,必须保留原始编码形态与浏览器 Cookie 一致——
-            // 不能用 queryItems（会自动 URL 解码），从 percentEncodedQuery 手工切出原始值
-            guard let components = URLComponents(string: poll.url),
-                  let rawQuery = components.percentEncodedQuery else {
-                throw APIError(code: -1, message: "登录回调 URL 解析失败")
+            guard let http = response as? HTTPURLResponse else {
+                throw APIError(code: -1, message: "登录响应无效")
             }
-            let wanted = ["SESSDATA", "bili_jct", "DedeUserID"]
-            var values: [String: String] = [:]
-            for pair in rawQuery.split(separator: "&") {
-                guard let eq = pair.firstIndex(of: "=") else { continue }
-                let name = String(pair[..<eq])
-                guard wanted.contains(name) else { continue }
-                values[name] = String(pair[pair.index(after: eq)...])
-            }
-            let pairs = wanted.compactMap { name in values[name].map { "\(name)=\($0)" } }
-            guard pairs.count == wanted.count else {
-                throw APIError(code: -1, message: "登录回调缺少 Cookie 字段")
-            }
-            return .success(cookie: pairs.joined(separator: "; "))
+            let responseCookies = Self.cookies(from: http, requestURL: url)
+            return .success(cookie: try Self.qrLoginCookie(
+                callbackURL: poll.url,
+                responseCookies: responseCookies))
         case 86038: return .expired
-        default: return .waiting
+        case 86090: return .scanned
+        case 86101: return .waiting
+        default:
+            throw APIError(code: poll.code, message: poll.message)
         }
+    }
+
+    /// 合并二维码登录凭据。Set-Cookie 优先，兼容只把凭据放在 crossDomain URL 的旧响应。
+    static func qrLoginCookie(
+        callbackURL: String,
+        responseCookies: [HTTPCookie]
+    ) throws -> String {
+        let wanted = ["SESSDATA", "bili_jct", "DedeUserID"]
+        var values = callbackCookieValues(callbackURL, wanted: Set(wanted))
+        for cookie in responseCookies where wanted.contains(cookie.name) {
+            values[cookie.name] = cookie.value
+        }
+        let missing = wanted.filter { values[$0]?.isEmpty != false }
+        guard missing.isEmpty else {
+            throw APIError(code: -1, message: "登录响应缺少 \(missing.joined(separator: ", "))")
+        }
+        return wanted.map { "\($0)=\(values[$0]!)" }.joined(separator: "; ")
+    }
+
+    private static func callbackCookieValues(
+        _ callbackURL: String,
+        wanted: Set<String>
+    ) -> [String: String] {
+        guard let components = URLComponents(string: callbackURL),
+              let rawQuery = components.percentEncodedQuery else { return [:] }
+        var values: [String: String] = [:]
+        for pair in rawQuery.split(separator: "&") {
+            guard let equals = pair.firstIndex(of: "=") else { continue }
+            let name = String(pair[..<equals])
+            guard wanted.contains(name) else { continue }
+            values[name] = String(pair[pair.index(after: equals)...])
+        }
+        return values
+    }
+
+    private static func cookies(
+        from response: HTTPURLResponse,
+        requestURL: URL
+    ) -> [HTTPCookie] {
+        let fields = response.allHeaderFields.reduce(into: [String: String]()) { result, field in
+            guard let name = field.key as? String else { return }
+            result[name] = String(describing: field.value)
+        }
+        return HTTPCookie.cookies(
+            withResponseHeaderFields: fields,
+            for: response.url ?? requestURL)
     }
 
     // MARK: - 收藏夹 (需登录)
