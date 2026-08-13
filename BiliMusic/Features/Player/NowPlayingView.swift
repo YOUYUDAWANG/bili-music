@@ -400,7 +400,7 @@ struct NowPlayingView: View {
             return min(max(168, size.width * 0.24), max(168, availableHeight * 0.48), 250)
         }
 
-        return min(max(300, size.width - 44), max(306, availableHeight * 0.46), 398)
+        return min(max(320, size.width - 20), max(330, availableHeight * 0.58), 430)
     }
 
     @ViewBuilder
@@ -520,7 +520,7 @@ struct NowPlayingView: View {
                                     .playerContentReveal(opacity: playerContentOpacity)
                             }
                         }
-                        .offset(y: queuePresentationState == .collapsed ? 8 : 0)
+                        .offset(y: queuePresentationState == .collapsed ? 20 : 0)
 
                         Spacer(minLength: bottomFloor)
                     }
@@ -625,7 +625,7 @@ struct NowPlayingView: View {
     private func portraitCoverSize(base: CGFloat, isCompact: Bool) -> CGFloat {
         switch queuePresentationState {
         case .collapsed:
-            return isCompact ? min(base * 0.98, base - 4) : min(base * 0.98, base - 6)
+            return isCompact ? min(base * 0.98, base - 2) : base
         case .split:
             return max(isCompact ? 188 : 226, min(base * 0.74, base - 58))
         case .fullQueue:
@@ -636,7 +636,7 @@ struct NowPlayingView: View {
     private func portraitTopPadding(height: CGFloat, isCompact: Bool) -> CGFloat {
         switch queuePresentationState {
         case .collapsed:
-            return isCompact ? 12 : min(30, max(18, height * 0.028))
+            return isCompact ? 16 : min(34, max(22, height * 0.032))
         case .split:
             return isCompact ? 4 : 8
         case .fullQueue:
@@ -647,7 +647,7 @@ struct NowPlayingView: View {
     private func portraitCoverBottomSpacing(isCompact: Bool) -> CGFloat {
         switch queuePresentationState {
         case .collapsed:
-            return isCompact ? 12 : 16
+            return isCompact ? 28 : 58
         case .split:
             return isCompact ? 8 : 10
         case .fullQueue:
@@ -658,7 +658,7 @@ struct NowPlayingView: View {
     private func portraitMetadataBottomSpacing(isCompact: Bool) -> CGFloat {
         switch queuePresentationState {
         case .collapsed:
-            return isCompact ? 8 : 10
+            return isCompact ? 10 : 14
         case .split:
             return isCompact ? 8 : 10
         case .fullQueue:
@@ -753,7 +753,7 @@ struct NowPlayingView: View {
     private func portraitTransportTopPadding(isCompact: Bool) -> CGFloat {
         switch queuePresentationState {
         case .collapsed:
-            return isCompact ? 14 : 18
+            return isCompact ? 18 : 24
         case .split:
             return isCompact ? 10 : 12
         case .fullQueue:
@@ -764,7 +764,7 @@ struct NowPlayingView: View {
     private func portraitToolbarTopPadding(isCompact: Bool) -> CGFloat {
         switch queuePresentationState {
         case .collapsed:
-            return isCompact ? 10 : 14
+            return isCompact ? 14 : 18
         case .split:
             return isCompact ? 8 : 10
         case .fullQueue:
@@ -815,7 +815,7 @@ struct NowPlayingView: View {
         guard !isLandscape else { return Layout.contentTopInset }
         switch queuePresentationState {
         case .collapsed:
-            return max(88, safeAreaTop + 30)
+            return max(108, safeAreaTop + 48)
         case .split:
             return max(58, safeAreaTop + 18)
         case .fullQueue:
