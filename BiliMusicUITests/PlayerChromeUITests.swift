@@ -100,6 +100,9 @@ final class PlayerChromeUITests: XCTestCase {
 
         let collapsedDrawer = element("playerBottomContextCollapsed")
         XCTAssertTrue(collapsedDrawer.waitForExistence(timeout: 2), "Bottom queue context should start as a collapsed Up Next surface.")
+        let nextTitle = element("playerCollapsedNextTrackTitle")
+        XCTAssertTrue(nextTitle.waitForExistence(timeout: 2), "Collapsed queue context should preview the next song.")
+        XCTAssertEqual(nextTitle.label, "Fixture Song Two", "Collapsed queue context should show the actual next queue item.")
         XCTAssertFalse(element("playerBottomQueuePanel").exists, "The queue list should not be expanded by default.")
 
         let start = collapsedDrawer.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.82))
@@ -154,6 +157,26 @@ final class PlayerChromeUITests: XCTestCase {
 
         XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 1), "Dragging down inside the split queue list should scroll or bounce the list, not minimize the player.")
         XCTAssertTrue(element("playerQueueSplitHeader").waitForExistence(timeout: 1), "Dragging down inside the split list body should keep the split queue state.")
+    }
+
+    @MainActor
+    func testSplitQueueCanScrollBeyondItsInitiallyVisibleRows() throws {
+        try openFullPlayerFromMini()
+        try expandBottomContextToSplit()
+
+        let splitQueuePanel = element("playerBottomQueuePanel")
+        XCTAssertTrue(splitQueuePanel.waitForExistence(timeout: 2), "Split queue panel should be visible before testing its full data source.")
+
+        let tenthSong = staticText(containing: "Fixture Song Ten")
+        for _ in 0..<5 where !tenthSong.exists {
+            let dragStart = splitQueuePanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.82))
+            let dragEnd = splitQueuePanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.18))
+            dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
+        }
+
+        XCTAssertTrue(tenthSong.waitForExistence(timeout: 2), "The first expanded queue state should scroll through the complete queue, not a four-row slice.")
+        XCTAssertTrue(element("playerQueueSplitHeader").waitForExistence(timeout: 1), "Scrolling the split queue should not promote, collapse, or dismiss the drawer.")
+        XCTAssertEqual(nowPlayingTitleLabel(), "Fixture Song One", "Scrolling the split queue should not start another track.")
     }
 
     @MainActor

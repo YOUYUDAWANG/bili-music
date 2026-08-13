@@ -27,7 +27,6 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 | `PlaybackCriticalPathTests.swift` | PlayerEngine 起播关键路径：current/封面先行赋值、单次取流、首帧后调度、电台 advance 竞态（pause/play/previous/换模式）、队列末尾收尾、seek 边界、stale scrub、`VersionedAtomicFileWriter` 版本拒绝、`PlaybackHistoryStore` 注入合并；repeatOne 手动/自动 nextIndex 语义 |
 | `PlaybackDiagnosticsTests.swift` | 起播链路诊断事件（checkpoint 顺序与来源标注） |
 | `PlayerControlLogicTests.swift` | `ProgressScrubMath` 的可见轨道坐标、边界 clamp 与水平拖动意图判定 |
-| `PlayerListWindowTests.swift` | 播放列表窗口计算 |
 | `PreparedStreamRetryTests.swift` | prepared 流失效后 invalidate + 单次 fresh 重试、重复失败回调共享一次恢复、pause 不吞失败、坏本地缓存回退 freshRemote 并移除缓存条目 |
 | `QueueControllerTests.swift` | `nextIndex` 全模式边界（空队列、队尾、shuffle 越界/去重、radio、repeatOne 自动重复 vs 手动队尾回绕到 0）；`appendUnique` 按 `TrackKey.matches` 去重（cid 未解析时按 bvid 松匹配、不同分 P 视为不同曲目） |
 | `RecommendationSchedulingTests.swift` | 推荐调度策略（`RecommendationSchedulingPolicy` / `RecommendationPanelRefreshPolicy` / `RecommendationVisibleLoadPolicy`）、cid enrichment 判定、推荐展示过滤；含少量读源码的结构断言 |

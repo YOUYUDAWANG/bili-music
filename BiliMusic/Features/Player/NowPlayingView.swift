@@ -500,7 +500,7 @@ struct NowPlayingView: View {
                                 compact: isCompact || queuePresentationState.isExpanded,
                                 centered: false)
                                 .padding(.horizontal, 34)
-                                .padding(.bottom, metadataBottomSpacing + (queuePresentationState == .collapsed ? 16 : 0))
+                                .padding(.bottom, metadataBottomSpacing + (queuePresentationState == .collapsed ? 4 : 0))
                                 .playerContentReveal(opacity: playerContentOpacity)
 
                             portraitPlayerControls(
@@ -520,7 +520,7 @@ struct NowPlayingView: View {
                                     .playerContentReveal(opacity: playerContentOpacity)
                             }
                         }
-                        .offset(y: queuePresentationState == .collapsed ? 64 : 0)
+                        .offset(y: queuePresentationState == .collapsed ? 8 : 0)
 
                         Spacer(minLength: bottomFloor)
                     }
@@ -636,7 +636,7 @@ struct NowPlayingView: View {
     private func portraitTopPadding(height: CGFloat, isCompact: Bool) -> CGFloat {
         switch queuePresentationState {
         case .collapsed:
-            return isCompact ? 22 : min(58, max(40, height * 0.052))
+            return isCompact ? 12 : min(30, max(18, height * 0.028))
         case .split:
             return isCompact ? 4 : 8
         case .fullQueue:
@@ -647,7 +647,7 @@ struct NowPlayingView: View {
     private func portraitCoverBottomSpacing(isCompact: Bool) -> CGFloat {
         switch queuePresentationState {
         case .collapsed:
-            return isCompact ? 18 : 26
+            return isCompact ? 12 : 16
         case .split:
             return isCompact ? 8 : 10
         case .fullQueue:
@@ -658,7 +658,7 @@ struct NowPlayingView: View {
     private func portraitMetadataBottomSpacing(isCompact: Bool) -> CGFloat {
         switch queuePresentationState {
         case .collapsed:
-            return isCompact ? 10 : 14
+            return isCompact ? 8 : 10
         case .split:
             return isCompact ? 8 : 10
         case .fullQueue:
@@ -753,7 +753,7 @@ struct NowPlayingView: View {
     private func portraitTransportTopPadding(isCompact: Bool) -> CGFloat {
         switch queuePresentationState {
         case .collapsed:
-            return isCompact ? 18 : 24
+            return isCompact ? 14 : 18
         case .split:
             return isCompact ? 10 : 12
         case .fullQueue:
@@ -764,7 +764,7 @@ struct NowPlayingView: View {
     private func portraitToolbarTopPadding(isCompact: Bool) -> CGFloat {
         switch queuePresentationState {
         case .collapsed:
-            return isCompact ? 14 : 18
+            return isCompact ? 10 : 14
         case .split:
             return isCompact ? 8 : 10
         case .fullQueue:
@@ -815,7 +815,7 @@ struct NowPlayingView: View {
         guard !isLandscape else { return Layout.contentTopInset }
         switch queuePresentationState {
         case .collapsed:
-            return max(124, safeAreaTop + 78)
+            return max(88, safeAreaTop + 30)
         case .split:
             return max(58, safeAreaTop + 18)
         case .fullQueue:
@@ -1246,7 +1246,7 @@ struct NowPlayingView: View {
     private func playerTopChrome(safeAreaTop: CGFloat) -> some View {
         VStack(spacing: 4) {
             Color.clear
-                .frame(height: max(safeAreaTop, 12))
+                .frame(height: max(safeAreaTop - 6, 12))
                 .accessibilityHidden(true)
             Capsule(style: .continuous)
                 .fill(Color.white.opacity(0.58))
@@ -1473,12 +1473,31 @@ struct NowPlayingView: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
                 .accessibilityIdentifier(queuePresentationState == .fullQueue ? "playerQueueFullHeader" : "playerQueueSplitHeader")
             } else {
-                VStack(spacing: 0) {
+                VStack(spacing: 9) {
                     bottomContextHandle
+
+                    HStack(spacing: 10) {
+                        Text("下一首")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(PlayerSurface.tertiaryText)
+
+                        Text(collapsedNextTrackTitle)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(PlayerSurface.secondaryText)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.82)
+                            .accessibilityIdentifier("playerCollapsedNextTrackTitle")
+
+                        Spacer(minLength: 8)
+
+                        Image(systemName: "chevron.up")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(PlayerSurface.tertiaryText)
+                    }
                 }
                 .frame(maxWidth: .infinity)
-                .frame(height: 44)
-                .padding(.horizontal, 24)
+                .frame(height: 66)
+                .padding(.horizontal, 28)
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
                 .accessibilityIdentifier("playerBottomContextCollapsed")
             }
@@ -1605,28 +1624,23 @@ struct NowPlayingView: View {
             .padding(.horizontal, 28)
             .accessibilityIdentifier("playerBottomPlaylistLoading")
         } else if currentPlaylist != nil && !currentPlaylistTracks.isEmpty {
-            let visibleItems = queuePresentationState == .fullQueue
-                ? Array(currentPlaylistTracks.enumerated()).map { PlayerListWindow.Item(index: $0.offset, track: $0.element) }
-                : PlayerListWindow.items(
-                    tracks: currentPlaylistTracks,
-                    current: engine.current,
-                    maxRows: maxRows)
+            let trackIndices = currentPlaylistTracks.indices
             let visibleRows = queuePresentationState == .fullQueue
-                ? max(1, visibleItems.count)
-                : min(visibleItems.count, max(1, maxRows))
+                ? max(1, trackIndices.count)
+                : min(trackIndices.count, max(1, maxRows))
             VStack(alignment: .leading, spacing: 0) {
                 ScrollViewReader { proxy in
-                    ScrollView(.vertical, showsIndicators: queuePresentationState == .fullQueue || visibleItems.count > visibleRows) {
+                    ScrollView(.vertical, showsIndicators: queuePresentationState == .fullQueue || trackIndices.count > visibleRows) {
                         LazyVStack(spacing: 0) {
-                            ForEach(visibleItems) { item in
+                            ForEach(trackIndices, id: \.self) { index in
                                 guardedPlayerRowButton {
-                                    Task { await playCurrentPlaylistTrack(at: item.index) }
+                                    Task { await playCurrentPlaylistTrack(at: index) }
                                 } label: {
-                                    bottomSheetTrackRow(track: item.track, index: item.index)
-                                        .id(item.track.id)
+                                    bottomSheetTrackRow(track: currentPlaylistTracks[index], index: index)
+                                        .id(index)
                                 }
 
-                                if item.index != visibleItems.last?.index {
+                                if index != trackIndices.last {
                                     playerDivider.padding(.leading, 72)
                                 }
                             }
@@ -1659,30 +1673,23 @@ struct NowPlayingView: View {
     @ViewBuilder
     private func queueBottomPanel(maxRows: Int) -> some View {
         if !engine.queue.isEmpty {
-            let visibleItems = queuePresentationState == .fullQueue
-                ? Array(engine.queue.enumerated()).map {
-                    PlayerListWindow.Item(index: $0.offset, track: $0.element)
-                }
-                : PlayerListWindow.items(
-                    tracks: engine.queue,
-                    current: engine.current,
-                    maxRows: maxRows)
+            let trackIndices = engine.queue.indices
             let visibleRows = queuePresentationState == .fullQueue
-                ? max(1, visibleItems.count)
-                : min(visibleItems.count, maxRows)
+                ? max(1, trackIndices.count)
+                : min(trackIndices.count, maxRows)
             VStack(alignment: .leading, spacing: 0) {
                 ScrollViewReader { proxy in
-                    ScrollView(.vertical, showsIndicators: queuePresentationState == .fullQueue || visibleItems.count > visibleRows) {
+                    ScrollView(.vertical, showsIndicators: queuePresentationState == .fullQueue || trackIndices.count > visibleRows) {
                         LazyVStack(spacing: 0) {
-                            ForEach(visibleItems) { item in
+                            ForEach(trackIndices, id: \.self) { index in
                                 guardedPlayerRowButton {
-                                    Task { await engine.jump(to: item.index) }
+                                    Task { await engine.jump(to: index) }
                                 } label: {
-                                    bottomSheetTrackRow(track: item.track, index: item.index)
-                                        .id(item.track.id)
+                                    bottomSheetTrackRow(track: engine.queue[index], index: index)
+                                        .id(index)
                                 }
 
-                                if item.index != visibleItems.last?.index {
+                                if index != trackIndices.last {
                                     playerDivider.padding(.leading, 72)
                                 }
                             }
@@ -1749,25 +1756,23 @@ struct NowPlayingView: View {
                 )
                 .accessibilityIdentifier("playerBottomRecommendationsEmpty")
             } else {
-                let visibleItems = queuePresentationState == .fullQueue
-                    ? Array(recommendedTracks.enumerated())
-                    : Array(recommendedTracks.prefix(maxRows).enumerated())
+                let trackIndices = recommendedTracks.indices
                 let visibleRows = queuePresentationState == .fullQueue
-                    ? max(1, visibleItems.count)
-                    : min(visibleItems.count, max(1, maxRows))
+                    ? max(1, trackIndices.count)
+                    : min(trackIndices.count, max(1, maxRows))
 
                 VStack(alignment: .leading, spacing: 0) {
-                    ScrollView(.vertical, showsIndicators: queuePresentationState == .fullQueue || recommendedTracks.count > visibleRows) {
+                    ScrollView(.vertical, showsIndicators: queuePresentationState == .fullQueue || trackIndices.count > visibleRows) {
                         LazyVStack(spacing: 0) {
-                            ForEach(visibleItems, id: \.element.id) { index, track in
+                            ForEach(trackIndices, id: \.self) { index in
                                 guardedPlayerRowButton {
                                     suppressNextRecommendationRefresh = true
                                     Task { await engine.play(tracks: recommendedTracks, startAt: index, queueMode: .radio) }
                                 } label: {
-                                    bottomSheetTrackRow(track: track, index: index)
+                                    bottomSheetTrackRow(track: recommendedTracks[index], index: index)
                                 }
 
-                                if index != visibleItems.last?.offset {
+                                if index != trackIndices.last {
                                     playerDivider.padding(.leading, 72)
                                 }
                             }
@@ -1827,6 +1832,23 @@ struct NowPlayingView: View {
                 ? "\(recommendedTracks.count) 首相关歌曲"
                 : "当前歌曲推荐"
         }
+    }
+
+    private var collapsedNextTrackTitle: String {
+        let nextIndex = engine.queueIndex + 1
+        guard engine.queue.indices.contains(nextIndex) else {
+            if engine.queueMode == .repeatOne {
+                return displayTitle
+            }
+            if engine.queueMode == .radio {
+                return "正在准备推荐歌曲"
+            }
+            return "已到当前列表末尾"
+        }
+        return TrackTitleFormatter.displayMetadata(
+            for: engine.queue[nextIndex],
+            clean: cleanListTitles
+        ).title
     }
 
     private var bottomContextFullTitle: String {
@@ -2151,21 +2173,20 @@ struct NowPlayingView: View {
 
     private func scrollCurrentQueue(_ proxy: ScrollViewProxy) {
         guard engine.queue.indices.contains(engine.queueIndex) else { return }
-        let currentId = engine.queue[engine.queueIndex].id
         DispatchQueue.main.async {
             animate(.easeInOut(duration: 0.2)) {
-                proxy.scrollTo(currentId, anchor: .center)
+                proxy.scrollTo(engine.queueIndex, anchor: .center)
             }
         }
     }
 
     private func scrollCurrentPlaylist(_ proxy: ScrollViewProxy) {
         guard let current = engine.current,
-              let currentTrack = currentPlaylistTracks.first(where: { $0.key.matches(current) })
+              let currentIndex = currentPlaylistTracks.firstIndex(where: { $0.key.matches(current) })
         else { return }
         DispatchQueue.main.async {
             animate(.easeInOut(duration: 0.2)) {
-                proxy.scrollTo(currentTrack.id, anchor: .center)
+                proxy.scrollTo(currentIndex, anchor: .center)
             }
         }
     }

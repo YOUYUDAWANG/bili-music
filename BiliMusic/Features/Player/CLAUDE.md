@@ -6,7 +6,7 @@
 
 ## 入口与启动
 
-- **文件**: `NowPlayingView.swift`（主入口）、`PlayerControlViews.swift`（控制子视图）、`PlayerSheetViews.swift`（歌词/合集/收藏等 sheet）、`PlayerListWindow.swift`（队列长列表窗口化纯函数）
+- **文件**: `NowPlayingView.swift`（主入口）、`PlayerControlViews.swift`（控制子视图）、`PlayerSheetViews.swift`（歌词/合集/收藏等 sheet）
 - 由 `RootView` 的 LNPopupUI `.floatingCompact + .automatic` 容器承载。
 - 迷你播放器、主播放器开合、跟手下滑和安全区停靠由 vendored LNPopupController 统一管理；播放页不再维护第二套纵向转场状态机。
 
@@ -29,11 +29,6 @@
 | 歌词页 | LyricSheetView（滚动高亮、自动居中） |
 | MV 全屏 | MVFullscreenView（全屏视频播放） |
 
-### PlayerListWindow（static 枚举，纯函数）
-
-- `items(tracks:current:maxRows:)` — 以当前曲目为中心取队列的可视窗口片段（长队列不整表渲染）。
-- `positionText(tracks:current:)` — 「第 x / n 首」定位文案。
-
 ## 关键依赖与配置
 
 - `PlayerEngine` — 所有状态通过 Environment 读取。
@@ -55,12 +50,12 @@
 - `NowPlayingView.swift`
 - `PlayerControlViews.swift`
 - `PlayerSheetViews.swift`
-- `PlayerListWindow.swift`
 
 ## 变更记录
 
 | 日期 | 变更 |
 |------|------|
+| 2026-08-14 | 收紧播放器纵向节奏；collapsed 显示下一首标题，split 在固定可视高度内开放完整队列滚动。 |
 | 2026-08-14 | 融合 LNPopup 性能架构与底部三段式抽屉；移除已由框架取代的自制开合手势和逐帧 frame 监听。 |
-| 2026-07-27 | 全项目 review 修复 + 文档同步：播放器子视图拆分并引入 PlayerListWindow；UI 层行为由 `BiliMusicUITests/PlayerChromeUITests` 以 fixture 覆盖。 |
+| 2026-07-27 | 全项目 review 修复 + 文档同步：播放器子视图拆分并补充列表与手势回归；UI 层行为由 `BiliMusicUITests/PlayerChromeUITests` 以 fixture 覆盖。 |
 | 2026-06-24 | 初始文档创建。 |

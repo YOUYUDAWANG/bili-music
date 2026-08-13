@@ -20,7 +20,7 @@ authoring_mode: ai_generated
 - 封面容器是播放页中唯一的 `.popupTransitionTarget()`；展开和收回沿同一条原生交互轨迹在播放条封面与全屏封面之间连续变形。
 - `CADisableMinimumFrameDurationOnPhone=true` 已开启，LNPopupController 的交互 display link 也请求 `UIScreen.main.maximumFramesPerSecond`；ProMotion 门禁不是当前慢拖掉帧的根因。低电量模式或系统“限制帧率”仍可能将刷新率封顶。
 - 有当前歌曲时 LNPopup 维持 mini player 与全屏内容的统一生命周期；播放内容保持单页，列表按抽屉状态和可视窗口加载。
-- collapsed/split 状态只创建当前曲目附近的有限队列行，fullQueue 才提供完整可滚动列表，避免长合集在播放器开合时参与整表构建。
+- collapsed 状态不创建列表；split/fullQueue 使用 `LazyVStack` 直接遍历索引，一级展开即可滚动完整队列，同时避免复制整张 Track 数组。
 - 中央页只承担封面、元数据、进度和播放操作；合集与队列明细只在左页出现，避免重复信息和重复列表渲染。
 - 播放页自身不再挂中心区/顶部纵向 dismiss 手势，避免和 popup controller 的惯性、取消及横向分页竞争；顶部向下箭头已移除，整页下滑只由同一个 popup controller 接管。
 - mini player 使用 LNPopupUI 标准 bar 而不是 custom bar，以保留上游多年打磨的 docking、安全区、惯性、玻璃样式和收回细节。

@@ -228,7 +228,7 @@ B 站视频可以有多个分 P（cid），缓存和去重不能只按 bvid。`T
 ### 功能页（`BiliMusic/Features/`）
 
 - **`RootView`** —— tab bar（推荐/搜索/收藏/缓存/设置）+ LNPopupUI 标准紧凑浮动播放条。LNPopupController 以 `.floatingCompact + .automatic` 承载 `NowPlayingView` 的展开、跟手惯性和收回；48pt mini bar 与折叠底栏按钮同高，封面是唯一 popup transition target。只有存在当前歌曲时才允许 `.onScrollDown` 底栏最小化，无歌曲时保持 `.never`，避免空 inline accessory 槽位。popup item 不订阅播放进度，避免首页滚动期间由 `currentTime` 驱动根视图刷新。`ScenePhase.background` 时 flush CacheStore + PlaybackHistoryStore。启动时 `AUTOPLAY_BV` 环境变量支持调试自动播。
-- **`NowPlayingView`** —— 单页播放器，当前列表、合集和推荐统一位于底部 collapsed → split → fullQueue 三段式抽屉。纵向开合由外层 LNPopupController 单独拥有，播放页不再叠加关闭手势；顶部安全区内保留 60×5pt 下滑提示条。慢速交互式下滑期间由 vendored LNPopupController 将整页临时栅格化为单一合成层。包含：播放模式切换（音乐/MV）、音质选择、播放模式（顺序/随机/单曲循环/电台）、收藏（短按/长按选夹）、下载、歌词页、MV 全屏、合集检测（`upPlaylistContaining`）。`PlayerProgressBar` 独立订阅 `currentTime`，抽屉非完整展开状态用 `PlayerListWindow` 限制长队列渲染。
+- **`NowPlayingView`** —— 单页播放器，当前列表、合集和推荐统一位于底部 collapsed → split → fullQueue 三段式抽屉。纵向开合由外层 LNPopupController 单独拥有，播放页不再叠加关闭手势；顶部安全区内保留 60×5pt 下滑提示条。慢速交互式下滑期间由 vendored LNPopupController 将整页临时栅格化为单一合成层。包含：播放模式切换（音乐/MV）、音质选择、播放模式（顺序/随机/单曲循环/电台）、收藏（短按/长按选夹）、下载、歌词页、MV 全屏、合集检测（`upPlaylistContaining`）。`PlayerProgressBar` 独立订阅 `currentTime`；collapsed 不创建列表，split/fullQueue 通过 `LazyVStack` 提供完整可滚动队列。
 - **`HomeView`** —— 出现时触发 `RecommendationEngine(.home)`；每次点「换一批」累积 `shownBVIDs` 以避免重复。去重机制：`RecentHomeFeedStore`（bvid → Date, 3h TTL, JSON 落盘，跨重启生效）。未登录/无收藏夹时显示引导。
 - **`RecentHomeFeedStore`** —— 首页去重专用。bvid → 最近展示时间，JSON 落盘（`home-recent.json`），1s 防抖写盘。TTL 3h，max 400 条。
 - **`SearchView`** —— 搜索入口。聚焦空搜索框时只展示本地历史或空状态，不显示 Music/MV/expanded scope；结果合并为“最佳匹配 + 音乐结果”的单一可点击音乐表面，`TrackRow` 在列表间复用。

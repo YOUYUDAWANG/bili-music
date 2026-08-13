@@ -88,8 +88,8 @@ bilibili-music/
 
 **`BiliMusic/Features/Player/`:**
 - Purpose: Full-screen player UI and player-specific sheets/controls.
-- Contains: LNPopup-hosted now-playing surface, playback controls, a three-state queue/playlist/recommendation drawer, lyrics/MV/playlist/favorite/download sheets, and list-window pure helpers.
-- Key files: `BiliMusic/Features/Player/NowPlayingView.swift`, `BiliMusic/Features/Player/PlayerControlViews.swift`, `BiliMusic/Features/Player/PlayerSheetViews.swift`, `BiliMusic/Features/Player/PlayerListWindow.swift`, `BiliMusic/Features/Player/CLAUDE.md`
+- Contains: LNPopup-hosted now-playing surface, playback controls, a three-state queue/playlist/recommendation drawer, and lyrics/MV/playlist/favorite/download sheets.
+- Key files: `BiliMusic/Features/Player/NowPlayingView.swift`, `BiliMusic/Features/Player/PlayerControlViews.swift`, `BiliMusic/Features/Player/PlayerSheetViews.swift`, `BiliMusic/Features/Player/CLAUDE.md`
 
 **`BiliMusic/Features/Settings/`:**
 - Purpose: Settings, login, quality, cache policy, MV preference, and history UI.

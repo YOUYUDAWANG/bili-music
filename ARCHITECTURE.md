@@ -61,7 +61,7 @@ BiliMusic/
     ├── Search/
     ├── Favorites/    收藏夹 + FavoriteManager(短按默认夹/长按选夹)
     ├── Player/       正在播放页(歌词入口、底部队列/合集/推荐抽屉、音乐/MV 切换)+ mini bar
-    │                 PlayerListWindow(队列长列表窗口化取片段纯函数)
+    │                 LazyVStack(完整队列按需创建可见行)
     └── Library/      缓存管理
 ```
 
