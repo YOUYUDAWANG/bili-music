@@ -164,8 +164,9 @@ cp Local.xcconfig.example Local.xcconfig   # 填入自己的 Apple 开发者 Tea
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-  xcodebuild -project BiliMusic.xcodeproj -target BiliMusic \
-  -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO build
+  xcodebuild -project BiliMusic.xcodeproj -scheme BiliMusic \
+  -destination 'generic/platform=iOS Simulator' \
+  CODE_SIGNING_ALLOWED=NO build
 ```
 
 `project.yml` 定义了 `BiliMusicTests` 与 `BiliMusicUITests` target；稳定性回归可在模拟器运行，日常播放路径仍需通过 AltStore 在用户自己的 iPhone 上做最终确认（免费开发者账号，签名 7 天有效需续签）。

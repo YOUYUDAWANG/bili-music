@@ -6,12 +6,14 @@ on:
   pull_request:
     paths:
       - 'BiliMusic/**'
+      - 'Vendor/**'
       - 'project.yml'
       - '.github/workflows/build.yml'
   push:
     branches: [main]
     paths:
       - 'BiliMusic/**'
+      - 'Vendor/**'
       - 'project.yml'
       - '.github/workflows/build.yml'
 
@@ -53,9 +55,7 @@ jobs:
           set -o pipefail
           xcodebuild \
             -project BiliMusic.xcodeproj \
-            -target BiliMusic \
-            -sdk iphonesimulator \
-            -arch x86_64 \
-            ONLY_ACTIVE_ARCH=NO \
+            -scheme BiliMusic \
+            -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
             build
