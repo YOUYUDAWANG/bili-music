@@ -8,8 +8,13 @@ final class RecentHomeFeedStore {
     static let shared = RecentHomeFeedStore()
 
     private var shown: [String: Date] = [:]
-    private var loaded = false
+    private var isLoaded = false
+    private var loadTask: Task<[String: Date], Never>?
+    private var loadStartVersion = 0
+    private var mutationVersion = 0
     private var saveTask: Task<Void, Never>?
+    private let fileWriter = VersionedAtomicFileWriter()
+    private var writeRevision = 0
 
     /// 多久之内不重复推荐同一首。
     private let ttl: TimeInterval = 3 * 3600
@@ -22,31 +27,56 @@ final class RecentHomeFeedStore {
             .appendingPathComponent("home-recent.json")
     }
 
-    private func loadIfNeeded() {
-        guard !loaded else { return }
-        loaded = true
-        if let data = try? Data(contentsOf: fileURL),
-           let decoded = try? JSONDecoder().decode([String: Date].self, from: data) {
-            shown = decoded
+    private func loadIfNeeded() async {
+        guard !isLoaded else { return }
+        if let loadTask {
+            let loaded = await loadTask.value
+            applyLoaded(loaded, startedAt: loadStartVersion)
+            return
         }
-        prune()
+
+        let fileURL = fileURL
+        loadStartVersion = mutationVersion
+        let task = Task<[String: Date], Never>.detached(priority: .utility) {
+            guard let data = try? Data(contentsOf: fileURL),
+                  let decoded = try? JSONDecoder().decode([String: Date].self, from: data) else {
+                return [:]
+            }
+            return decoded
+        }
+        loadTask = task
+        let loaded = await task.value
+        applyLoaded(loaded, startedAt: loadStartVersion)
     }
 
     /// TTL 内仍算「最近推荐过」的 key 集合,用作首页推荐的排除集。
     /// cid 置 nil → 按 bvid 整体匹配(TrackKey.matches 把 nil 当通配)。
-    func recentKeys() -> Set<TrackKey> {
-        loadIfNeeded()
+    func recentKeys() async -> Set<TrackKey> {
+        await loadIfNeeded()
         let cutoff = Date().addingTimeInterval(-ttl)
         return Set(shown.filter { $0.value >= cutoff }.keys.map { TrackKey(bvid: $0, cid: nil) })
     }
 
     /// 记录本次首页展示过的曲目。
-    func record(_ bvids: [String]) {
-        loadIfNeeded()
+    func record(_ bvids: [String]) async {
+        await loadIfNeeded()
+        mutationVersion += 1
         let now = Date()
         for bvid in bvids { shown[bvid] = now }
         prune()
         save()
+    }
+
+    func flush() async {
+        guard isLoaded || mutationVersion > 0 else { return }
+        saveTask?.cancel()
+        let revision = nextWriteRevision()
+        do {
+            try await write(shown, revision: revision)
+        } catch {
+            NSLog("Recent home feed flush failed: %@", error.localizedDescription)
+        }
+        finishSave(revision: revision)
     }
 
     private func prune() {
@@ -60,16 +90,50 @@ final class RecentHomeFeedStore {
 
     private func save() {
         let snapshot = shown
-        let url = fileURL
         saveTask?.cancel()
+        let revision = nextWriteRevision()
         saveTask = Task { [weak self] in
+            guard let self else { return }
             try? await Task.sleep(for: .seconds(1))
             guard !Task.isCancelled else { return }
-            await Task.detached(priority: .background) {
-                guard let data = try? JSONEncoder().encode(snapshot) else { return }
-                try? data.write(to: url, options: .atomic)
-            }.value
-            self?.saveTask = nil
+            do {
+                try await self.write(snapshot, revision: revision)
+            } catch {
+                NSLog("Recent home feed save failed: %@", error.localizedDescription)
+            }
+            self.finishSave(revision: revision)
         }
+    }
+
+    private func write(_ snapshot: [String: Date], revision: Int) async throws {
+        let data = try await Task.detached(priority: .background) {
+            try JSONEncoder().encode(snapshot)
+        }.value
+        try await fileWriter.write(data, revision: revision, to: fileURL)
+    }
+
+    private func nextWriteRevision() -> Int {
+        writeRevision += 1
+        return writeRevision
+    }
+
+    private func finishSave(revision: Int) {
+        if writeRevision == revision {
+            saveTask = nil
+        }
+    }
+
+    private func applyLoaded(_ loaded: [String: Date], startedAt version: Int) {
+        guard !isLoaded else { return }
+        if mutationVersion == version {
+            shown = loaded
+        } else {
+            for (bvid, date) in loaded where date > (shown[bvid] ?? .distantPast) {
+                shown[bvid] = date
+            }
+        }
+        prune()
+        isLoaded = true
+        loadTask = nil
     }
 }

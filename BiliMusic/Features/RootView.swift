@@ -143,11 +143,7 @@ private struct PlayerPopupSurface: View {
     @Binding var isPopupOpen: Bool
 
     var body: some View {
-        NowPlayingView(
-            isPresented: isPopupOpen,
-            isCoverTransitionSource: true,
-            coverRevealProgress: 1
-        )
+        NowPlayingView(isPresented: isPopupOpen)
         .popupContentBackgroundColor(.black)
         .popupItem {
             PopupItem(
@@ -200,7 +196,7 @@ enum AppResourceCleanup {
     static func handleBackgrounding(engine: PlayerEngine) async {
         engine.restoreCurrentArtworkFromImageCache()
         ImageMemoryCache.shared.releaseReloadableImages()
-        await CacheStore.shared.flush()
+        try? await CacheStore.shared.flush()
         await PlaybackHistoryStore.shared.flush()
         await engine.handleScenePhase(isBackground: true)
     }

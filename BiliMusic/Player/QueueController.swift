@@ -4,11 +4,19 @@ enum QueueController {
     static func nextIndex(
         mode: PlayerEngine.QueueMode,
         queueCount: Int,
-        currentIndex: Int
+        currentIndex: Int,
+        automatic: Bool
     ) -> Int? {
         switch mode {
         case .repeatOne:
-            return currentIndex
+            if automatic {
+                return currentIndex
+            }
+            // 手动切歌在队尾回绕到队首:hasNext 在单曲循环下恒为 true,
+            // 锁屏「下一曲」按钮可点,返回 nil 会让它看起来无响应。
+            guard queueCount > 0 else { return nil }
+            let next = currentIndex + 1
+            return next < queueCount ? next : 0
         case .shuffle:
             guard queueCount > 1 else { return nil }
             return (0..<queueCount).filter { $0 != currentIndex }.randomElement()
@@ -24,19 +32,5 @@ enum QueueController {
         }
         queue.append(contentsOf: additions)
         return additions
-    }
-
-    static func remove(at index: Int, from queue: inout [Track], currentIndex: inout Int) -> Bool {
-        guard queue.indices.contains(index), queue.count > 1 else { return false }
-        queue.remove(at: index)
-        if index < currentIndex {
-            currentIndex -= 1
-            return false
-        }
-        if index == currentIndex {
-            currentIndex = min(currentIndex, queue.count - 1)
-            return true
-        }
-        return false
     }
 }

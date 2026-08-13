@@ -138,6 +138,14 @@ struct RecommendationEngine {
         limit: Int = 24,
         policy: RecommendationSchedulingPolicy? = nil
     ) async -> [Track] {
+#if DEBUG
+        if UITestFixtures.enabled, mode == .relatedPanel {
+            return UITestFixtures.relatedPanelTracks(
+                current: context.current,
+                excludedKeys: context.excludedKeys,
+                limit: limit)
+        }
+#endif
         let schedulingPolicy = policy ?? RecommendationSchedulingPolicy.default(for: mode)
         let snapshot = await Self.makeSnapshot(mode: mode)
         let cacheKey = Self.cacheKey(mode: mode, context: context, snapshot: snapshot)
@@ -364,9 +372,12 @@ struct RecommendationEngine {
     private static func makeSnapshot(mode: Mode) async -> Snapshot {
         await CacheStore.shared.loadIfNeeded()
         await PlaybackHistoryStore.shared.loadIfNeeded()
-        // 发现类推荐要排除已收藏的歌,先补全收藏全集(缓存 10 分钟,绝大多数调用是命中)。
-        if mode != .radio {
-            await FavoriteManager.shared.syncAllFavoriteIDs()
+        // 收藏全集可能跨多个收藏夹和多页。冷启动时等待完整同步会把首页/推荐
+        // 的首批结果一起卡住；先用当前快照出结果，再在后台刷新供下一轮过滤。
+        if mode != .radio, CookieStore.isLoggedIn {
+            Task(priority: .utility) {
+                await FavoriteManager.shared.syncAllFavoriteIDs()
+            }
         }
         let historyEntries = PlaybackHistoryStore.shared.entries
         let cacheEntries = CacheStore.shared.entries

@@ -80,6 +80,7 @@ enum AudioCDNSelector {
                 return .timedOut
             }
 
+            var failedCount = 0
             for await result in group {
                 switch result {
                 case .reachable(let url, let milliseconds):
@@ -91,6 +92,12 @@ enum AudioCDNSelector {
                     return nil
                 case .failed(let url):
                     await hostHealth.recordFailure(url: url)
+                    failedCount += 1
+                    // 所有 probe 都已失败时不必等满 timeout,立即返回。
+                    if failedCount == probeCandidates.count {
+                        group.cancelAll()
+                        return nil
+                    }
                     continue
                 }
             }

@@ -34,158 +34,6 @@ private struct InlineMVPlayerView: UIViewRepresentable {
     }
 }
 
-/// 用原生分页滚动承载 SwiftUI 页面。拖动和减速期间冻结页面更新并栅格化现有图层，
-/// 让 Core Animation 只移动已经排好版的内容，避免播放器状态刷新打断横滑帧率。
-private struct NativePlayerPager: UIViewControllerRepresentable {
-    @Binding var selection: Int
-    let pages: [AnyView]
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(selection: $selection)
-    }
-
-    func makeUIViewController(context: Context) -> NativePlayerPagerController {
-        let controller = NativePlayerPagerController()
-        controller.pageChanged = { page in
-            context.coordinator.selection.wrappedValue = page
-        }
-        controller.install(pages: pages, initialPage: selection)
-        return controller
-    }
-
-    func updateUIViewController(_ controller: NativePlayerPagerController, context: Context) {
-        context.coordinator.selection = $selection
-        controller.update(pages: pages, selectedPage: selection)
-    }
-
-    final class Coordinator {
-        var selection: Binding<Int>
-        init(selection: Binding<Int>) { self.selection = selection }
-    }
-}
-
-private final class NativePlayerPagerController: UIPageViewController,
-    UIPageViewControllerDataSource,
-    UIPageViewControllerDelegate {
-    private var hosts: [UIHostingController<AnyView>] = []
-    private var pendingPages: [AnyView]?
-    private var requestedPage = 1
-    private var currentPage = 1
-    private var isTransitioningPages = false
-    var pageChanged: ((Int) -> Void)?
-
-    init() {
-        super.init(transitionStyle: .scroll, navigationOrientation: .horizontal)
-        dataSource = self
-        delegate = self
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        view.backgroundColor = .clear
-        view.subviews.compactMap { $0 as? UIScrollView }.forEach {
-            $0.backgroundColor = .clear
-            $0.isDirectionalLockEnabled = true
-            $0.decelerationRate = .fast
-        }
-    }
-
-    func install(pages: [AnyView], initialPage: Int) {
-        requestedPage = initialPage
-        currentPage = initialPage
-        for page in pages {
-            let host = UIHostingController(rootView: page)
-            host.view.backgroundColor = .clear
-            hosts.append(host)
-        }
-        guard hosts.indices.contains(initialPage) else { return }
-        setViewControllers([hosts[initialPage]], direction: .forward, animated: false)
-    }
-
-    func update(pages: [AnyView], selectedPage: Int) {
-        requestedPage = selectedPage
-        if isTransitioningPages {
-            pendingPages = pages
-            return
-        }
-        apply(pages: pages)
-        guard selectedPage != currentPage, hosts.indices.contains(selectedPage) else { return }
-        let direction: NavigationDirection = selectedPage > currentPage ? .forward : .reverse
-        currentPage = selectedPage
-        setViewControllers([hosts[selectedPage]], direction: direction, animated: false)
-    }
-
-    private func apply(pages: [AnyView]) {
-        guard pages.count == hosts.count else { return }
-        for (host, page) in zip(hosts, pages) {
-            host.rootView = page
-        }
-        pendingPages = nil
-    }
-
-    func pageViewController(
-        _ pageViewController: UIPageViewController,
-        viewControllerBefore viewController: UIViewController
-    ) -> UIViewController? {
-        guard let index = hosts.firstIndex(where: { $0 === viewController }), index > 0 else { return nil }
-        return hosts[index - 1]
-    }
-
-    func pageViewController(
-        _ pageViewController: UIPageViewController,
-        viewControllerAfter viewController: UIViewController
-    ) -> UIViewController? {
-        guard let index = hosts.firstIndex(where: { $0 === viewController }), index + 1 < hosts.count else { return nil }
-        return hosts[index + 1]
-    }
-
-    func pageViewController(
-        _ pageViewController: UIPageViewController,
-        willTransitionTo pendingViewControllers: [UIViewController]
-    ) {
-        isTransitioningPages = true
-        for host in hosts {
-            host.view.layer.shouldRasterize = true
-            host.view.layer.rasterizationScale = traitCollection.displayScale
-        }
-    }
-
-    func pageViewController(
-        _ pageViewController: UIPageViewController,
-        didFinishAnimating finished: Bool,
-        previousViewControllers: [UIViewController],
-        transitionCompleted completed: Bool
-    ) {
-        isTransitioningPages = false
-        for host in hosts { host.view.layer.shouldRasterize = false }
-        if completed,
-           let visible = viewControllers?.first,
-           let page = hosts.firstIndex(where: { $0 === visible }) {
-            currentPage = page
-            requestedPage = page
-            DispatchQueue.main.async { [weak self] in self?.pageChanged?(page) }
-        }
-        if let pendingPages { apply(pages: pendingPages) }
-    }
-}
-
-private struct PlayerProgressFrameKey: PreferenceKey {
-    static let defaultValue: CGRect = .null
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        value = nextValue()
-    }
-}
-
-private struct PlayerBottomContextFrameKey: PreferenceKey {
-    static let defaultValue: CGRect = .null
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        value = nextValue()
-    }
-}
-
 struct RecommendationPanelRefreshPolicy: Equatable {
     var shouldLoadImmediately: Bool
     var shouldMarkStale: Bool
@@ -204,32 +52,169 @@ struct RecommendationPanelRefreshPolicy: Equatable {
     }
 }
 
+struct RecommendationVisibleLoadPolicy: Equatable {
+    var shouldLoad: Bool
+
+    static func playbackStarted(
+        recommendationContextVisible: Bool,
+        recommendationsStale: Bool,
+        recommendationsEmpty: Bool,
+        recommendationsMismatched: Bool
+    ) -> RecommendationVisibleLoadPolicy {
+        visibleLoad(
+            recommendationContextVisible: recommendationContextVisible,
+            recommendationsStale: recommendationsStale,
+            recommendationsEmpty: recommendationsEmpty,
+            recommendationsMismatched: recommendationsMismatched)
+    }
+
+    static func visibleContextChanged(
+        recommendationContextVisible: Bool,
+        recommendationsStale: Bool,
+        recommendationsEmpty: Bool,
+        recommendationsMismatched: Bool
+    ) -> RecommendationVisibleLoadPolicy {
+        visibleLoad(
+            recommendationContextVisible: recommendationContextVisible,
+            recommendationsStale: recommendationsStale,
+            recommendationsEmpty: recommendationsEmpty,
+            recommendationsMismatched: recommendationsMismatched)
+    }
+
+    private static func visibleLoad(
+        recommendationContextVisible: Bool,
+        recommendationsStale: Bool,
+        recommendationsEmpty: Bool,
+        recommendationsMismatched: Bool
+    ) -> RecommendationVisibleLoadPolicy {
+        RecommendationVisibleLoadPolicy(
+            shouldLoad: recommendationContextVisible &&
+                (recommendationsStale || recommendationsEmpty || recommendationsMismatched))
+    }
+}
+
+private struct PlaylistLookupResult {
+    let playlist: BiliClient.UPPlaylist?
+    let tracks: [Track]
+    let error: String?
+}
+
+@MainActor
+private final class PlayerPlaylistLookupCache {
+    static let shared = PlayerPlaylistLookupCache()
+
+    private struct Entry {
+        let result: PlaylistLookupResult
+        let storedAt: Date
+    }
+
+    private var entries: [String: Entry] = [:]
+    private let capacity = 32
+
+    func result(for bvid: String, now: Date = Date()) -> PlaylistLookupResult? {
+        guard let entry = entries[bvid] else { return nil }
+        let ttl: TimeInterval
+        if entry.result.error != nil {
+            ttl = 60
+        } else if entry.result.playlist == nil {
+            ttl = 30 * 60
+        } else {
+            ttl = 2 * 60 * 60
+        }
+        guard now.timeIntervalSince(entry.storedAt) < ttl else {
+            entries[bvid] = nil
+            return nil
+        }
+        return entry.result
+    }
+
+    func store(_ result: PlaylistLookupResult, for bvid: String, now: Date = Date()) {
+        entries[bvid] = Entry(result: result, storedAt: now)
+        guard entries.count > capacity else { return }
+        let overflow = entries.count - capacity
+        for key in entries
+            .sorted(by: { $0.value.storedAt < $1.value.storedAt })
+            .prefix(overflow)
+            .map(\.key) {
+            entries[key] = nil
+        }
+    }
+}
+
 /// 全屏正在播放页(从 mini bar 上拉打开)。
 struct NowPlayingView: View {
     @Environment(PlayerEngine.self) private var engine
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var isPresented = true
-    var isCoverTransitionSource = true
-    var coverRevealProgress: CGFloat = 1
     var safeAreaTop: CGFloat = 0
-    private enum PlayerPage: Int, CaseIterable {
-        case queue = 0
-        case nowPlaying = 1
-        case recommendations = 2
+    private enum QueuePresentationState: Int, Comparable {
+        case collapsed = 0
+        case split = 1
+        case fullQueue = 2
 
-        var title: String {
+        static func < (lhs: QueuePresentationState, rhs: QueuePresentationState) -> Bool {
+            lhs.rawValue < rhs.rawValue
+        }
+
+        var isExpanded: Bool { self != .collapsed }
+
+        mutating func promote() {
             switch self {
-            case .queue:
-                return "队列"
-            case .nowPlaying:
-                return "正在播放"
-            case .recommendations:
-                return "推荐"
+            case .collapsed:
+                self = .split
+            case .split:
+                self = .fullQueue
+            case .fullQueue:
+                break
+            }
+        }
+
+        mutating func demote() {
+            switch self {
+            case .collapsed:
+                break
+            case .split:
+                self = .collapsed
+            case .fullQueue:
+                self = .split
             }
         }
     }
 
-    @State private var selectedPage = PlayerPage.nowPlaying.rawValue
+    private enum BottomContextTab: String, CaseIterable, Identifiable {
+        case queue
+        case playlist
+        case recommendations
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .queue:
+                return "当前列表"
+            case .playlist:
+                return "合集"
+            case .recommendations:
+                return "推荐"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .queue:
+                return "text.line.first.and.arrowtriangle.forward"
+            case .playlist:
+                return "rectangle.stack"
+            case .recommendations:
+                return "sparkles"
+            }
+        }
+
+        var accessibilityIdentifier: String {
+            "playerBottomTab-\(rawValue)"
+        }
+    }
+
     @State private var recommendedTracks: [Track] = []
     @State private var recommendationsLoading = false
     @State private var recommendationsError: String?
@@ -242,57 +227,48 @@ struct NowPlayingView: View {
     @State private var recommendationSeedKey: TrackKey?
     @State private var shownRecommendationKeys: Set<TrackKey> = []
     @State private var recommendationTask: Task<Void, Never>?
+    @State private var recommendationLoadID = UUID()
     @State private var playlistLookupTask: Task<Void, Never>?
-    @State private var playlistLookupCache: [String: PlaylistLookupResult] = [:]
+    @State private var scheduledPlaylistBVID: String?
     @State private var showLyrics = false
     @State private var showMVFullscreen = false
     @State private var showUPPlaylists = false
     @State private var showFavoriteFolders = false
     @State private var switchingMode = false
+    @GestureState private var bottomContextDragOffset: CGFloat = 0
+    @State private var queuePresentationState: QueuePresentationState = .collapsed
+    @State private var bottomContextTab: BottomContextTab = .queue
     @State private var playHapticTrigger = 0
     @State private var prevHapticTrigger = 0
     @State private var nextHapticTrigger = 0
     @State private var favoriteHapticTrigger = 0
     @State private var favoriteWasAdded = false
     @State private var downloadTrigger = 0
-    @State private var isProgressScrubbing = false
-    @State private var suppressPageSwipeForScrub = false
-    @State private var progressScrubGeneration = 0
-    @State private var progressFrameInGlobal: CGRect = .null
-    @State private var listRowActionSuppressedUntil: Date?
     @State private var landscapeMVFullscreenKey: TrackKey?
     @State private var showInlineMVChrome = false
     @State private var inlineMVChromeHideTask: Task<Void, Never>?
-    @AppStorage(TrackTitleFormatter.cleanListTitlesDefaultsKey) private var cleanListTitles = true
+    @AppStorage(TrackTitleFormatter.cleanListTitlesDefaultsKey) private var cleanListTitles = false
     private var favorites: FavoriteManager { .shared }
 
     private enum Layout {
-        static let topChromeBottomPadding: CGFloat = 2
-        static let topChromeControlSize: CGFloat = 44
-        static let contentTopInset: CGFloat = 4
-        static let dismissIndicatorWidth: CGFloat = 60
-        static let dismissIndicatorHeight: CGFloat = 5
+        static let topChromeBottomPadding: CGFloat = 0
+        static let contentTopInset: CGFloat = 0
         static let centerHorizontalPadding: CGFloat = 26
-        static let contextPreviewLimit = 8
-        static let sidePanelPreviewLimit = 5
-        static let compactRowHeight: CGFloat = 34
+        static let bottomSheetRowHeight: CGFloat = 52
+        static let collapsedDrawerTopPadding: CGFloat = 36
+        static let compactCollapsedDrawerTopPadding: CGFloat = 28
+        static let fullQueueMiniHeaderHeight: CGFloat = 66
     }
 
     private enum PlayerSurface {
-        static let primaryText = Color.white.opacity(0.90)
-        static let secondaryText = Color.white.opacity(0.52)
-        static let tertiaryText = Color.white.opacity(0.34)
-        static let divider = Color.white.opacity(0.08)
-        static let panelFill = Color.white.opacity(0.11)
-        static let panelStroke = Color.white.opacity(0.13)
+        static let primaryText = Color.white.opacity(0.94)
+        static let secondaryText = Color.white.opacity(0.66)
+        static let tertiaryText = Color.white.opacity(0.46)
+        static let divider = Color.white.opacity(0.11)
+        static let panelFill = Color.white.opacity(0.14)
+        static let panelStroke = Color.white.opacity(0.17)
         static let accentFill = AppTheme.accent.opacity(0.18)
         static let accentStroke = AppTheme.accent.opacity(0.30)
-    }
-
-    private struct PlaylistLookupResult {
-        let playlist: BiliClient.UPPlaylist?
-        let tracks: [Track]
-        let error: String?
     }
 
     var body: some View {
@@ -307,6 +283,7 @@ struct NowPlayingView: View {
                 playerPages(
                     coverSize: coverSize,
                     width: proxy.size.width,
+                    safeAreaTop: effectiveSafeAreaTop,
                     isLandscape: isLandscape
                 )
             }
@@ -337,56 +314,80 @@ struct NowPlayingView: View {
             MVFullscreenView()
         }
         .onAppear {
-            scheduleCurrentPlaylistLookup(force: false, delay: .milliseconds(1600))
             if engine.state == .playing {
-                scheduleRecommendationLoad(clear: false, allowBackground: true)
+                scheduleCurrentPlaylistLookup(force: false, delay: .milliseconds(350))
             }
         }
         .onChange(of: engine.playbackMode) { _, mode in
-            if mode == .mv {
-                inlineMVChromeHideTask?.cancel()
-                showInlineMVChrome = false
-            } else {
-                inlineMVChromeHideTask?.cancel()
-                showInlineMVChrome = false
-            }
+            inlineMVChromeHideTask?.cancel()
+            showInlineMVChrome = false
             if mode != .mv {
                 landscapeMVFullscreenKey = nil
             }
         }
-        .onChange(of: engine.current?.bvid) {
+        .onChange(of: engine.current?.key) { oldKey, newKey in
+            if let oldKey, let newKey, oldKey.isCIDEnrichment(to: newKey) {
+                return
+            }
             recommendationTask?.cancel()
+            recommendationLoadID = UUID()
             playlistLookupTask?.cancel()
-            scheduleCurrentPlaylistLookup(force: false, delay: .milliseconds(1800))
+            scheduledPlaylistBVID = nil
+            currentPlaylist = nil
+            currentPlaylistTracks = []
+            currentPlaylistError = nil
+            currentPlaylistLoading = false
             recommendationSeedKey = nil
             recommendedTracks = []
             recommendationsError = nil
             shownRecommendationKeys = []
             let refreshPolicy = RecommendationPanelRefreshPolicy.currentTrackChanged(
                 suppressImmediateRefresh: suppressNextRecommendationRefresh,
-                recommendationPanelVisible: selectedPage == PlayerPage.recommendations.rawValue)
+                recommendationPanelVisible: isRecommendationContextVisible)
             suppressNextRecommendationRefresh = false
             recommendationsStale = refreshPolicy.shouldMarkStale
             if refreshPolicy.shouldLoadImmediately {
-                scheduleRecommendationLoad(clear: true, allowBackground: false)
+                scheduleRecommendationLoad(clear: true)
                 recommendationsStale = false
-            } else if engine.state == .playing {
-                scheduleRecommendationLoad(clear: false, allowBackground: true)
             }
         }
         .onChange(of: engine.state) { _, state in
             guard state == .playing else { return }
-            scheduleRecommendationLoad(clear: false, allowBackground: true)
-        }
-        .onChange(of: selectedPage) { _, page in
-            guard page == PlayerPage.recommendations.rawValue else { return }
-            guard recommendationsStale || recommendedTracks.isEmpty || !recommendationsMatchCurrentTrack else { return }
+            scheduleCurrentPlaylistLookup(force: false, delay: .milliseconds(350))
+            let loadPolicy = RecommendationVisibleLoadPolicy.playbackStarted(
+                recommendationContextVisible: isRecommendationContextVisible,
+                recommendationsStale: recommendationsStale,
+                recommendationsEmpty: recommendedTracks.isEmpty,
+                recommendationsMismatched: !recommendationsMatchCurrentTrack)
+            guard loadPolicy.shouldLoad else { return }
             recommendationsStale = false
-            scheduleRecommendationLoad(clear: !recommendedTracks.isEmpty, allowBackground: false)
+            scheduleRecommendationLoad(clear: !recommendedTracks.isEmpty)
+        }
+        .onChange(of: bottomContextTab) { _, _ in
+            let loadPolicy = RecommendationVisibleLoadPolicy.visibleContextChanged(
+                recommendationContextVisible: isRecommendationContextVisible,
+                recommendationsStale: recommendationsStale,
+                recommendationsEmpty: recommendedTracks.isEmpty,
+                recommendationsMismatched: !recommendationsMatchCurrentTrack)
+            guard loadPolicy.shouldLoad else { return }
+            recommendationsStale = false
+            scheduleRecommendationLoad(clear: !recommendedTracks.isEmpty)
+        }
+        .onChange(of: queuePresentationState) { _, _ in
+            let loadPolicy = RecommendationVisibleLoadPolicy.visibleContextChanged(
+                recommendationContextVisible: isRecommendationContextVisible,
+                recommendationsStale: recommendationsStale,
+                recommendationsEmpty: recommendedTracks.isEmpty,
+                recommendationsMismatched: !recommendationsMatchCurrentTrack)
+            guard loadPolicy.shouldLoad else { return }
+            recommendationsStale = false
+            scheduleRecommendationLoad(clear: !recommendedTracks.isEmpty)
         }
         .onDisappear {
             recommendationTask?.cancel()
+            recommendationLoadID = UUID()
             playlistLookupTask?.cancel()
+            scheduledPlaylistBVID = nil
             inlineMVChromeHideTask?.cancel()
         }
     }
@@ -399,57 +400,64 @@ struct NowPlayingView: View {
             return min(max(168, size.width * 0.24), max(168, availableHeight * 0.48), 250)
         }
 
-        return min(max(270, size.width - 20), max(286, availableHeight * 0.49), 430)
+        return min(max(300, size.width - 44), max(306, availableHeight * 0.46), 398)
     }
 
+    @ViewBuilder
     private var playerBackground: some View {
+        let palette = engine.currentArtworkPalette
         ZStack {
-            Color.black
+            Color(uiColor: palette.middle)
 
-            engine.currentArtworkPalette.gradient
-                .opacity(0.92)
+            palette.gradient
+                .opacity(0.96)
+
+            palette.glow
+                .blendMode(.screen)
+                .opacity(0.56)
 
             RadialGradient(
                 colors: [
-                    Color.white.opacity(0.07),
+                    Color.white.opacity(0.12),
                     Color.clear
                 ],
-                center: .top,
-                startRadius: 20,
-                endRadius: 430
+                center: .topTrailing,
+                startRadius: 32,
+                endRadius: 520
             )
 
             LinearGradient(
                 colors: [
-                    Color.black.opacity(0.06),
-                    Color.black.opacity(0.28),
-                    Color.black.opacity(0.76)
+                    Color.white.opacity(0.04),
+                    Color.black.opacity(0.08),
+                    Color.black.opacity(0.34)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
         }
+        .animation(.easeInOut(duration: 0.32), value: palette)
     }
 
     @ViewBuilder
-    private func nowPlayingPage(coverSize: CGFloat, isLandscape: Bool) -> some View {
+    private func nowPlayingPage(coverSize: CGFloat, pageWidth: CGFloat, isLandscape: Bool) -> some View {
         if isLandscape {
-            landscapeNowPlayingPage(coverSize: coverSize)
+            landscapeNowPlayingPage(coverSize: coverSize, pageWidth: pageWidth)
         } else {
-            portraitNowPlayingPage(coverSize: coverSize)
+            portraitNowPlayingPage(coverSize: coverSize, pageWidth: pageWidth)
         }
     }
 
-    private func landscapeNowPlayingPage(coverSize: CGFloat) -> some View {
-        HStack(spacing: 22) {
-            mediaView(coverSize: coverSize)
-                .contentShape(Rectangle())
+    private func landscapeNowPlayingPage(coverSize: CGFloat, pageWidth: CGFloat) -> some View {
+            HStack(spacing: 22) {
+                mediaView(coverSize: coverSize)
 
             VStack(spacing: 8) {
                 playerMetadata(compact: true)
 
                 playerControlStack(compact: true)
             }
+            .playerContentReveal(opacity: playerContentOpacity)
             .frame(maxWidth: .infinity)
         }
         .padding(.horizontal, 34)
@@ -457,51 +465,222 @@ struct NowPlayingView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
-    private func portraitNowPlayingPage(coverSize: CGFloat) -> some View {
+    private func portraitNowPlayingPage(coverSize: CGFloat, pageWidth: CGFloat) -> some View {
         GeometryReader { proxy in
             let isCompact = proxy.size.height < 760
-            let topPadding = isCompact ? 12 : min(32, max(18, proxy.size.height * 0.036))
-            let coverBottomSpacing: CGFloat = isCompact ? 22 : 30
-            let metadataBottomSpacing: CGFloat = isCompact ? 22 : 30
-            let bottomFloor: CGFloat = isCompact ? 54 : 88
+            let activeCoverSize = portraitCoverSize(base: coverSize, isCompact: isCompact)
+            let topPadding = portraitTopPadding(height: proxy.size.height, isCompact: isCompact)
+            let coverBottomSpacing = portraitCoverBottomSpacing(isCompact: isCompact)
+            let metadataBottomSpacing = portraitMetadataBottomSpacing(isCompact: isCompact)
+            let bottomFloor: CGFloat = queuePresentationState == .fullQueue ? 0 : (isCompact ? 16 : 26)
+            let maxRows = bottomContextMaxRows(for: proxy.size, isCompact: isCompact)
+            let drawerTopOffset = fullQueueDrawerTopOffset(for: proxy.size.height)
+            let drawerHeight = max(420, proxy.size.height - drawerTopOffset)
+            let drawerFrameHeight: CGFloat? = queuePresentationState == .fullQueue ? drawerHeight : nil
+            let drawerAlignment: Alignment = queuePresentationState == .fullQueue ? .top : .bottom
+            let drawerOffsetY: CGFloat = queuePresentationState == .fullQueue ? drawerTopOffset : 0
+            let drawerBottomPadding: CGFloat = queuePresentationState == .collapsed
+                ? (isCompact ? 24 : 30)
+                : 0
 
-            VStack(spacing: 0) {
-                mediaView(coverSize: coverSize)
-                    .contentShape(Rectangle())
-                    .padding(.top, topPadding)
-                    .padding(.bottom, coverBottomSpacing)
+            ZStack(alignment: .top) {
+                if queuePresentationState == .fullQueue {
+                    fullQueueMiniPlayerHeader
+                        .padding(.horizontal, 24)
+                        .frame(height: Layout.fullQueueMiniHeaderHeight, alignment: .center)
+                        .playerContentReveal(opacity: playerContentOpacity)
+                } else {
+                    VStack(spacing: 0) {
+                        mediaView(coverSize: activeCoverSize)
+                            .padding(.top, topPadding)
+                            .padding(.bottom, coverBottomSpacing)
 
-                playerMetadata(compact: false, centered: false)
-                    .padding(.horizontal, 34)
-                    .padding(.bottom, metadataBottomSpacing)
+                        VStack(spacing: 0) {
+                            playerMetadata(
+                                compact: isCompact || queuePresentationState.isExpanded,
+                                centered: false)
+                                .padding(.horizontal, 34)
+                                .padding(.bottom, metadataBottomSpacing + (queuePresentationState == .collapsed ? 16 : 0))
+                                .playerContentReveal(opacity: playerContentOpacity)
 
-                Spacer(minLength: isCompact ? 8 : 18)
+                            portraitPlayerControls(
+                                isCompact: isCompact,
+                                maxRows: maxRows,
+                                includeBottomContext: false)
+                                .playerContentReveal(opacity: playerContentOpacity)
 
-                portraitPlayerControls(isCompact: isCompact)
+                            if let favoriteError = favorites.lastError {
+                                Text(favoriteError)
+                                    .font(.caption2)
+                                    .foregroundStyle(AppTheme.error)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.top, 8)
+                                    .padding(.horizontal, 28)
+                                    .playerContentReveal(opacity: playerContentOpacity)
+                            }
+                        }
+                        .offset(y: queuePresentationState == .collapsed ? 64 : 0)
 
-                if let favoriteError = favorites.lastError {
-                    Text(favoriteError)
-                        .font(.caption2)
-                        .foregroundStyle(AppTheme.error)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 8)
-                        .padding(.horizontal, 28)
+                        Spacer(minLength: bottomFloor)
+                    }
                 }
 
-                Color.clear
-                    .frame(height: bottomFloor)
-                    .accessibilityHidden(true)
+                bottomContextDrawer(maxRows: maxRows)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: drawerAlignment)
+                    .frame(height: drawerFrameHeight, alignment: .top)
+                    .offset(y: drawerOffsetY)
+                    .padding(.bottom, drawerBottomPadding)
+                    .layoutPriority(queuePresentationState == .fullQueue ? 1 : 0)
+                    .playerContentReveal(opacity: playerContentOpacity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
+        .animation(contextTransitionAnimation, value: queuePresentationState)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
+    private func fullQueueDrawerTopOffset(for pageHeight: CGFloat) -> CGFloat {
+        pageHeight < 760 ? 76 : 84
+    }
+
+    private var fullQueueMiniPlayerHeader: some View {
+        HStack(spacing: 14) {
+            fullQueueHeaderArtwork
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(displayTitle)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(PlayerSurface.primaryText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+
+                Text(displayArtist)
+                    .font(.system(size: 15))
+                    .foregroundStyle(PlayerSurface.secondaryText)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button {
+                playHapticTrigger += 1
+                engine.togglePlayPause()
+            } label: {
+                ZStack {
+                    Image(systemName: engine.state == .playing ? "pause.fill" : "play.fill")
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundStyle(Color.white.opacity(0.95))
+                        .contentTransition(.symbolEffect(.replace))
+
+                    if engine.state == .loading {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(Color.white.opacity(0.82))
+                    }
+                }
+                .frame(width: 46, height: 46)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(engine.state == .playing ? "暂停" : "播放")
+            .accessibilityIdentifier("playerTransportControls")
+            .sensoryFeedback(.impact(weight: .medium), trigger: playHapticTrigger)
+        }
+        .frame(height: 58)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("playerFullQueueMiniHeader")
+    }
+
+    @ViewBuilder
+    private var fullQueueHeaderArtwork: some View {
+        let currentTrack = engine.current
+        let coverURL = BiliArtworkURL.thumbnail(currentTrack?.coverURL, width: 320, height: 180)
+        if let coverURL {
+            CachedAsyncImage(
+                url: coverURL,
+                targetSize: CGSize(width: 72, height: 42),
+                fallbackImage: engine.currentCoverImage,
+                onImageLoaded: { image in
+                    engine.rememberCurrentCover(image, for: currentTrack)
+                }
+            ) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+                artworkPlaceholder(cornerRadius: 6)
+            }
+            .frame(width: 72, height: 42)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        } else if let currentCoverImage = engine.currentCoverImage {
+            Image(uiImage: currentCoverImage)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: 72, height: 42)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        } else {
+            artworkPlaceholder(cornerRadius: 6)
+                .frame(width: 72, height: 42)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+    }
+
+    private func portraitCoverSize(base: CGFloat, isCompact: Bool) -> CGFloat {
+        switch queuePresentationState {
+        case .collapsed:
+            return isCompact ? min(base * 0.98, base - 4) : min(base * 0.98, base - 6)
+        case .split:
+            return max(isCompact ? 188 : 226, min(base * 0.74, base - 58))
+        case .fullQueue:
+            return max(isCompact ? 128 : 150, min(base * 0.48, 178))
+        }
+    }
+
+    private func portraitTopPadding(height: CGFloat, isCompact: Bool) -> CGFloat {
+        switch queuePresentationState {
+        case .collapsed:
+            return isCompact ? 22 : min(58, max(40, height * 0.052))
+        case .split:
+            return isCompact ? 4 : 8
+        case .fullQueue:
+            return isCompact ? 0 : 4
+        }
+    }
+
+    private func portraitCoverBottomSpacing(isCompact: Bool) -> CGFloat {
+        switch queuePresentationState {
+        case .collapsed:
+            return isCompact ? 18 : 26
+        case .split:
+            return isCompact ? 8 : 10
+        case .fullQueue:
+            return isCompact ? 8 : 10
+        }
+    }
+
+    private func portraitMetadataBottomSpacing(isCompact: Bool) -> CGFloat {
+        switch queuePresentationState {
+        case .collapsed:
+            return isCompact ? 10 : 14
+        case .split:
+            return isCompact ? 8 : 10
+        case .fullQueue:
+            return isCompact ? 8 : 10
+        }
+    }
+
+    private func bottomContextMaxRows(for size: CGSize, isCompact: Bool) -> Int {
+        switch queuePresentationState {
+        case .collapsed:
+            return 0
+        case .split:
+            return isCompact ? 4 : 5
+        case .fullQueue:
+            return Int.max
+        }
+    }
+
     private func playerMetadata(compact: Bool, centered: Bool = true) -> some View {
-        VStack(alignment: centered ? .center : .leading, spacing: compact ? 3 : 8) {
+        VStack(alignment: centered ? .center : .leading, spacing: compact ? 3 : 6) {
             Text(displayTitle)
-                .font(.system(size: compact ? 20 : 23, weight: .semibold))
+                .font(.system(size: compact ? 19 : 22, weight: .semibold))
                 .foregroundStyle(Color.white)
                 .multilineTextAlignment(centered ? .center : .leading)
                 .lineLimit(compact ? 1 : 2)
@@ -509,12 +688,14 @@ struct NowPlayingView: View {
                 .minimumScaleFactor(0.82)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: centered ? .center : .leading)
-                .accessibilityIdentifier("nowPlayingMetadata")
+                .accessibilityIdentifier("nowPlayingTitle")
+
             Text(displayArtist)
-                .font(.system(size: compact ? 13 : 17, weight: .regular))
+                .font(.system(size: compact ? 13 : 16, weight: .regular))
                 .foregroundStyle(Color.white.opacity(0.62))
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: centered ? .center : .leading)
+
             if case .failed(let message) = engine.state {
                 Text(message)
                     .font(.caption)
@@ -523,77 +704,122 @@ struct NowPlayingView: View {
                     .frame(maxWidth: .infinity, alignment: centered ? .center : .leading)
             }
         }
+        .accessibilityIdentifier("nowPlayingMetadata")
         .frame(maxWidth: .infinity, alignment: centered ? .center : .leading)
     }
 
     private var displayTitle: String {
-        guard let rawTitle = engine.current?.title else { return "" }
-        return TrackTitleFormatter.cleanedTitle(rawTitle)
+        guard let current = engine.current else { return "" }
+        return TrackTitleFormatter.displayMetadata(for: current, clean: cleanListTitles).title
     }
 
     private var displayArtist: String {
         guard let current = engine.current else { return "" }
-        return TrackTitleFormatter.displayMetadata(for: current, clean: true).artist
+        return TrackTitleFormatter.displayMetadata(for: current, clean: cleanListTitles).artist
     }
 
-    private func portraitPlayerControls(isCompact: Bool) -> some View {
+    private func portraitPlayerControls(
+        isCompact: Bool,
+        maxRows: Int,
+        includeBottomContext: Bool = true
+    ) -> some View {
         VStack(spacing: 0) {
-            trackedProgressView
+            progressView
 
             transportControls
-                .padding(.top, isCompact ? 24 : 28)
+                .padding(.top, portraitTransportTopPadding(isCompact: isCompact))
 
-            playerToolbar
-                .padding(.top, isCompact ? 20 : 24)
+            VStack(spacing: 0) {
+                if queuePresentationState != .fullQueue {
+                    playerToolbarButtons
+                        .padding(.top, portraitToolbarTopPadding(isCompact: isCompact))
+                        .transition(
+                            .opacity
+                                .combined(with: .scale(scale: 0.98, anchor: .top))
+                                .combined(with: .move(edge: .top))
+                        )
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("playerToolbar")
+                }
 
+                if includeBottomContext {
+                    bottomContextDrawer(maxRows: maxRows)
+                        .padding(.top, portraitBottomContextTopPadding(isCompact: isCompact))
+                }
+            }
+        }
+    }
+
+    private func portraitTransportTopPadding(isCompact: Bool) -> CGFloat {
+        switch queuePresentationState {
+        case .collapsed:
+            return isCompact ? 18 : 24
+        case .split:
+            return isCompact ? 10 : 12
+        case .fullQueue:
+            return isCompact ? 8 : 10
+        }
+    }
+
+    private func portraitToolbarTopPadding(isCompact: Bool) -> CGFloat {
+        switch queuePresentationState {
+        case .collapsed:
+            return isCompact ? 14 : 18
+        case .split:
+            return isCompact ? 8 : 10
+        case .fullQueue:
+            return isCompact ? 8 : 10
+        }
+    }
+
+    private func portraitBottomContextTopPadding(isCompact: Bool) -> CGFloat {
+        switch queuePresentationState {
+        case .collapsed:
+            return isCompact ? Layout.compactCollapsedDrawerTopPadding : Layout.collapsedDrawerTopPadding
+        case .split:
+            return isCompact ? 8 : 10
+        case .fullQueue:
+            return isCompact ? 6 : 8
         }
     }
 
     private func playerControlStack(compact: Bool) -> some View {
         VStack(spacing: compact ? 6 : 12) {
-            trackedProgressView
+            progressView
 
             transportControls
                 .padding(.top, compact ? -6 : -2)
 
-            playerToolbar
+            playerToolbarButtons
                 .padding(.top, compact ? -2 : 2)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("playerToolbar")
         }
         .padding(.bottom, 2)
     }
 
-    private var trackedProgressView: some View {
-        progressView
-            .background(
-                GeometryReader { geo in
-                    Color.clear.preference(
-                        key: PlayerProgressFrameKey.self,
-                        value: geo.frame(in: .global)
-                    )
-                }
-            )
+    private func playerPages(coverSize: CGFloat, width: CGFloat, safeAreaTop: CGFloat, isLandscape: Bool) -> some View {
+        nowPlayingPage(coverSize: coverSize, pageWidth: width, isLandscape: isLandscape)
+            .padding(.top, playerContentTopInset(safeAreaTop: safeAreaTop, isLandscape: isLandscape))
+            .contentShape(Rectangle())
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .clipped()
+        .contentShape(Rectangle())
+        .overlay(alignment: .top) {
+            playerTopChrome(safeAreaTop: safeAreaTop)
+                .playerContentReveal(opacity: playerContentOpacity)
+        }
     }
 
-    private func playerPages(coverSize: CGFloat, width: CGFloat, isLandscape: Bool) -> some View {
-        NativePlayerPager(
-            selection: $selectedPage,
-            pages: [
-                AnyView(horizontalListPage(accessibilityIdentifier: "playerQueuePage") { queueList }),
-                AnyView(
-                    nowPlayingPage(coverSize: coverSize, isLandscape: isLandscape)
-                        .padding(.top, Layout.contentTopInset)
-                        .contentShape(Rectangle())
-                ),
-                AnyView(horizontalListPage(accessibilityIdentifier: "playerRecommendationsPage") {
-                    recommendationsList
-                })
-            ])
-        .frame(maxHeight: .infinity)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            playerTopChrome
-        }
-        .onPreferenceChange(PlayerProgressFrameKey.self) { frame in
-            progressFrameInGlobal = frame
+    private func playerContentTopInset(safeAreaTop: CGFloat, isLandscape: Bool) -> CGFloat {
+        guard !isLandscape else { return Layout.contentTopInset }
+        switch queuePresentationState {
+        case .collapsed:
+            return max(124, safeAreaTop + 78)
+        case .split:
+            return max(58, safeAreaTop + 18)
+        case .fullQueue:
+            return max(92, safeAreaTop + 42)
         }
     }
 
@@ -601,7 +827,7 @@ struct NowPlayingView: View {
     private func mediaView(coverSize: CGFloat) -> some View {
         ZStack(alignment: .topTrailing) {
             let currentTrack = engine.current
-            let coverURL = thumbnailURL(currentTrack?.coverURL, width: 960, height: 540)
+            let coverURL = BiliArtworkURL.thumbnail(currentTrack?.coverURL, width: 960, height: 540)
             ZStack {
                 if engine.playbackMode == .mv, let player = engine.avPlayer {
                     InlineMVPlayerView(player: player)
@@ -628,7 +854,6 @@ struct NowPlayingView: View {
                     artworkPlaceholder(cornerRadius: AppTheme.playerCoverRadius)
                 }
             }
-            .popupTransitionTarget()
 
             if engine.playbackMode == .mv {
                 Button {
@@ -649,13 +874,20 @@ struct NowPlayingView: View {
             }
         }
             .frame(width: coverSize, height: coverSize * 9 / 16)
-            .opacity(coverRevealOpacity)
+            .popupTransitionTarget()
             .clipShape(RoundedRectangle(cornerRadius: AppTheme.playerCoverRadius))
             .overlay {
                 RoundedRectangle(cornerRadius: AppTheme.playerCoverRadius)
                     .stroke(Color.primary.opacity(0.06), lineWidth: 1)
             }
             .shadow(color: .black.opacity(0.42), radius: 28, y: 18)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("播放封面")
+            .accessibilityIdentifier("nowPlayingArtwork")
+            .simultaneousGesture(TapGesture().onEnded {
+                guard engine.playbackMode == .mv else { return }
+                revealInlineMVChrome()
+            })
     }
 
     private func revealInlineMVChrome() {
@@ -668,11 +900,8 @@ struct NowPlayingView: View {
         }
     }
 
-    private var coverRevealOpacity: Double {
-        guard isCoverTransitionSource else { return 0 }
-        let progress = min(1, max(0, (coverRevealProgress - 0.55) / 0.28))
-        let smoothed = progress * progress * (3 - 2 * progress)
-        return Double(smoothed)
+    private var playerContentOpacity: Double {
+        1
     }
 
     private func artworkPlaceholder(cornerRadius: CGFloat) -> some View {
@@ -696,14 +925,12 @@ struct NowPlayingView: View {
     private var progressView: some View {
         // 独立子视图:只有它订阅 engine.currentTime(每 0.5s 变),
         // 避免整个播放器 body(封面、操作栏、TabView)跟着每半秒重渲染。
-        PlayerProgressBar { scrubbing in
-            setProgressScrubbing(scrubbing)
-        }
+        PlayerProgressBar()
     }
 
     private var transportControls: some View {
-        HStack(spacing: 46) {
-            PlayerIconButton(systemName: "backward.fill", size: 31, accessibilityLabel: "上一曲") {
+        HStack(spacing: 48) {
+            PlayerIconButton(systemName: "backward.fill", size: 30, accessibilityLabel: "上一曲") {
                 prevHapticTrigger += 1
                 Task { await engine.playPrevious() }
             }
@@ -713,17 +940,17 @@ struct NowPlayingView: View {
                 engine.togglePlayPause()
             } label: {
                 Image(systemName: engine.state == .playing ? "pause.fill" : "play.fill")
-                    .font(.system(size: 36, weight: .bold))
+                    .font(.system(size: 34, weight: .bold))
                     .contentTransition(.symbolEffect(.replace))
-                    .frame(width: 78, height: 78)
+                    .frame(width: 72, height: 72)
                     .foregroundStyle(Color.black.opacity(0.92))
                     .background(Color.white, in: Circle())
-                    .shadow(color: .black.opacity(0.18), radius: 16, y: 8)
+                    .shadow(color: .black.opacity(0.16), radius: 14, y: 7)
             }
             .overlay { if engine.state == .loading { ProgressView().tint(Color.black.opacity(0.80)) } }
             .accessibilityIdentifier("playerTransportControls")
             .sensoryFeedback(.impact(weight: .medium), trigger: playHapticTrigger)
-            PlayerIconButton(systemName: "forward.fill", size: 31, accessibilityLabel: "下一曲") {
+            PlayerIconButton(systemName: "forward.fill", size: 30, accessibilityLabel: "下一曲") {
                 nextHapticTrigger += 1
                 Task { await engine.playNext() }
             }
@@ -733,18 +960,16 @@ struct NowPlayingView: View {
         .foregroundStyle(Color.white.opacity(0.94))
     }
 
-    private var playerToolbar: some View {
-        HStack(spacing: 22) {
+    private var playerToolbarButtons: some View {
+        HStack(spacing: 20) {
             favoriteButton
             downloadButton
             mvSwitchButton
             moreMenu
         }
-        .frame(maxWidth: 262)
+        .frame(maxWidth: 246)
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 18)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("playerToolbar")
     }
 
     private var favoriteButton: some View {
@@ -772,6 +997,35 @@ struct NowPlayingView: View {
         .symbolEffect(.bounce, value: isFavorite)
         .accessibilityHint("收藏到默认收藏夹")
         .sensoryFeedback(.intent(favoriteWasAdded ? .success : .selection), trigger: favoriteHapticTrigger)
+        .contextMenu {
+            if CookieStore.isLoggedIn, !favorites.folders.isEmpty {
+                ForEach(favorites.folders) { folder in
+                    Button {
+                        guard let current = engine.current else { return }
+                        Task {
+                            await favorites.toggle(track: current, folder: folder)
+                        }
+                    } label: {
+                        Label(folder.title, systemImage: "folder")
+                    }
+                }
+            } else {
+                Button {
+                    showFavoriteFolders = true
+                } label: {
+                    Label(
+                        CookieStore.isLoggedIn ? "选择收藏夹" : "请先登录 B 站",
+                        systemImage: "folder.badge.plus")
+                }
+                .disabled(!CookieStore.isLoggedIn)
+            }
+        }
+        .task {
+            guard CookieStore.isLoggedIn, favorites.folders.isEmpty else { return }
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            await favorites.loadFolders()
+        }
     }
 
     private var downloadButton: some View {
@@ -817,7 +1071,7 @@ struct NowPlayingView: View {
         Menu {
             ForEach(PlayerEngine.QueueMode.allCases) { mode in
                 Button {
-                    engine.queueMode = mode
+                    engine.setQueueMode(mode)
                 } label: {
                     Label(mode.rawValue, systemImage: mode.icon).tag(mode)
                 }
@@ -939,7 +1193,7 @@ struct NowPlayingView: View {
             Section("播放模式") {
                 ForEach(PlayerEngine.QueueMode.allCases) { mode in
                     Button {
-                        engine.queueMode = mode
+                        engine.setQueueMode(mode)
                     } label: {
                         Label(mode.rawValue, systemImage: engine.queueMode == mode ? "checkmark" : mode.icon)
                     }
@@ -989,60 +1243,28 @@ struct NowPlayingView: View {
         .buttonStyle(.plain)
     }
 
-    private var playerTopChrome: some View {
+    private func playerTopChrome(safeAreaTop: CGFloat) -> some View {
         VStack(spacing: 4) {
+            Color.clear
+                .frame(height: max(safeAreaTop, 12))
+                .accessibilityHidden(true)
             Capsule(style: .continuous)
                 .fill(Color.white.opacity(0.58))
-                .frame(
-                    width: Layout.dismissIndicatorWidth,
-                    height: Layout.dismissIndicatorHeight
-                )
-                .padding(.top, 8)
-                .frame(height: 20, alignment: .top)
-                .accessibilityElement(children: .ignore)
+                .frame(width: 60, height: 5)
                 .accessibilityLabel("下滑收起播放器")
-                .accessibilityIdentifier("playerDismissIndicator")
-
-            playerPageHint
-            .padding(.horizontal, 20)
             .padding(.bottom, Layout.topChromeBottomPadding)
         }
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
-    }
-
-    private var playerPageHint: some View {
-        VStack(spacing: 5) {
-            Text(PlayerPage(rawValue: selectedPage)?.title ?? PlayerPage.nowPlaying.title)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Color.white.opacity(0.62))
-                .lineLimit(1)
-
-            HStack(spacing: 4) {
-                ForEach(PlayerPage.allCases, id: \.rawValue) { page in
-                    RoundedRectangle(cornerRadius: 1, style: .continuous)
-                        .fill(page.rawValue == selectedPage ? AppTheme.accent : Color.white.opacity(0.26))
-                        .frame(
-                            width: page.rawValue == selectedPage ? 14 : 5,
-                            height: 2
-                        )
-                        .animation(pageTransitionAnimation, value: selectedPage)
-                        .accessibilityHidden(true)
-                }
-            }
-        }
-        .frame(height: Layout.topChromeControlSize)
-        .accessibilityIdentifier("playerPageHint")
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("播放器页面")
-        .accessibilityValue(PlayerPage(rawValue: selectedPage)?.title ?? PlayerPage.nowPlaying.title)
+        .accessibilityIdentifier("playerTopChrome")
     }
 
     private func setPlaybackMode(_ mode: PlayerEngine.PlaybackMode) {
         guard mode != engine.playbackMode, !switchingMode else { return }
         guard mode == .music || engine.videoAvailable else { return }
+        // 同步置位：Task 内置位会让快速双击都通过 guard，模式被切换两次。
+        switchingMode = true
         Task {
-            switchingMode = true
             await engine.setPlaybackMode(mode)
             switchingMode = false
         }
@@ -1057,25 +1279,12 @@ struct NowPlayingView: View {
             }
             return
         }
+        // sheet 与 fullScreenCover 不能同时呈现；有 sheet 时不消费 key，
+        // 留待 sheet 关闭后再次旋转仍可触发。
+        guard !showLyrics, !showFavoriteFolders, !showUPPlaylists else { return }
         guard landscapeMVFullscreenKey?.matches(current) != true else { return }
         landscapeMVFullscreenKey = current.key
         showMVFullscreen = true
-    }
-
-    private func horizontalListPage<Content: View>(
-        accessibilityIdentifier: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 12) {
-                content()
-                    .padding(.horizontal, 20)
-                Spacer(minLength: 32)
-            }
-            .padding(.top, Layout.contentTopInset)
-            .padding(.bottom, 28)
-        }
-        .accessibilityIdentifier(accessibilityIdentifier)
     }
 
     private var playerDivider: some View {
@@ -1086,127 +1295,12 @@ struct NowPlayingView: View {
         action: @escaping () -> Void,
         @ViewBuilder label: () -> Label
     ) -> some View {
-        Button {
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(80))
-                guard !isListRowActionSuppressed else { return }
-                action()
-            }
-        } label: {
+        Button(action: action) {
             label()
         }
-            .buttonStyle(.plain)
-            .contentShape(Rectangle())
-            .accessibilityAddTraits(.isButton)
-    }
-
-    private var isListRowActionSuppressed: Bool {
-        guard let listRowActionSuppressedUntil else { return false }
-        return Date() < listRowActionSuppressedUntil
-    }
-
-    private func suppressListRowActionsBriefly() {
-        listRowActionSuppressedUntil = Date().addingTimeInterval(0.45)
-    }
-
-    @ViewBuilder
-    private var queueList: some View {
-        if engine.queue.isEmpty && !hasPlaylistContext {
-            playerPageState(
-                title: "队列为空",
-                message: "从搜索、推荐或收藏夹播放歌曲后，这里会显示当前队列。",
-                systemName: "list.bullet"
-            )
-            .accessibilityIdentifier("playerQueueEmptyState")
-        } else {
-            VStack(alignment: .leading, spacing: 16) {
-                if hasPlaylistContext {
-                    currentPlaylistPanel
-                }
-
-                if !engine.queue.isEmpty {
-                    VStack(spacing: 0) {
-                        ForEach(Array(engine.queue.enumerated()), id: \.element.id) { index, track in
-                            guardedPlayerRowButton {
-                                Task { await engine.jump(to: index) }
-                            } label: {
-                                TrackRow(
-                                    track: track,
-                                    isPlaying: index == engine.queueIndex,
-                                    appearance: .player)
-                            }
-                            .accessibilityIdentifier(index == engine.queueIndex ? "playerQueueCurrentRow" : "playerQueueRow-\(index)")
-                            .contextMenu {
-                                if engine.queue.count > 1 {
-                                    Button(role: .destructive) {
-                                        engine.removeFromQueue(at: index)
-                                    } label: {
-                                        Label("从播放列表移除", systemImage: "minus.circle")
-                                    }
-                                }
-                            }
-                            if index != engine.queue.count - 1 {
-                                playerDivider.padding(.leading, 70)
-                            }
-                        }
-                    }
-                    .accessibilityIdentifier("playerQueueListContainer")
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var recommendationsList: some View {
-        if recommendationsLoading {
-            playerPageState(
-                title: "正在加载推荐...",
-                message: "播放不会因此中断。",
-                systemName: "music.note.list",
-                isLoading: true
-            )
-            .accessibilityIdentifier("playerRecommendationsLoadingState")
-        } else if recommendationsError != nil {
-            playerPageState(
-                title: "推荐加载失败",
-                message: "推荐加载失败，请稍后重试。",
-                systemName: "exclamationmark.triangle"
-            )
-            .accessibilityIdentifier("playerRecommendationsErrorState")
-        } else if !recommendationsMatchCurrentTrack {
-            playerPageState(
-                title: "正在准备当前歌曲推荐",
-                message: "推荐会根据当前歌曲生成，播放不会因此中断。",
-                systemName: "music.note.list",
-                isLoading: true
-            )
-            .accessibilityIdentifier("playerRecommendationsLoadingState")
-        } else if recommendedTracks.isEmpty {
-            playerPageState(
-                title: "暂无推荐",
-                message: "播放一首歌曲后再打开推荐页。",
-                systemName: "music.note.list"
-            )
-            .accessibilityIdentifier("playerRecommendationsEmptyState")
-        } else {
-            VStack(spacing: 0) {
-                ForEach(Array(recommendedTracks.prefix(12).enumerated()), id: \.element.id) { index, track in
-                    guardedPlayerRowButton {
-                        suppressNextRecommendationRefresh = true
-                        Task { await engine.play(tracks: recommendedTracks, startAt: index, queueMode: .radio) }
-                    } label: {
-                        TrackRow(
-                            track: track,
-                            isPlaying: engine.current.map { track.key.matches($0) } ?? false,
-                            appearance: .player)
-                    }
-                    if index != min(recommendedTracks.count, 12) - 1 {
-                        playerDivider.padding(.leading, 70)
-                    }
-                }
-            }
-            .accessibilityIdentifier("playerRecommendationsList")
-        }
+        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .accessibilityAddTraits(.isButton)
     }
 
     private func playerPageState(
@@ -1249,325 +1343,596 @@ struct NowPlayingView: View {
     }
 
     @ViewBuilder
-    private var bottomContextPanel: some View {
-        if currentPlaylistLoading && currentPlaylistTracks.isEmpty {
-            currentPlaylistPanel
-        } else if currentPlaylist != nil && !currentPlaylistTracks.isEmpty {
-            currentPlaylistPanel
-        } else {
-            queuePreviewPanel
+    private func bottomContextDrawer(maxRows: Int) -> some View {
+        if hasBottomContextContent {
+            VStack(spacing: 0) {
+                bottomContextHeader
+
+                if queuePresentationState.isExpanded {
+                    VStack(spacing: 0) {
+                        bottomContextTabPicker
+                            .padding(.horizontal, 28)
+                            .padding(.bottom, 8)
+
+                        PlayerSurface.divider
+                            .frame(height: 0.5)
+                            .padding(.horizontal, 28)
+                            .padding(.bottom, 6)
+
+                        bottomContextListPanel(maxRows: maxRows)
+                            .id(bottomContextTab)
+                            .transition(bottomContextPanelTransition)
+                    }
+                    .transition(
+                        .asymmetric(
+                            insertion: .move(edge: .bottom).combined(with: .opacity),
+                            removal: .opacity.combined(with: .scale(scale: 0.98, anchor: .top))
+                        )
+                    )
+                }
+            }
+            .padding(.bottom, queuePresentationState.isExpanded ? 0 : 2)
+            .offset(y: bottomContextInteractiveOffset)
+            .frame(maxWidth: .infinity, maxHeight: queuePresentationState == .fullQueue ? .infinity : nil, alignment: .top)
+            .background(alignment: .top) {
+                RoundedRectangle(cornerRadius: bottomContextCornerRadius, style: .continuous)
+                    .fill(Color.white.opacity(bottomContextBackgroundOpacity))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: bottomContextCornerRadius, style: .continuous)
+                            .stroke(Color.white.opacity(bottomContextStrokeOpacity), lineWidth: 1)
+                    }
+                    .padding(.horizontal, bottomContextBackgroundHorizontalInset)
+                    .opacity(queuePresentationState == .collapsed ? 0 : 1)
+                    .scaleEffect(x: 1, y: queuePresentationState == .collapsed ? 0.82 : 1, anchor: .top)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: bottomContextCornerRadius, style: .continuous))
+            .animation(contextTransitionAnimation, value: queuePresentationState)
+            .animation(contextTransitionAnimation, value: bottomContextTab)
+            .animation(.interactiveSpring(response: 0.22, dampingFraction: 0.86), value: bottomContextDragOffset)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("playerBottomContextDrawer")
         }
     }
 
-    @ViewBuilder
-    private var currentPlaylistPanel: some View {
-        if currentPlaylistLoading && currentPlaylistTracks.isEmpty {
-            HStack(spacing: 10) {
-                ProgressView()
-                    .tint(PlayerSurface.primaryText)
-                    .scaleEffect(0.75)
-                Text("正在检测所属合集")
-                    .font(.caption)
-                    .foregroundStyle(PlayerSurface.secondaryText)
-                Spacer()
-            }
-            .padding(14)
-            .playerPanelBackground(cornerRadius: 16)
-        } else if let currentPlaylist, !currentPlaylistTracks.isEmpty {
-            let visibleRows = min(currentPlaylistTracks.count, Layout.sidePanelPreviewLimit)
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    Image(systemName: "rectangle.stack.fill")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(AppTheme.accent)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("所在合集")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(PlayerSurface.secondaryText)
-                        Text(currentPlaylist.title)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(PlayerSurface.primaryText)
-                            .lineLimit(1)
-                    }
-                    Spacer()
-                    Text(currentPlaylistPositionText)
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(PlayerSurface.secondaryText)
-                }
+    private var bottomContextHeader: some View {
+        Group {
+            if queuePresentationState == .fullQueue {
+                VStack(spacing: 0) {
+                    bottomContextHandle
+                        .padding(.top, 12)
+                        .padding(.bottom, 16)
+                        .frame(maxWidth: .infinity)
 
-                ScrollViewReader { proxy in
-                    ScrollView(.vertical, showsIndicators: false) {
-                        LazyVStack(spacing: 0) {
-                            ForEach(Array(currentPlaylistTracks.enumerated()), id: \.element.id) { index, track in
-                                guardedPlayerRowButton {
-                                    Task { await playCurrentPlaylistTrack(at: index) }
-                                } label: {
-                                    compactPlaylistRow(track: track, index: index)
-                                        .id(track.id)
-                                }
-                            }
+                    HStack(alignment: .center, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(bottomContextEyebrow)
+                                .font(.system(size: 16, weight: .regular))
+                                .foregroundStyle(PlayerSurface.secondaryText)
+                                .lineLimit(1)
+                            Text(bottomContextFullTitle)
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(PlayerSurface.primaryText)
+                                .lineLimit(1)
                         }
+
+                        Spacer()
+
+                        Button {
+                            animate(contextTransitionAnimation) {
+                                queuePresentationState = .split
+                            }
+                        } label: {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(Color.white.opacity(0.80))
+                                .frame(width: 42, height: 38)
+                                .background(Color.white.opacity(0.10), in: Capsule())
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(bottomContextFullListLabel)
                     }
-                    .frame(maxHeight: CGFloat(visibleRows) * Layout.compactRowHeight)
-                    .onAppear { scrollCurrentPlaylist(proxy) }
-                    .onChange(of: engine.current?.id) { _, _ in
-                        scrollCurrentPlaylist(proxy)
-                    }
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 16)
                 }
-            }
-            .padding(14)
-            .playerPanelBackground(cornerRadius: 18)
-            .accessibilityIdentifier("playerCurrentPlaylistPanel")
-        } else if let currentPlaylistError {
-            Text(currentPlaylistError)
-                .font(.caption2)
-                .foregroundStyle(PlayerSurface.secondaryText)
-                .lineLimit(1)
-        }
-    }
-
-    @ViewBuilder
-    private func bottomContextListPanel(maxRows: Int) -> some View {
-        if currentPlaylist != nil && !currentPlaylistTracks.isEmpty {
-            currentPlaylistBottomPanel(maxRows: maxRows)
-        } else {
-            queueBottomPanel(maxRows: maxRows)
-        }
-    }
-
-    @ViewBuilder
-    private func currentPlaylistBottomPanel(maxRows: Int) -> some View {
-        if let currentPlaylist, !currentPlaylistTracks.isEmpty {
-            let visibleRows = min(currentPlaylistTracks.count, maxRows)
-            VStack(alignment: .leading, spacing: 8) {
-                playerDivider
-
-                HStack(spacing: 8) {
-                    Image(systemName: "rectangle.stack.fill")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(AppTheme.accent)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+                .accessibilityIdentifier("playerQueueFullHeader")
+            } else if queuePresentationState.isExpanded {
+                HStack(spacing: 12) {
+                    bottomContextHandle
 
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(currentPlaylist.title)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(PlayerSurface.primaryText)
-                            .lineLimit(1)
-                        Text("所在合集 · \(currentPlaylistPositionText)")
-                            .font(.caption2)
+                        Text(bottomContextEyebrow)
+                            .font(.caption2.weight(.semibold))
                             .foregroundStyle(PlayerSurface.secondaryText)
+                            .lineLimit(1)
+                        Text(bottomContextTitle)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(PlayerSurface.primaryText)
                             .lineLimit(1)
                     }
 
                     Spacer()
 
                     Button {
-                        selectPlayerPage(PlayerPage.queue.rawValue)
+                        animate(contextTransitionAnimation) {
+                            queuePresentationState = queuePresentationState == .fullQueue ? .split : .fullQueue
+                        }
                     } label: {
-                        Image(systemName: "list.bullet")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(PlayerSurface.secondaryText)
-                            .frame(width: 34, height: 30)
+                        Image(systemName: queuePresentationState == .fullQueue ? "chevron.down" : "chevron.up")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color.white.opacity(0.74))
+                            .frame(width: 34, height: 34)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("查看完整合集")
+                    .accessibilityLabel(bottomContextFullListLabel)
                 }
+                .padding(.horizontal, 28)
+                .frame(height: 54)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+                .accessibilityIdentifier(queuePresentationState == .fullQueue ? "playerQueueFullHeader" : "playerQueueSplitHeader")
+            } else {
+                VStack(spacing: 0) {
+                    bottomContextHandle
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 44)
+                .padding(.horizontal, 24)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                .accessibilityIdentifier("playerBottomContextCollapsed")
+            }
+        }
+        .contentShape(Rectangle())
+        .gesture(bottomContextHeaderDrag)
+        .onTapGesture {
+            animate(contextTransitionAnimation) {
+                if queuePresentationState == .fullQueue {
+                    queuePresentationState = .split
+                } else {
+                    queuePresentationState.promote()
+                }
+            }
+        }
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(bottomContextAccessibilityLabel)
+    }
 
+    private var bottomContextCornerRadius: CGFloat {
+        switch queuePresentationState {
+        case .collapsed:
+            return 12
+        case .split:
+            return 18
+        case .fullQueue:
+            return 22
+        }
+    }
+
+    private var bottomContextBackgroundHorizontalInset: CGFloat {
+        switch queuePresentationState {
+        case .collapsed:
+            return 86
+        case .split:
+            return 18
+        case .fullQueue:
+            return 0
+        }
+    }
+
+    private var bottomContextBackgroundOpacity: Double {
+        switch queuePresentationState {
+        case .collapsed:
+            return 0.055
+        case .split:
+            return 0.078
+        case .fullQueue:
+            return 0.108
+        }
+    }
+
+    private var bottomContextStrokeOpacity: Double {
+        queuePresentationState == .collapsed ? 0.055 : 0.075
+    }
+
+    private var bottomContextPanelTransition: AnyTransition {
+        .asymmetric(
+            insertion: .opacity
+                .combined(with: .move(edge: .bottom))
+                .combined(with: .scale(scale: 0.985, anchor: .top)),
+            removal: .opacity
+                .combined(with: .scale(scale: 0.985, anchor: .top))
+        )
+    }
+
+    private var bottomContextHandle: some View {
+        RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+            .fill(Color.white.opacity(queuePresentationState.isExpanded ? 0.30 : 0.24))
+            .frame(width: 34, height: 3)
+    }
+
+    private var bottomContextTabPicker: some View {
+        HStack(spacing: 6) {
+            ForEach(BottomContextTab.allCases) { tab in
+                Button {
+                    animate(contextTransitionAnimation) {
+                        bottomContextTab = tab
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: tab.icon)
+                            .font(.system(size: 12, weight: .semibold))
+                        Text(tab.title)
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(bottomContextTab == tab ? Color.white : PlayerSurface.secondaryText)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 30)
+                    .background {
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(bottomContextTab == tab ? Color.white.opacity(0.14) : Color.white.opacity(0.045))
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier(tab.accessibilityIdentifier)
+                .accessibilityLabel(tab.title)
+                .accessibilityAddTraits(bottomContextTab == tab ? [.isButton, .isSelected] : .isButton)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func bottomContextListPanel(maxRows: Int) -> some View {
+        switch bottomContextTab {
+        case .queue:
+            queueBottomPanel(maxRows: maxRows)
+        case .playlist:
+            currentPlaylistBottomPanel(maxRows: maxRows)
+        case .recommendations:
+            recommendationsBottomPanel(maxRows: maxRows)
+        }
+    }
+
+    @ViewBuilder
+    private func currentPlaylistBottomPanel(maxRows: Int) -> some View {
+        if currentPlaylistLoading && currentPlaylistTracks.isEmpty {
+            playerPageState(
+                title: "正在检测合集",
+                message: "如果当前歌曲来自 UP 主合集，会在这里显示完整列表。",
+                systemName: "rectangle.stack",
+                isLoading: true
+            )
+            .padding(.horizontal, 28)
+            .accessibilityIdentifier("playerBottomPlaylistLoading")
+        } else if currentPlaylist != nil && !currentPlaylistTracks.isEmpty {
+            let visibleItems = queuePresentationState == .fullQueue
+                ? Array(currentPlaylistTracks.enumerated()).map { PlayerListWindow.Item(index: $0.offset, track: $0.element) }
+                : PlayerListWindow.items(
+                    tracks: currentPlaylistTracks,
+                    current: engine.current,
+                    maxRows: maxRows)
+            let visibleRows = queuePresentationState == .fullQueue
+                ? max(1, visibleItems.count)
+                : min(visibleItems.count, max(1, maxRows))
+            VStack(alignment: .leading, spacing: 0) {
                 ScrollViewReader { proxy in
-                    ScrollView(.vertical, showsIndicators: currentPlaylistTracks.count > visibleRows) {
+                    ScrollView(.vertical, showsIndicators: queuePresentationState == .fullQueue || visibleItems.count > visibleRows) {
                         LazyVStack(spacing: 0) {
-                            ForEach(Array(currentPlaylistTracks.enumerated()), id: \.element.id) { index, track in
+                            ForEach(visibleItems) { item in
                                 guardedPlayerRowButton {
-                                    Task { await playCurrentPlaylistTrack(at: index) }
+                                    Task { await playCurrentPlaylistTrack(at: item.index) }
                                 } label: {
-                                    compactPlaylistRow(track: track, index: index)
-                                        .id(track.id)
+                                    bottomSheetTrackRow(track: item.track, index: item.index)
+                                        .id(item.track.id)
                                 }
 
-                                if index != currentPlaylistTracks.count - 1 {
-                                    playerDivider.padding(.leading, 34)
+                                if item.index != visibleItems.last?.index {
+                                    playerDivider.padding(.leading, 72)
                                 }
                             }
                         }
                     }
-                    .frame(maxHeight: CGFloat(visibleRows) * Layout.compactRowHeight)
+                    .frame(maxHeight: queuePresentationState == .fullQueue ? .infinity : CGFloat(visibleRows) * Layout.bottomSheetRowHeight)
                     .onAppear { scrollCurrentPlaylist(proxy) }
-                    .onChange(of: engine.current?.id) { _, _ in
+                    .onChange(of: engine.current?.key) { oldKey, newKey in
+                        if let oldKey, let newKey, oldKey.isCIDEnrichment(to: newKey) {
+                            return
+                        }
                         scrollCurrentPlaylist(proxy)
                     }
                 }
             }
             .padding(.horizontal, 28)
-            .background(bottomContextFrameReader)
+            .frame(maxWidth: .infinity, maxHeight: queuePresentationState == .fullQueue ? .infinity : nil, alignment: .top)
             .accessibilityIdentifier("playerBottomPlaylistPanel")
+        } else {
+            playerPageState(
+                title: "没有检测到合集",
+                message: currentPlaylistError ?? "这首歌不在可识别的 UP 主合集里。",
+                systemName: "rectangle.stack"
+            )
+            .padding(.horizontal, 28)
+            .accessibilityIdentifier("playerBottomPlaylistEmpty")
         }
     }
 
     @ViewBuilder
     private func queueBottomPanel(maxRows: Int) -> some View {
         if !engine.queue.isEmpty {
-            let visibleRows = min(engine.queue.count, maxRows)
-            VStack(alignment: .leading, spacing: 8) {
-                playerDivider
-
-                HStack(spacing: 8) {
-                    Image(systemName: "text.line.first.and.arrowtriangle.forward")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(AppTheme.accent)
-
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("播放列表")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(PlayerSurface.primaryText)
-                            .lineLimit(1)
-                        Text("\(engine.queueIndex + 1)/\(engine.queue.count)")
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(PlayerSurface.secondaryText)
-                            .lineLimit(1)
-                    }
-
-                    Spacer()
-
-                    Button {
-                        selectPlayerPage(PlayerPage.queue.rawValue)
-                    } label: {
-                        Image(systemName: "list.bullet")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(PlayerSurface.secondaryText)
-                            .frame(width: 34, height: 30)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("查看完整播放列表")
+            let visibleItems = queuePresentationState == .fullQueue
+                ? Array(engine.queue.enumerated()).map {
+                    PlayerListWindow.Item(index: $0.offset, track: $0.element)
                 }
-
+                : PlayerListWindow.items(
+                    tracks: engine.queue,
+                    current: engine.current,
+                    maxRows: maxRows)
+            let visibleRows = queuePresentationState == .fullQueue
+                ? max(1, visibleItems.count)
+                : min(visibleItems.count, maxRows)
+            VStack(alignment: .leading, spacing: 0) {
                 ScrollViewReader { proxy in
-                    ScrollView(.vertical, showsIndicators: engine.queue.count > visibleRows) {
+                    ScrollView(.vertical, showsIndicators: queuePresentationState == .fullQueue || visibleItems.count > visibleRows) {
                         LazyVStack(spacing: 0) {
-                            ForEach(Array(engine.queue.enumerated()), id: \.element.id) { index, track in
+                            ForEach(visibleItems) { item in
                                 guardedPlayerRowButton {
-                                    Task { await engine.jump(to: index) }
+                                    Task { await engine.jump(to: item.index) }
                                 } label: {
-                                    compactPlaylistRow(track: track, index: index)
-                                        .id(track.id)
+                                    bottomSheetTrackRow(track: item.track, index: item.index)
+                                        .id(item.track.id)
                                 }
 
-                                if index != engine.queue.count - 1 {
-                                    playerDivider.padding(.leading, 34)
+                                if item.index != visibleItems.last?.index {
+                                    playerDivider.padding(.leading, 72)
                                 }
                             }
                         }
                     }
-                    .frame(maxHeight: CGFloat(visibleRows) * Layout.compactRowHeight)
+                    .frame(maxHeight: queuePresentationState == .fullQueue ? .infinity : CGFloat(visibleRows) * Layout.bottomSheetRowHeight)
                     .onAppear { scrollCurrentQueue(proxy) }
                     .onChange(of: engine.queueIndex) { _, _ in
                         scrollCurrentQueue(proxy)
                     }
-                    .onChange(of: engine.current?.id) { _, _ in
+                    .onChange(of: engine.current?.key) { oldKey, newKey in
+                        if let oldKey, let newKey, oldKey.isCIDEnrichment(to: newKey) {
+                            return
+                        }
                         scrollCurrentQueue(proxy)
                     }
                 }
             }
             .padding(.horizontal, 28)
-            .background(bottomContextFrameReader)
+            .frame(maxWidth: .infinity, maxHeight: queuePresentationState == .fullQueue ? .infinity : nil, alignment: .top)
             .accessibilityIdentifier("playerBottomQueuePanel")
-        }
-    }
-
-    private var bottomContextFrameReader: some View {
-        GeometryReader { geo in
-            Color.clear.preference(
-                key: PlayerBottomContextFrameKey.self,
-                value: geo.frame(in: .global)
+        } else {
+            playerPageState(
+                title: "当前列表为空",
+                message: "从搜索、推荐或收藏夹播放歌曲后，这里会显示当前列表。",
+                systemName: "list.bullet"
             )
+            .padding(.horizontal, 28)
+            .accessibilityIdentifier("playerBottomQueueEmpty")
         }
     }
 
     @ViewBuilder
-    private var queuePreviewPanel: some View {
-        if !engine.queue.isEmpty {
-            let previewItems = queuePreviewItems
-            let visibleRows = min(previewItems.count, Layout.sidePanelPreviewLimit)
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    Image(systemName: "text.line.first.and.arrowtriangle.forward")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(AppTheme.accent)
-                    Text("接下来播放")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(PlayerSurface.primaryText)
-                    Spacer()
-                    Text("\(engine.queueIndex + 1)/\(engine.queue.count)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(PlayerSurface.secondaryText)
-                }
+    private func recommendationsBottomPanel(maxRows: Int) -> some View {
+        Group {
+            if recommendationsLoading {
+                playerPageState(
+                    title: "正在加载推荐",
+                    message: "推荐会根据当前歌曲生成，播放不会因此中断。",
+                    systemName: "music.note.list",
+                    isLoading: true
+                )
+                .accessibilityIdentifier("playerBottomRecommendationsLoading")
+            } else if recommendationsError != nil {
+                playerPageState(
+                    title: "推荐加载失败",
+                    message: recommendationsError ?? "请稍后重试。",
+                    systemName: "exclamationmark.triangle"
+                )
+                .accessibilityIdentifier("playerBottomRecommendationsError")
+            } else if !recommendationsMatchCurrentTrack {
+                playerPageState(
+                    title: "准备当前歌曲推荐",
+                    message: "打开推荐后会加载和当前歌曲相关的音乐。",
+                    systemName: "sparkles",
+                    isLoading: true
+                )
+                .accessibilityIdentifier("playerBottomRecommendationsLoading")
+            } else if recommendedTracks.isEmpty {
+                playerPageState(
+                    title: "暂无推荐",
+                    message: "当前歌曲暂时没有找到合适的相关音乐。",
+                    systemName: "music.note.list"
+                )
+                .accessibilityIdentifier("playerBottomRecommendationsEmpty")
+            } else {
+                let visibleItems = queuePresentationState == .fullQueue
+                    ? Array(recommendedTracks.enumerated())
+                    : Array(recommendedTracks.prefix(maxRows).enumerated())
+                let visibleRows = queuePresentationState == .fullQueue
+                    ? max(1, visibleItems.count)
+                    : min(visibleItems.count, max(1, maxRows))
 
-                ScrollViewReader { proxy in
-                    ScrollView(.vertical, showsIndicators: previewItems.count > visibleRows) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ScrollView(.vertical, showsIndicators: queuePresentationState == .fullQueue || recommendedTracks.count > visibleRows) {
                         LazyVStack(spacing: 0) {
-                            ForEach(previewItems, id: \.track.id) { item in
+                            ForEach(visibleItems, id: \.element.id) { index, track in
                                 guardedPlayerRowButton {
-                                    Task { await engine.jump(to: item.index) }
+                                    suppressNextRecommendationRefresh = true
+                                    Task { await engine.play(tracks: recommendedTracks, startAt: index, queueMode: .radio) }
                                 } label: {
-                                    compactPlaylistRow(track: item.track, index: item.index)
-                                        .id(item.track.id)
+                                    bottomSheetTrackRow(track: track, index: index)
+                                }
+
+                                if index != visibleItems.last?.offset {
+                                    playerDivider.padding(.leading, 72)
                                 }
                             }
                         }
                     }
-                    .frame(maxHeight: CGFloat(visibleRows) * Layout.compactRowHeight)
-                    .onAppear { scrollCurrentQueue(proxy) }
-                    .onChange(of: engine.queueIndex) { _, _ in
-                        scrollCurrentQueue(proxy)
+                    .frame(maxHeight: queuePresentationState == .fullQueue ? .infinity : CGFloat(visibleRows) * Layout.bottomSheetRowHeight)
+                }
+                .accessibilityIdentifier("playerBottomRecommendationsPanel")
+            }
+        }
+        .padding(.horizontal, 28)
+        .frame(maxWidth: .infinity, maxHeight: queuePresentationState == .fullQueue ? .infinity : nil, alignment: .top)
+        .onAppear {
+            ensureRecommendationsLoadedIfVisible()
+        }
+    }
+
+    private var hasBottomContextContent: Bool {
+        engine.current != nil ||
+            currentPlaylistLoading ||
+            currentPlaylist != nil ||
+            !currentPlaylistTracks.isEmpty ||
+            !engine.queue.isEmpty
+    }
+
+    private var bottomContextEyebrow: String {
+        if queuePresentationState == .fullQueue && bottomContextTab == .queue {
+            return "Playing from"
+        }
+        if bottomContextTab == .playlist && currentPlaylistLoading && currentPlaylistTracks.isEmpty {
+            return "正在检测"
+        }
+        if bottomContextTab == .playlist && currentPlaylist != nil && !currentPlaylistTracks.isEmpty {
+            return "Playing from"
+        }
+        if bottomContextTab == .recommendations {
+            return "Related"
+        }
+        return "Up Next"
+    }
+
+    private var bottomContextTitle: String {
+        switch bottomContextTab {
+        case .queue:
+            guard !engine.queue.isEmpty else { return "当前列表" }
+            return "\(engine.queueIndex + 1)/\(engine.queue.count)"
+        case .playlist:
+            if currentPlaylistLoading && currentPlaylistTracks.isEmpty {
+                return "当前歌曲所属合集"
+            }
+            if let currentPlaylist, !currentPlaylistTracks.isEmpty {
+                return currentPlaylist.title
+            }
+            return "当前歌曲所属合集"
+        case .recommendations:
+            return recommendationsMatchCurrentTrack && !recommendedTracks.isEmpty
+                ? "\(recommendedTracks.count) 首相关歌曲"
+                : "当前歌曲推荐"
+        }
+    }
+
+    private var bottomContextFullTitle: String {
+        switch bottomContextTab {
+        case .queue:
+            return "当前列表"
+        case .playlist:
+            if let currentPlaylist, !currentPlaylistTracks.isEmpty {
+                return currentPlaylist.title
+            }
+            return "当前歌曲所属合集"
+        case .recommendations:
+            return "当前歌曲推荐"
+        }
+    }
+
+    private var bottomContextFullListLabel: String {
+        queuePresentationState == .fullQueue ? "收起列表" : "展开完整列表"
+    }
+
+    private var bottomContextAccessibilityLabel: String {
+        switch queuePresentationState {
+        case .collapsed:
+            return "展开接下来播放"
+        case .split:
+            return "展开完整播放列表"
+        case .fullQueue:
+            return "收起到接下来播放"
+        }
+    }
+
+    private var bottomContextInteractiveOffset: CGFloat {
+        if queuePresentationState.isExpanded {
+            return max(0, min(28, bottomContextDragOffset * 0.35))
+        }
+        return min(0, max(-24, bottomContextDragOffset * 0.35))
+    }
+
+    private var bottomContextHeaderDrag: some Gesture {
+        DragGesture(minimumDistance: 8, coordinateSpace: .global)
+            .updating($bottomContextDragOffset) { value, state, _ in
+                guard abs(value.translation.height) > abs(value.translation.width) * 1.1 else {
+                    // 方向意图消失时归零,避免视差偏移冻结。
+                    state = 0
+                    return
+                }
+                state = value.translation.height
+            }
+            .onEnded { value in
+                guard abs(value.translation.height) > abs(value.translation.width) * 1.1 else { return }
+                let projected = value.predictedEndTranslation.height
+                if value.translation.height < -22 || projected < -46 {
+                    animate(contextTransitionAnimation) {
+                        queuePresentationState.promote()
                     }
-                    .onChange(of: engine.current?.id) { _, _ in
-                        scrollCurrentQueue(proxy)
+                } else if value.translation.height > 28 || projected > 58 {
+                    animate(contextTransitionAnimation) {
+                        queuePresentationState.demote()
                     }
                 }
             }
-            .padding(14)
-            .playerPanelBackground(cornerRadius: 18)
-            .padding(.horizontal, 24)
-        }
     }
 
-    private func compactPlaylistRow(track: Track, index: Int) -> some View {
+    private func bottomSheetTrackRow(track: Track, index: Int) -> some View {
         let isCurrent = engine.current.map { track.key.matches($0) } ?? false
         let display = TrackTitleFormatter.displayMetadata(for: track, clean: cleanListTitles)
-        return HStack(spacing: 10) {
-            Text("\(index + 1)")
-                .font(.caption.monospacedDigit().weight(isCurrent ? .semibold : .regular))
-                .foregroundStyle(isCurrent ? AppTheme.accent : PlayerSurface.tertiaryText)
-                .frame(width: 24, alignment: .trailing)
-            VStack(alignment: .leading, spacing: 2) {
+        return HStack(spacing: 12) {
+            if let coverURL = BiliArtworkURL.thumbnail(track.coverURL, width: 96, height: 54) {
+                CachedAsyncImage(
+                    url: coverURL,
+                    targetSize: CGSize(width: 42, height: 24),
+                    fallbackImage: isCurrent ? engine.currentCoverImage : nil
+                ) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    artworkPlaceholder(cornerRadius: 4)
+                }
+                .frame(width: 42, height: 24)
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            } else {
+                artworkPlaceholder(cornerRadius: 4)
+                    .frame(width: 42, height: 24)
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
                 Text(display.title)
-                    .font(.caption.weight(isCurrent ? .semibold : .regular))
-                    .foregroundStyle(isCurrent ? AppTheme.accent : PlayerSurface.primaryText)
+                    .font(.subheadline.weight(isCurrent ? .semibold : .regular))
+                    .foregroundStyle(isCurrent ? Color.white : PlayerSurface.primaryText)
                     .lineLimit(1)
-                Text(display.artist)
-                    .font(.caption2)
+                Text("\(display.artist) · \(MusicFormatters.playbackTime(Double(track.duration)))")
+                    .font(.caption)
                     .foregroundStyle(PlayerSurface.secondaryText)
                     .lineLimit(1)
             }
-            Spacer()
-            if isCurrent {
-                Image(systemName: "waveform")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(AppTheme.accent)
-            } else {
-                Text(format(Double(track.duration)))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(PlayerSurface.tertiaryText)
-            }
-        }
-        .padding(.vertical, 7)
-        .contentShape(Rectangle())
-    }
 
-    private var queuePreviewItems: [(index: Int, track: Track)] {
-        Array(engine.queue.enumerated()).map { index, track in
-            (index, track)
+            Spacer(minLength: 8)
+
+            Image(systemName: isCurrent ? "waveform" : "line.3.horizontal")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(isCurrent ? AppTheme.accent : PlayerSurface.secondaryText)
+                .frame(width: 24, height: 32)
         }
+        .frame(height: Layout.bottomSheetRowHeight)
+        .contentShape(Rectangle())
+        .accessibilityLabel("\(index + 1). \(display.title)")
     }
 
     private var recommendationsMatchCurrentTrack: Bool {
@@ -1578,8 +1943,24 @@ struct NowPlayingView: View {
         return recommendationSeedKey.matches(current)
     }
 
-    private func scheduleRecommendationLoad(clear: Bool, allowBackground: Bool) {
+    private var isRecommendationContextVisible: Bool {
+        queuePresentationState.isExpanded && bottomContextTab == .recommendations
+    }
+
+    private func ensureRecommendationsLoadedIfVisible() {
+        let loadPolicy = RecommendationVisibleLoadPolicy.visibleContextChanged(
+            recommendationContextVisible: isRecommendationContextVisible,
+            recommendationsStale: recommendationsStale,
+            recommendationsEmpty: recommendedTracks.isEmpty,
+            recommendationsMismatched: !recommendationsMatchCurrentTrack)
+        guard loadPolicy.shouldLoad else { return }
+        recommendationsStale = false
+        scheduleRecommendationLoad(clear: !recommendedTracks.isEmpty)
+    }
+
+    private func scheduleRecommendationLoad(clear: Bool) {
         recommendationTask?.cancel()
+        recommendationLoadID = UUID()
         recommendationsError = nil
         if clear {
             recommendedTracks = []
@@ -1589,7 +1970,7 @@ struct NowPlayingView: View {
             recommendationsLoading = false
             return
         }
-        guard allowBackground || selectedPage == PlayerPage.recommendations.rawValue else {
+        guard isRecommendationContextVisible else {
             recommendationsLoading = false
             return
         }
@@ -1597,20 +1978,23 @@ struct NowPlayingView: View {
             recommendationsLoading = false
             return
         }
-        let isVisible = selectedPage == PlayerPage.recommendations.rawValue
+        let isVisible = isRecommendationContextVisible
         if isVisible && recommendedTracks.isEmpty {
             recommendationsLoading = true
         }
+        let loadID = UUID()
+        recommendationLoadID = loadID
         recommendationTask = Task(priority: isVisible ? .userInitiated : .utility) {
             try? await Task.sleep(for: .milliseconds(clear && isVisible ? 260 : 0))
-            guard !Task.isCancelled else { return }
-            await loadRecommendations()
+            guard !Task.isCancelled, recommendationLoadID == loadID else { return }
+            await loadRecommendations(loadID: loadID)
         }
     }
 
     private func scheduleCurrentPlaylistLookup(force: Bool, delay: Duration) {
-        playlistLookupTask?.cancel()
         guard let current = engine.current else {
+            playlistLookupTask?.cancel()
+            scheduledPlaylistBVID = nil
             currentPlaylist = nil
             currentPlaylistTracks = []
             currentPlaylistError = nil
@@ -1619,11 +2003,16 @@ struct NowPlayingView: View {
         }
 
         let bvid = current.bvid
-        if !force, let cached = playlistLookupCache[bvid] {
+        if !force, let cached = PlayerPlaylistLookupCache.shared.result(for: bvid) {
+            playlistLookupTask?.cancel()
+            scheduledPlaylistBVID = nil
             applyPlaylistLookup(cached, for: bvid)
             return
         }
+        guard force || scheduledPlaylistBVID != bvid else { return }
 
+        playlistLookupTask?.cancel()
+        scheduledPlaylistBVID = bvid
         currentPlaylist = nil
         currentPlaylistTracks = []
         currentPlaylistError = nil
@@ -1644,12 +2033,15 @@ struct NowPlayingView: View {
         currentPlaylistLoading = false
     }
 
-    private func loadRecommendations() async {
+    private func loadRecommendations(loadID: UUID) async {
         guard let current = engine.current else { return }
-        let bvid = current.bvid
         let currentKey = current.key
-        recommendationsLoading = selectedPage == PlayerPage.recommendations.rawValue && recommendedTracks.isEmpty
-        defer { recommendationsLoading = false }
+        recommendationsLoading = isRecommendationContextVisible && recommendedTracks.isEmpty
+        defer {
+            if recommendationLoadID == loadID {
+                recommendationsLoading = false
+            }
+        }
         let excluded = shownRecommendationKeys.union([currentKey])
         let tracks = await RecommendationEngine().recommendations(
             mode: .relatedPanel,
@@ -1659,7 +2051,9 @@ struct NowPlayingView: View {
                 playlistTracks: currentPlaylistTracks,
                 excludedKeys: excluded),
             limit: 24)
-        guard engine.current?.bvid == bvid else { return }
+        guard !Task.isCancelled,
+              recommendationLoadID == loadID,
+              engine.current.map({ currentKey.matches($0) }) ?? false else { return }
         shownRecommendationKeys.formUnion(tracks.map(\.key))
         recommendationSeedKey = currentKey
         recommendedTracks = tracks
@@ -1679,14 +2073,19 @@ struct NowPlayingView: View {
         }
 
         let bvid = current.bvid
-        if !force, let cached = playlistLookupCache[bvid] {
+        if !force, let cached = PlayerPlaylistLookupCache.shared.result(for: bvid) {
             applyPlaylistLookup(cached, for: bvid)
             return
         }
 
         currentPlaylistLoading = true
         currentPlaylistError = nil
-        defer { currentPlaylistLoading = false }
+        defer {
+            if scheduledPlaylistBVID == bvid {
+                currentPlaylistLoading = false
+                scheduledPlaylistBVID = nil
+            }
+        }
         do {
             let client = BiliClient()
             var resolvedOwnerMid = current.ownerMid
@@ -1694,15 +2093,21 @@ struct NowPlayingView: View {
             if playlist == nil {
                 if resolvedOwnerMid == nil {
                     resolvedOwnerMid = try? await client.videoInfo(bvid: bvid).owner.mid
+                    guard !Task.isCancelled else { return }
                 }
                 if let ownerMid = resolvedOwnerMid {
-                    playlist = try? await client.upPlaylistContaining(bvid: bvid, mid: ownerMid)
+                    playlist = try? await client.upPlaylistContaining(
+                        bvid: bvid,
+                        mid: ownerMid,
+                        maxPlaylists: 4,
+                        maxPages: 2)
+                    guard !Task.isCancelled else { return }
                 }
             }
             guard let playlist else {
                 guard engine.current?.bvid == bvid else { return }
                 let result = PlaylistLookupResult(playlist: nil, tracks: [], error: nil)
-                playlistLookupCache[bvid] = result
+                storePlaylistLookup(result, for: bvid)
                 applyPlaylistLookup(result, for: bvid)
                 return
             }
@@ -1721,45 +2126,27 @@ struct NowPlayingView: View {
             } ?? []
             guard engine.current?.bvid == bvid else { return }
             let result = PlaylistLookupResult(playlist: playlist, tracks: tracks, error: nil)
-            playlistLookupCache[bvid] = result
+            storePlaylistLookup(result, for: bvid)
             applyPlaylistLookup(result, for: bvid)
             engine.preload(tracks: tracks, limit: 2, delay: .milliseconds(700))
         } catch {
-            guard engine.current?.bvid == bvid else { return }
+            guard !Task.isCancelled, engine.current?.bvid == bvid else { return }
             let result = PlaylistLookupResult(
                 playlist: nil,
                 tracks: [],
                 error: "合集检测失败: \(error.localizedDescription)")
-            playlistLookupCache[bvid] = result
+            storePlaylistLookup(result, for: bvid)
             applyPlaylistLookup(result, for: bvid)
         }
     }
 
-    private var currentPlaylistPositionText: String {
-        guard let bvid = engine.current?.bvid,
-              let index = currentPlaylistTracks.firstIndex(where: { $0.bvid == bvid }) else {
-            return "\(currentPlaylistTracks.count) 首"
-        }
-        return "\(index + 1)/\(currentPlaylistTracks.count)"
-    }
-
-    private var hasPlaylistContext: Bool {
-        currentPlaylistLoading || currentPlaylist != nil || !currentPlaylistTracks.isEmpty || currentPlaylistError != nil
+    private func storePlaylistLookup(_ result: PlaylistLookupResult, for bvid: String) {
+        PlayerPlaylistLookupCache.shared.store(result, for: bvid)
     }
 
     private func playCurrentPlaylistTrack(at index: Int) async {
         guard currentPlaylistTracks.indices.contains(index) else { return }
         await engine.play(tracks: currentPlaylistTracks, startAt: index, queueMode: .sequential)
-    }
-
-    private func scrollCurrentPlaylist(_ proxy: ScrollViewProxy) {
-        guard let currentId = engine.current?.id,
-              currentPlaylistTracks.contains(where: { $0.id == currentId }) else { return }
-        DispatchQueue.main.async {
-            animate(.easeInOut(duration: 0.2)) {
-                proxy.scrollTo(currentId, anchor: .center)
-            }
-        }
     }
 
     private func scrollCurrentQueue(_ proxy: ScrollViewProxy) {
@@ -1772,23 +2159,20 @@ struct NowPlayingView: View {
         }
     }
 
-    private func normalizedCoverURL(_ raw: String?) -> URL? {
-        guard let raw else { return nil }
-        return URL(string: raw.hasPrefix("//") ? "https:" + raw : raw)
-    }
-
-    private func dedupe(_ tracks: [Track]) -> [Track] {
-        var seen = Set<String>()
-        return tracks.filter { track in
-            guard !seen.contains(track.bvid) else { return false }
-            seen.insert(track.bvid)
-            return true
+    private func scrollCurrentPlaylist(_ proxy: ScrollViewProxy) {
+        guard let current = engine.current,
+              let currentTrack = currentPlaylistTracks.first(where: { $0.key.matches(current) })
+        else { return }
+        DispatchQueue.main.async {
+            animate(.easeInOut(duration: 0.2)) {
+                proxy.scrollTo(currentTrack.id, anchor: .center)
+            }
         }
     }
 
-    private func format(_ seconds: Double) -> String {
-        let s = Int(seconds.isFinite ? max(seconds, 0) : 0)
-        return String(format: "%d:%02d", s / 60, s % 60)
+    private func normalizedCoverURL(_ raw: String?) -> URL? {
+        guard let raw else { return nil }
+        return URL(string: raw.hasPrefix("//") ? "https:" + raw : raw)
     }
 
     private func formatBitrate(_ bandwidth: Int) -> String {
@@ -1798,37 +2182,8 @@ struct NowPlayingView: View {
         return "\(max(1, bandwidth / 1000)) kbps"
     }
 
-    private func selectPlayerPage(_ page: Int) {
-        let target = min(PlayerPage.recommendations.rawValue, max(PlayerPage.queue.rawValue, page))
-        animate(pageTransitionAnimation) {
-            selectedPage = target
-        }
-    }
-
-    private func isProgressGestureStart(_ location: CGPoint) -> Bool {
-        guard selectedPage == PlayerPage.nowPlaying.rawValue else { return false }
-        guard !progressFrameInGlobal.isNull, !progressFrameInGlobal.isEmpty else { return false }
-        return progressFrameInGlobal
-            .insetBy(dx: -12, dy: -4)
-            .contains(location)
-    }
-
-    private func setProgressScrubbing(_ scrubbing: Bool) {
-        progressScrubGeneration += 1
-        let generation = progressScrubGeneration
-        isProgressScrubbing = scrubbing
-        suppressPageSwipeForScrub = true
-
-        guard !scrubbing else { return }
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(220))
-            guard progressScrubGeneration == generation else { return }
-            suppressPageSwipeForScrub = false
-        }
-    }
-
-    private var pageTransitionAnimation: Animation {
-        reduceMotion ? .easeOut(duration: 0.12) : .snappy(duration: 0.32, extraBounce: 0.08)
+    private var contextTransitionAnimation: Animation {
+        reduceMotion ? .easeOut(duration: 0.12) : .interactiveSpring(response: 0.42, dampingFraction: 0.90, blendDuration: 0.08)
     }
 
     private func animate(_ animation: Animation, _ updates: @escaping () -> Void) {
@@ -1840,7 +2195,20 @@ struct NowPlayingView: View {
     }
 }
 
+/// 承载抽屉全局 frame 的引用盒:写入不触发 SwiftUI 视图失效。
+/// 仅在主线程读写(手势回调与 preference 回调均在主线程)。
+private final class BottomContextFrameBox: @unchecked Sendable {
+    var rect: CGRect = .null
+}
+
 private extension View {
+    @ViewBuilder
+    func playerContentReveal(opacity: Double) -> some View {
+        self
+            .opacity(opacity)
+            .animation(.easeOut(duration: 0.12), value: opacity)
+    }
+
     func playerPanelBackground(cornerRadius: CGFloat) -> some View {
         background {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -1863,15 +2231,6 @@ private extension View {
     }
 }
 
-/// 为 hdslb.com 的封面 URL 追加 WebP 缩略图参数。
-private func thumbnailURL(_ url: URL?, width: Int, height: Int) -> URL? {
-    guard let url else { return nil }
-    let raw = url.absoluteString
-    guard !raw.localizedCaseInsensitiveContains("transparent.png") else { return nil }
-    guard raw.contains("hdslb.com"), !raw.contains("@") else { return url }
-    return URL(string: raw + "@\(width)w_\(height)h_1c.webp")
-}
-
 // MARK: - Control views and sheet views are in separate files:
-// PlayerControlViews.swift (PlayerIconButton, ActionSymbolButton, PlayerProgressBar, etc.)
+// PlayerControlViews.swift (PlayerIconButton, PlayerProgressBar, etc.)
 // PlayerSheetViews.swift (LyricsSheetView, MVFullscreenView, FavoriteFolderPickerView, UPPlaylistsView, etc.)

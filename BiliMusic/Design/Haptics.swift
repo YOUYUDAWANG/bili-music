@@ -29,10 +29,3 @@ extension SensoryFeedback {
         }
     }
 }
-
-/// 用于 @State 触发器的自增计数器。
-/// 比用 Bool toggle 更可靠（不会因连续两次相同值而漏触发）。
-struct HapticTrigger: Equatable {
-    private var count = 0
-    mutating func fire() { count &+= 1 }
-}

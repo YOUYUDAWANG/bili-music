@@ -207,9 +207,9 @@ struct PlayerProgressBar: View {
             .frame(height: Metrics.interactionHeight)
 
             HStack {
-                Text(format(isScrubbing ? scrubValue : engine.currentTime))
+                Text(MusicFormatters.playbackTime(isScrubbing ? scrubValue : engine.currentTime))
                 Spacer()
-                Text(format(engine.duration))
+                Text(MusicFormatters.playbackTime(engine.duration))
             }
             .font(.caption.monospacedDigit())
             .foregroundStyle(Color.white.opacity(0.58))
@@ -218,12 +218,23 @@ struct PlayerProgressBar: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("播放进度")
-        .accessibilityValue("\(format(isScrubbing ? scrubValue : engine.currentTime)) / \(format(engine.duration))")
+        .accessibilityValue(
+            "\(MusicFormatters.playbackTime(isScrubbing ? scrubValue : engine.currentTime)) / \(MusicFormatters.playbackTime(engine.duration))"
+        )
         .accessibilityIdentifier("nowPlayingProgress")
         .onDisappear {
             guard isScrubbing else { return }
             engine.endScrub(to: scrubValue)
             isScrubbing = false
+            onScrubChanged(false)
+        }
+        .onChange(of: engine.current?.key) { oldKey, newKey in
+            if let oldKey, let newKey, oldKey.isCIDEnrichment(to: newKey) {
+                return
+            }
+            guard isScrubbing else { return }
+            isScrubbing = false
+            rejectedCurrentDrag = false
             onScrubChanged(false)
         }
     }
@@ -256,10 +267,6 @@ struct PlayerProgressBar: View {
             }
     }
 
-    private func format(_ seconds: Double) -> String {
-        let s = Int(seconds.isFinite ? max(seconds, 0) : 0)
-        return String(format: "%d:%02d", s / 60, s % 60)
-    }
 }
 
 enum ProgressScrubMath {

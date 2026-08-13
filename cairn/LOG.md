@@ -2,6 +2,13 @@
 
 本文件按反向时间顺序记录实质进展——最新记录放在本行下方最顶部。每条记录保持简短，只写摘要与指针；稳定结论沉淀到 `cairn/<topic>.md`。
 
+## 2026-08-14 · 融合 LNPopup 性能架构与稳定版底部抽屉
+
+- 保留 LNPopup 标准 mini player、原生全屏开合、snapshot 转场与真机性能补丁。
+- 恢复单播放器页面和底部队列/合集/推荐三态抽屉，移除横向分页及其旧手势策略，避免与进度条和列表滚动竞争。
+- collapsed/split 队列改为当前歌曲附近窗口化渲染，fullQueue 才创建完整列表。
+- 详情：见 `cairn/player-gesture-performance.md`。
+
 ## 2026-08-14 · 修复本地 Swift Package 的远程编译门禁
 
 - GitHub Actions 从单 target、强制 x86_64 改为 `BiliMusic` shared scheme + generic iOS Simulator，避免各 vendored Package 的 generated module map 落入分离 build root。

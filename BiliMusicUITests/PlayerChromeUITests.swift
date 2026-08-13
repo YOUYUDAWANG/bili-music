@@ -7,7 +7,10 @@ final class PlayerChromeUITests: XCTestCase {
         continueAfterFailure = false
         XCUIDevice.shared.orientation = .portrait
         app = XCUIApplication()
-        app.launchArguments = ["-searchHistory", "[]"]
+        app.launchArguments = [
+            "-searchHistory", "[]",
+            "-cleanListTitles", "false"
+        ]
         app.launchEnvironment["BILIMUSIC_UITEST_FIXTURE"] = "1"
         app.launch()
     }
@@ -34,6 +37,134 @@ final class PlayerChromeUITests: XCTestCase {
         let miniPlayer = element("miniPlayer")
         XCTAssertTrue(miniPlayer.waitForExistence(timeout: 3), "Dragging down from the top player chrome should close the full player.")
         XCTAssertTrue(nowPlaying.waitForNonExistence(timeout: 3), "Full player should be removed after closing.")
+    }
+
+    @MainActor
+    func testMiniPlayerArtworkAndFullArtworkSurviveTwoOpenCloseTransitions() throws {
+        for iteration in 1...2 {
+            let miniPlayer = element("miniPlayer")
+            XCTAssertTrue(miniPlayer.waitForExistence(timeout: 3), "Mini player should be visible before opening on round \(iteration).")
+            XCTAssertTrue(
+                miniPlayer.descendants(matching: .staticText)["Fixture Song One"].waitForExistence(timeout: 3),
+                "The standard popup bar should expose the current title before opening on round \(iteration)."
+            )
+            XCTAssertTrue(
+                miniPlayer.descendants(matching: .image).firstMatch.waitForExistence(timeout: 3),
+                "The standard popup bar should expose artwork before opening on round \(iteration)."
+            )
+
+            try openFullPlayerFromMini()
+            let nowPlaying = element("nowPlayingView")
+            XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should open on round \(iteration).")
+
+            let fullTitle = metadataElement(timeout: 3)
+            XCTAssertTrue(fullTitle.waitForExistence(timeout: 3), "Full title should be visible after opening on round \(iteration).")
+            XCTAssertEqual(fullTitle.label, "Fixture Song One", "Full title should keep the raw fixture title after opening on round \(iteration).")
+            XCTAssertTrue(element("nowPlayingArtwork").waitForExistence(timeout: 3), "Full artwork should be visible after opening on round \(iteration).")
+
+            centerPlayerCoverArea().dragDownToDismiss()
+
+            XCTAssertTrue(nowPlaying.waitForNonExistence(timeout: 3), "Full player should close on round \(iteration).")
+            XCTAssertTrue(miniPlayer.waitForExistence(timeout: 3), "Mini player should be visible again after closing on round \(iteration).")
+            XCTAssertTrue(
+                miniPlayer.descendants(matching: .staticText)["Fixture Song One"].waitForExistence(timeout: 3),
+                "The current title should survive closing on round \(iteration)."
+            )
+            XCTAssertTrue(
+                miniPlayer.descendants(matching: .image).firstMatch.waitForExistence(timeout: 3),
+                "Artwork should survive closing on round \(iteration)."
+            )
+        }
+    }
+
+    @MainActor
+    func testFullPlayerContentAppearsPromptlyAfterOpenTransition() throws {
+        let miniPlayer = element("miniPlayer")
+        XCTAssertTrue(miniPlayer.waitForExistence(timeout: 5), "Fixture mini player should be visible.")
+
+        let openStart = miniPlayer.coordinate(withNormalizedOffset: CGVector(dx: 0.24, dy: 0.5))
+        let openEnd = openStart.withOffset(CGVector(dx: 0, dy: -160))
+        openStart.press(forDuration: 0.35, thenDragTo: openEnd)
+
+        let nowPlaying = element("nowPlayingView")
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 1), "Full player shell should mount as the open transition starts.")
+        XCTAssertTrue(element("nowPlayingArtwork").exists, "Artwork may participate in the mini-to-full transition.")
+        XCTAssertTrue(element("nowPlayingMetadata").waitForExistence(timeout: 0.8), "Metadata should appear promptly after opening.")
+        XCTAssertTrue(element("nowPlayingProgress").waitForExistence(timeout: 0.8), "Progress should appear promptly after opening.")
+        XCTAssertTrue(element("playerToolbar").waitForExistence(timeout: 0.8), "Player actions should appear promptly after opening.")
+    }
+
+    @MainActor
+    func testBottomContextUsesYouTubeMusicStyleQueueStates() throws {
+        try openFullPlayerFromMini()
+
+        let collapsedDrawer = element("playerBottomContextCollapsed")
+        XCTAssertTrue(collapsedDrawer.waitForExistence(timeout: 2), "Bottom queue context should start as a collapsed Up Next surface.")
+        XCTAssertFalse(element("playerBottomQueuePanel").exists, "The queue list should not be expanded by default.")
+
+        let start = collapsedDrawer.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.82))
+        let end = start.withOffset(CGVector(dx: 0, dy: -92))
+        start.press(forDuration: 0.05, thenDragTo: end)
+
+        let splitHeader = element("playerQueueSplitHeader")
+        XCTAssertTrue(splitHeader.waitForExistence(timeout: 2), "First upward drag should reveal the split Up Next state.")
+        XCTAssertTrue(element("playerBottomQueuePanel").waitForExistence(timeout: 2), "Split state should show the queue list.")
+
+        let splitStart = splitHeader.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72))
+        let splitEnd = splitStart.withOffset(CGVector(dx: 0, dy: -116))
+        splitStart.press(forDuration: 0.05, thenDragTo: splitEnd)
+
+        XCTAssertTrue(element("playerQueueFullHeader").waitForExistence(timeout: 2), "Second upward drag should promote the queue into the full queue state.")
+        let fullQueueDrawer = element("playerBottomContextDrawer")
+        XCTAssertTrue(fullQueueDrawer.waitForExistence(timeout: 2), "Full queue should keep the bottom context drawer visible.")
+        let fullQueuePanel = element("playerBottomQueuePanel")
+        XCTAssertTrue(fullQueuePanel.waitForExistence(timeout: 2), "Full queue should keep the queue panel visible.")
+        XCTAssertLessThan(fullQueueDrawer.frame.minY, app.frame.height * 0.30, "Full queue drawer should start near the upper player area like a queue sheet, not near the bottom.")
+        XCTAssertGreaterThan(fullQueuePanel.frame.height, app.frame.height * 0.55, "Full queue should allocate a queue-dominant area instead of a small bottom drawer.")
+        XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 1), "Promoting the queue context should not close the player.")
+    }
+
+    @MainActor
+    func testDraggingDownInsideFullQueueListDoesNotDismissPlayer() throws {
+        try openFullPlayerFromMini()
+        try expandBottomContextToFullQueue()
+
+        let fullQueuePanel = element("playerBottomQueuePanel")
+        XCTAssertTrue(fullQueuePanel.waitForExistence(timeout: 2), "Full queue panel should be visible before testing list drag ownership.")
+
+        let dragStart = fullQueuePanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.28))
+        let dragEnd = fullQueuePanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.78))
+        dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
+
+        XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 1), "Dragging down inside the full queue list should scroll or bounce the list, not minimize the player.")
+        XCTAssertTrue(element("playerQueueFullHeader").waitForExistence(timeout: 1), "Dragging down inside the list body should keep the full queue state.")
+    }
+
+    @MainActor
+    func testDraggingDownInsideSplitQueueListDoesNotDismissPlayer() throws {
+        try openFullPlayerFromMini()
+        try expandBottomContextToSplit()
+
+        let splitQueuePanel = element("playerBottomQueuePanel")
+        XCTAssertTrue(splitQueuePanel.waitForExistence(timeout: 2), "Split queue panel should be visible before testing list drag ownership.")
+
+        let dragStart = splitQueuePanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.30))
+        let dragEnd = splitQueuePanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.88))
+        dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
+
+        XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 1), "Dragging down inside the split queue list should scroll or bounce the list, not minimize the player.")
+        XCTAssertTrue(element("playerQueueSplitHeader").waitForExistence(timeout: 1), "Dragging down inside the split list body should keep the split queue state.")
+    }
+
+    @MainActor
+    func testCenterBodyDragDoesNotDismissWhileSplitQueueIsOpen() throws {
+        try openFullPlayerFromMini()
+        try expandBottomContextToSplit()
+
+        centerPlayerCoverArea().dragDownToDismiss()
+
+        XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 1), "The center dismiss gesture should not minimize the player while the split queue owns vertical gestures.")
+        XCTAssertTrue(element("playerQueueSplitHeader").waitForExistence(timeout: 1), "The split queue should remain open after a center-body downward drag.")
     }
 
     @MainActor
@@ -83,9 +214,7 @@ final class PlayerChromeUITests: XCTestCase {
         let nowPlaying = element("nowPlayingView")
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before testing center-page dismiss.")
 
-        let dragStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.32))
-        let dragEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.70))
-        dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
+        centerPlayerCoverArea().dragDownToDismiss()
 
         XCTAssertTrue(nowPlaying.waitForNonExistence(timeout: 3), "Dragging down on the center player body should minimize the full player.")
         XCTAssertTrue(element("miniPlayer").waitForExistence(timeout: 3), "The mini player should reappear after center-page minimize.")
@@ -94,53 +223,81 @@ final class PlayerChromeUITests: XCTestCase {
     @MainActor
     func testDraggingQueueListBodyDoesNotDismissFullPlayer() throws {
         try openFullPlayerFromMini()
-        try swipeToPlayerPage(direction: .right)
+        try expandBottomContextToFullQueue()
 
         let nowPlaying = element("nowPlayingView")
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should stay open before testing queue-list drag.")
+        let queuePanel = element("playerBottomQueuePanel")
+        XCTAssertTrue(queuePanel.waitForExistence(timeout: 2), "Bottom queue panel should be visible before testing list drag.")
 
-        let dragStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.38))
-        let dragEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.76))
+        let dragStart = queuePanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.28))
+        let dragEnd = queuePanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.78))
         dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
 
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 1), "Dragging inside the queue list body should not minimize the full player.")
     }
 
     @MainActor
-    func testQueueSideListScrollsVertically() throws {
+    func testBottomQueueListScrollsVertically() throws {
         try openFullPlayerFromMini()
-        try swipeToPlayerPage(direction: .right)
+        try expandBottomContextToFullQueue()
 
-        let queuePage = element("playerQueuePage")
-        XCTAssertTrue(queuePage.waitForExistence(timeout: 2), "Queue page should be visible before testing vertical scrolling.")
+        let queuePanel = element("playerBottomQueuePanel")
+        XCTAssertTrue(queuePanel.waitForExistence(timeout: 2), "Bottom queue panel should be visible before testing vertical scrolling.")
 
-        for _ in 0..<3 where !app.staticTexts["Fixture Song Ten"].exists {
-            let dragStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.76))
-            let dragEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.30))
+        let tenthSong = staticText(containing: "Fixture Song Ten")
+        for _ in 0..<3 where !tenthSong.exists {
+            let dragStart = queuePanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.78))
+            let dragEnd = queuePanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.24))
             dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
         }
 
-        XCTAssertTrue(app.staticTexts["Fixture Song Ten"].waitForExistence(timeout: 2), "Queue side page should allow vertical scrolling to later rows.")
+        XCTAssertTrue(tenthSong.waitForExistence(timeout: 2), "Bottom queue should expose later rows in the expanded list.")
         XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 1), "Vertical queue scrolling should not minimize the full player.")
+        XCTAssertEqual(nowPlayingTitleLabel(), "Fixture Song One", "Vertical queue scrolling should not change the current track.")
     }
 
     @MainActor
     func testDraggingRecommendationListBodyDoesNotDismissFullPlayer() throws {
         try openFullPlayerFromMini()
-        try swipeToPlayerPage(direction: .left)
+        try expandBottomContextToFullQueue()
+        selectBottomContextTab("recommendations")
 
         let nowPlaying = element("nowPlayingView")
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should stay open before testing recommendation-list drag.")
+        let recommendationsPanel = element("playerBottomRecommendationsPanel")
+        XCTAssertTrue(recommendationsPanel.waitForExistence(timeout: 5), "Bottom recommendations panel should be visible before testing list drag.")
 
-        let dragStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.38))
-        let dragEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.76))
+        let dragStart = recommendationsPanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.28))
+        let dragEnd = recommendationsPanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.78))
         dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
 
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 1), "Dragging inside the recommendation list body should not minimize the full player.")
     }
 
     @MainActor
-    func testProgressScrubDoesNotDismissOrChangePlayerPage() throws {
+    func testBottomRecommendationListScrollsVerticallyWithoutChangingTrack() throws {
+        try openFullPlayerFromMini()
+        try expandBottomContextToFullQueue()
+        selectBottomContextTab("recommendations")
+
+        let recommendationsPanel = element("playerBottomRecommendationsPanel")
+        XCTAssertTrue(recommendationsPanel.waitForExistence(timeout: 5), "Bottom recommendations panel should be visible before testing vertical scrolling.")
+
+        let tenthSong = staticText(containing: "Fixture Song Ten")
+        for _ in 0..<3 where !tenthSong.exists {
+            let dragStart = recommendationsPanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.78))
+            let dragEnd = recommendationsPanel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.24))
+            dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
+        }
+
+        XCTAssertTrue(tenthSong.waitForExistence(timeout: 2), "Bottom recommendations should expose later rows in the expanded list.")
+        XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 1), "Vertical recommendation scrolling should not minimize the full player.")
+        XCTAssertEqual(nowPlayingTitleLabel(), "Fixture Song One", "Vertical recommendation scrolling should not change the current track.")
+    }
+
+    @MainActor
+    func testProgressScrubDoesNotDismissPlayer() throws {
         try openFullPlayerFromMini()
 
         let nowPlaying = element("nowPlayingView")
@@ -154,50 +311,50 @@ final class PlayerChromeUITests: XCTestCase {
         start.press(forDuration: 0.05, thenDragTo: end)
 
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 1), "Scrubbing progress should not minimize the full player.")
-        XCTAssertFalse(element("playerQueuePage").isHittable, "Scrubbing progress should not swipe to the queue page.")
-        XCTAssertFalse(element("playerRecommendationsPage").isHittable, "Scrubbing progress should not swipe to the recommendations page.")
+        XCTAssertFalse(element("playerBottomQueuePanel").isHittable, "Scrubbing progress should not open the queue panel.")
+        XCTAssertFalse(element("playerBottomRecommendationsPanel").isHittable, "Scrubbing progress should not open recommendations.")
     }
 
     @MainActor
-    func testVerticalDragOnProgressDoesNotStartScrubbing() throws {
-        try openFullPlayerFromMini()
-
-        let progress = element("nowPlayingProgress")
-        XCTAssertTrue(progress.waitForExistence(timeout: 2), "The progress bar should be visible before testing vertical intent.")
-        let valueBefore = progress.value as? String
-        let start = progress.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        let end = start.withOffset(CGVector(dx: 10, dy: -90))
-        start.press(forDuration: 0.05, thenDragTo: end)
-
-        XCTAssertEqual(progress.value as? String, valueBefore, "A mostly vertical drag that starts near progress must not seek playback.")
-        XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 1), "Vertical intent near progress should not dismiss the player.")
-        XCTAssertFalse(element("playerQueuePage").isHittable, "Vertical intent near progress should not change pages.")
-        XCTAssertFalse(element("playerRecommendationsPage").isHittable, "Vertical intent near progress should not change pages.")
-    }
-
-    @MainActor
-    func testHorizontalPageSwipeChangesPageWithoutDismissing() throws {
+    func testHorizontalLeftSwipeDoesNotChangeSinglePlayerPageOrDismiss() throws {
         try openFullPlayerFromMini()
 
         let nowPlaying = element("nowPlayingView")
-        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before testing horizontal page ownership.")
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before testing horizontal gesture ownership.")
+        let titleBefore = nowPlayingTitleLabel()
 
-        try swipeToPlayerPage(direction: .left)
+        centerPlayerCoverArea().leftSwipe()
 
-        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 1), "Horizontal page swipe should not minimize the full player.")
-        XCTAssertTrue(element("playerRecommendationsPage").exists, "Horizontal page swipe should land on the recommendations page.")
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 1), "Horizontal swipe should not minimize the single-page player.")
+        XCTAssertTrue(waitForSingleNowPlayingSurface(), "The player should remain on the single now-playing surface.")
+        XCTAssertEqual(nowPlayingTitleLabel(), titleBefore, "Horizontal swipe should not change the current track.")
+    }
+
+    @MainActor
+    func testHorizontalRightSwipeDoesNotChangeSinglePlayerPageOrDismiss() throws {
+        try openFullPlayerFromMini()
+
+        let nowPlaying = element("nowPlayingView")
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before testing horizontal gesture ownership.")
+        let titleBefore = nowPlayingTitleLabel()
+
+        centerPlayerCoverArea().rightSwipe()
+
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 1), "Horizontal swipe should not minimize the single-page player.")
+        XCTAssertTrue(waitForSingleNowPlayingSurface(), "The player should remain on the single now-playing surface.")
+        XCTAssertEqual(nowPlayingTitleLabel(), titleBefore, "Horizontal swipe should not change the current track.")
     }
 
     @MainActor
     func testHorizontalDragOnQueueRowDoesNotJumpTrack() throws {
         try openFullPlayerFromMini()
-        XCTAssertEqual(metadataElement().label, "Fixture Song One")
+        XCTAssertEqual(nowPlayingTitleLabel(), "Fixture Song One")
 
-        try swipeToPlayerPage(direction: .right)
+        try expandBottomContextToFullQueue()
 
-        let queuePage = element("playerQueuePage")
-        XCTAssertTrue(queuePage.waitForExistence(timeout: 2), "Queue page should be visible before dragging a queue row.")
-        let secondRowTitle = queuePage.descendants(matching: .staticText)
+        let queuePanel = element("playerBottomQueuePanel")
+        XCTAssertTrue(queuePanel.waitForExistence(timeout: 2), "Bottom queue should be visible before dragging a queue row.")
+        let secondRowTitle = queuePanel.descendants(matching: .staticText)
             .matching(NSPredicate(format: "label == %@", "Fixture Song Two"))
             .firstMatch
         XCTAssertTrue(secondRowTitle.waitForExistence(timeout: 2), "Queue should expose the second fixture row before dragging.")
@@ -211,7 +368,7 @@ final class PlayerChromeUITests: XCTestCase {
             XCTAssertTrue(currentRow.label.contains("Fixture Song One"), "A horizontal row drag should not be treated as tapping the second queue item.")
         } else {
             let metadata = element("nowPlayingMetadata")
-            XCTAssertTrue(metadata.waitForExistence(timeout: 2), "If the horizontal row drag changes player pages, the center metadata should be visible.")
+            XCTAssertTrue(metadata.waitForExistence(timeout: 2), "The center metadata should remain visible after a horizontal row drag.")
             XCTAssertEqual(metadata.label, "Fixture Song One", "A horizontal row drag should not be treated as tapping the second queue item.")
         }
     }
@@ -250,48 +407,6 @@ final class PlayerChromeUITests: XCTestCase {
     }
 
     @MainActor
-    func testInlineMiniPlayerMatchesCollapsedTabButtonHeight() throws {
-        let miniPlayer = element("miniPlayer")
-        XCTAssertTrue(miniPlayer.waitForExistence(timeout: 5), "Fixture mini player should be visible.")
-
-        for _ in 0..<3 {
-            app.swipeUp(velocity: .slow)
-        }
-
-        let searchButton = app.tabBars.buttons["搜索"]
-        XCTAssertTrue(searchButton.waitForExistence(timeout: 2), "Collapsed tab bar should retain the search button.")
-        XCTAssertEqual(
-            miniPlayer.frame.height,
-            searchButton.frame.height,
-            accuracy: 2,
-            "Inline mini player should use the same 48pt system height as adjacent tab controls."
-        )
-    }
-
-    @MainActor
-    func testHomeWithoutCurrentTrackDoesNotReserveEmptyMiniPlayerSlot() throws {
-        app.terminate()
-        app = XCUIApplication()
-        app.launchArguments = ["-searchHistory", "[]"]
-        app.launchEnvironment["BILIMUSIC_UITEST_FIXTURE"] = "1"
-        app.launchEnvironment["BILIMUSIC_UITEST_NO_CURRENT"] = "1"
-        app.launch()
-
-        let tabBar = app.tabBars.firstMatch
-        XCTAssertTrue(tabBar.waitForExistence(timeout: 3), "Home should show its regular tab bar.")
-        let initialFrame = tabBar.frame
-        XCTAssertFalse(element("miniPlayer").exists, "No mini player should exist before the first track starts.")
-
-        for _ in 0..<3 {
-            app.swipeUp(velocity: .slow)
-        }
-
-        XCTAssertFalse(element("miniPlayer").exists, "Scrolling without a current track must not create an empty mini-player slot.")
-        XCTAssertEqual(tabBar.frame.minY, initialFrame.minY, accuracy: 2, "The regular tab bar should not collapse around an empty center slot.")
-        XCTAssertEqual(tabBar.frame.height, initialFrame.height, accuracy: 2, "The regular tab bar height should remain stable without playback.")
-    }
-
-    @MainActor
     func testSearchTabUsesFocusedHistoryWithoutModeScopes() throws {
         app.tabBars.buttons["搜索"].tap()
 
@@ -308,37 +423,40 @@ final class PlayerChromeUITests: XCTestCase {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
 
+    private func elements(_ identifier: String) -> [XCUIElement] {
+        app.descendants(matching: .any).matching(identifier: identifier).allElementsBoundByIndex
+    }
+
+    private func staticText(containing text: String) -> XCUIElement {
+        app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+    }
+
     @MainActor
     private func assertDensePlayerLayout() throws {
         let nowPlaying = element("nowPlayingView")
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before dense layout verification.")
 
-        let pageHint = element("playerPageHint")
-        let dismissIndicator = element("playerDismissIndicator")
+        let topChrome = element("playerTopChrome")
         let metadata = metadataElement()
         let progress = element("nowPlayingProgress")
         let transport = element("playerTransportControls")
         let toolbar = element("playerToolbar")
+        let bottomContext = element("playerBottomContextCollapsed")
 
-        let elements = [dismissIndicator, pageHint, metadata, progress, transport, toolbar]
+        let elements = [topChrome, metadata, progress, transport, toolbar, bottomContext]
         for element in elements {
             XCTAssertTrue(element.waitForExistence(timeout: 2), "Dense player layout element should exist: \(element)")
             XCTAssertFalse(element.frame.isEmpty, "Dense player layout element should have a measurable frame: \(element)")
         }
 
-        XCTAssertFalse(element("playerBottomQueuePanel").exists, "The center page should not duplicate the queue preview from the queue page.")
-        XCTAssertFalse(element("playerBottomPlaylistPanel").exists, "The center page should not duplicate the collection from the queue page.")
-
-        XCTAssertLessThanOrEqual(dismissIndicator.frame.maxY, pageHint.frame.minY, "The downward-dismiss indicator should sit above the player page hint.")
-        XCTAssertEqual(dismissIndicator.frame.width, 60, accuracy: 2, "The dismiss indicator should match the wider Apple Music grabber.")
-        XCTAssertLessThanOrEqual(dismissIndicator.frame.midY, app.frame.minY + 100, "The dismiss indicator should stay near the top safe-area boundary instead of being pushed down twice.")
         let coverArea = centerPlayerCoverArea()
-        XCTAssertGreaterThanOrEqual(coverArea.screenPoint.y, pageHint.frame.maxY + 80, "Cover area should stay below the page hint.")
+        XCTAssertGreaterThanOrEqual(coverArea.screenPoint.y, topChrome.frame.maxY + 36, "Cover area should stay below the top chrome.")
         XCTAssertLessThanOrEqual(coverArea.screenPoint.y, metadata.frame.minY - 24, "Cover area should stay above title metadata.")
-        XCTAssertGreaterThanOrEqual(metadata.frame.minY - pageHint.frame.maxY, 210, "Dense player layout should preserve room for visible cover art.")
+        XCTAssertGreaterThanOrEqual(metadata.frame.minY - topChrome.frame.maxY, 178, "Dense player layout should preserve room for visible cover art.")
         assertVerticalOrder(metadata, progress, "Title metadata should stay above progress.")
         assertVerticalOrder(progress, transport, "Progress should stay above transport controls.")
         assertVerticalOrder(transport, toolbar, "Transport controls should stay above the player toolbar.")
+        assertVerticalOrder(toolbar, bottomContext, "The bottom queue drawer should sit below the player toolbar.")
 
         let layoutElements = [metadata, progress, transport, toolbar]
         for firstIndex in 0..<layoutElements.count {
@@ -347,9 +465,10 @@ final class PlayerChromeUITests: XCTestCase {
             }
         }
 
-        let maxBottomGap: CGFloat = app.frame.height <= 700 ? 96 : 128
-        let bottomGap = app.frame.maxY - toolbar.frame.maxY
-        XCTAssertLessThanOrEqual(bottomGap, maxBottomGap, "Dense player layout should not leave excessive empty space below the toolbar.")
+        let maxToolbarToDrawerGap: CGFloat = app.frame.height <= 700 ? 60 : 84
+        let toolbarToDrawerGap = bottomContext.frame.minY - toolbar.frame.maxY
+        XCTAssertLessThanOrEqual(toolbarToDrawerGap, maxToolbarToDrawerGap, "Collapsed queue should sit under the toolbar instead of leaving a large empty lower half.")
+        XCTAssertGreaterThanOrEqual(toolbarToDrawerGap, 12, "Collapsed queue should keep enough breathing room below the toolbar.")
     }
 
     private func assertVerticalOrder(_ upper: XCUIElement, _ lower: XCUIElement, _ message: String) {
@@ -384,100 +503,268 @@ final class PlayerChromeUITests: XCTestCase {
         openStart.press(forDuration: 0.35, thenDragTo: openEnd)
     }
 
-    private enum PlayerPageSwipeDirection {
-        case left
-        case right
+    @MainActor
+    private func expandBottomContextToSplit() throws {
+        let collapsedDrawer = element("playerBottomContextCollapsed")
+        XCTAssertTrue(collapsedDrawer.waitForExistence(timeout: 2), "Bottom queue context should start collapsed before expanding.")
+
+        let start = collapsedDrawer.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.82))
+        let end = start.withOffset(CGVector(dx: 0, dy: -92))
+        start.press(forDuration: 0.05, thenDragTo: end)
+
+        XCTAssertTrue(element("playerQueueSplitHeader").waitForExistence(timeout: 2), "First upward drag should reveal the split queue state.")
     }
 
     @MainActor
-    private func swipeToPlayerPage(direction: PlayerPageSwipeDirection) throws {
-        let nowPlaying = element("nowPlayingView")
-        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before swiping pages.")
-        let coverArea = centerPlayerCoverArea()
-        XCTAssertTrue(coverArea.screenPoint.y > nowPlaying.frame.minY, "The center player cover area should be measurable before swiping pages.")
+    private func expandBottomContextToFullQueue() throws {
+        try expandBottomContextToSplit()
 
-        let expectedPage = direction == .left ? "推荐" : "队列"
-        if direction == .left {
-            coverArea.leftSwipe()
-        } else {
-            coverArea.rightSwipe()
-        }
+        let splitHeader = element("playerQueueSplitHeader")
+        let splitStart = splitHeader.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72))
+        let splitEnd = splitStart.withOffset(CGVector(dx: 0, dy: -116))
+        splitStart.press(forDuration: 0.05, thenDragTo: splitEnd)
 
-        XCTAssertTrue(waitForPlayerPage(expectedPage), "Horizontal swipe should switch the player page to \(expectedPage).")
+        XCTAssertTrue(element("playerQueueFullHeader").waitForExistence(timeout: 2), "Second upward drag should reveal the full queue state.")
+    }
+
+    @MainActor
+    private func selectBottomContextTab(_ rawValue: String) {
+        let tab = element("playerBottomTab-\(rawValue)")
+        XCTAssertTrue(tab.waitForExistence(timeout: 2), "Bottom context tab should exist: \(rawValue)")
+        tab.tap()
     }
 
     @MainActor
     private func centerPlayerCoverArea() -> CoverArea {
-        let pageHint = element("playerPageHint")
-        let metadata = metadataElement()
-        XCTAssertTrue(pageHint.waitForExistence(timeout: 2), "Page hint should exist before deriving the cover area.")
-        XCTAssertTrue(metadata.waitForExistence(timeout: 2), "Metadata should exist before deriving the cover area.")
+        let nowPlaying = element("nowPlayingView")
+        let artwork = element("nowPlayingArtwork")
+        let topChrome = element("playerTopChrome")
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 2), "Full player should exist before deriving the cover area.")
+        if artwork.waitForExistence(timeout: 2), !artwork.frame.isEmpty {
+            return CoverArea(app: app, screenPoint: CGPoint(x: artwork.frame.midX, y: artwork.frame.midY))
+        }
 
-        let top = pageHint.frame.maxY
-        let bottom = metadata.frame.minY
-        let y = min(max((top + bottom) / 2, app.frame.minY + 120), app.frame.maxY - 120)
+        XCTAssertTrue(topChrome.waitForExistence(timeout: 2), "Top chrome should exist before deriving the cover area.")
+
+        let top = max(topChrome.frame.maxY, nowPlaying.frame.minY + 96)
+        let y = min(max(top + 170, app.frame.minY + 160), app.frame.maxY * 0.54)
         return CoverArea(app: app, screenPoint: CGPoint(x: app.frame.midX, y: y))
     }
 
     @MainActor
     private func metadataElement(timeout: TimeInterval = 2) -> XCUIElement {
-        let identified = element("nowPlayingMetadata")
-        if identified.waitForExistence(timeout: 0.4) {
+        if let title = stableTitleElement(timeout: timeout) {
+            return title
+        }
+
+        if let identified = stableMetadataElement(timeout: timeout) {
             return identified
         }
 
-        let fixtureTitle = app.staticTexts
-            .matching(NSPredicate(format: "label == %@", "Fixture Song One"))
-            .firstMatch
-        if fixtureTitle.waitForExistence(timeout: timeout) {
+        if let fixtureTitle = fixtureTitleElement(timeout: timeout) {
             return fixtureTitle
         }
 
-        return identified
+        return element("nowPlayingMetadata")
+    }
+
+    @MainActor
+    private func nowPlayingTitleLabel(timeout: TimeInterval = 2) -> String {
+        if let title = stableTitleElement(timeout: timeout) {
+            return title.label
+        }
+        if let fixtureTitle = fixtureTitleElement(timeout: timeout) {
+            return fixtureTitle.label
+        }
+        return metadataElement(timeout: timeout).label
+    }
+
+    @MainActor
+    private func stableMetadataElement(timeout: TimeInterval) -> XCUIElement? {
+        let nowPlaying = element("nowPlayingView")
+        _ = nowPlaying.waitForExistence(timeout: timeout)
+
+        let progress = element("nowPlayingProgress")
+        _ = progress.waitForExistence(timeout: 0.4)
+        let progressFrame = progress.exists ? progress.frame : .null
+
+        if let fixtureTitle = fixtureTitleElement(timeout: 0.5) {
+            return fixtureTitle
+        }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let title = bestMetadataCandidate(
+                in: elements("nowPlayingTitle"),
+                playerFrame: nowPlaying.frame,
+                progressFrame: progressFrame
+            ) {
+                return title
+            }
+
+            if let metadata = bestMetadataCandidate(
+                in: elements("nowPlayingMetadata").filter { $0.elementType != .staticText },
+                playerFrame: nowPlaying.frame,
+                progressFrame: progress.frame
+            ) {
+                return titleElement(in: metadata) ?? metadata
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        } while Date() < deadline
+
+        return nil
+    }
+
+    @MainActor
+    private func stableTitleElement(timeout: TimeInterval) -> XCUIElement? {
+        let nowPlaying = element("nowPlayingView")
+        _ = nowPlaying.waitForExistence(timeout: timeout)
+
+        let progress = element("nowPlayingProgress")
+        _ = progress.waitForExistence(timeout: 0.4)
+        let progressFrame = progress.exists ? progress.frame : .null
+
+        if let fixtureTitle = fixtureTitleElement(timeout: 0.5) {
+            return fixtureTitle
+        }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let title = bestMetadataCandidate(
+                in: elements("nowPlayingTitle"),
+                playerFrame: nowPlaying.frame,
+                progressFrame: progressFrame
+            ) {
+                return title
+            }
+
+            if let metadata = bestMetadataCandidate(
+                in: elements("nowPlayingMetadata").filter { $0.elementType != .staticText },
+                playerFrame: nowPlaying.frame,
+                progressFrame: progressFrame
+            ), let title = titleElement(in: metadata) {
+                return title
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        } while Date() < deadline
+
+        return nil
+    }
+
+    @MainActor
+    private func fixtureTitleElement(timeout: TimeInterval) -> XCUIElement? {
+        let nowPlaying = element("nowPlayingView")
+        _ = nowPlaying.waitForExistence(timeout: timeout)
+
+        let progress = element("nowPlayingProgress")
+        _ = progress.waitForExistence(timeout: 0.4)
+        let progressFrame = progress.exists ? progress.frame : .null
+        let fixtureTitles = app.staticTexts.matching(NSPredicate(format: "label == %@", "Fixture Song One"))
+
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let candidates = fixtureTitles.allElementsBoundByIndex.filter { candidate in
+                candidate.exists &&
+                !candidate.frame.isEmpty &&
+                candidate.frame.intersects(nowPlaying.frame) &&
+                (progressFrame.isNull || progressFrame.isEmpty || candidate.frame.maxY <= progressFrame.minY + 1)
+            }
+
+            if let title = candidates.sorted(by: titleSort).first {
+                return title
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        } while Date() < deadline
+
+        return nil
+    }
+
+    private func bestMetadataCandidate(
+        in candidates: [XCUIElement],
+        playerFrame: CGRect,
+        progressFrame: CGRect
+    ) -> XCUIElement? {
+        let visible = candidates.filter { candidate in
+            candidate.exists &&
+            !candidate.frame.isEmpty &&
+            candidate.frame.intersects(playerFrame)
+        }
+
+        let ordered = visible.sorted { lhs, rhs in
+            if abs(lhs.frame.minY - rhs.frame.minY) > 1 {
+                return lhs.frame.minY < rhs.frame.minY
+            }
+            return lhs.frame.minX < rhs.frame.minX
+        }
+
+        if !progressFrame.isEmpty,
+           let aboveProgress = ordered.first(where: { $0.frame.maxY <= progressFrame.minY + 1 }) {
+            return aboveProgress
+        }
+
+        return ordered.first
+    }
+
+    private func titleElement(in metadata: XCUIElement) -> XCUIElement? {
+        let titles = metadata.descendants(matching: .staticText).allElementsBoundByIndex
+            .filter { $0.exists && !$0.frame.isEmpty }
+            .sorted(by: titleSort)
+
+        return titles.first(where: { isFixtureTitleLabel($0.label) }) ?? titles.first
+    }
+
+    private func isFixtureTitleLabel(_ label: String) -> Bool {
+        label.hasPrefix("Fixture Song")
+    }
+
+    private func titleSort(_ lhs: XCUIElement, _ rhs: XCUIElement) -> Bool {
+        if abs(lhs.frame.minY - rhs.frame.minY) > 1 {
+            return lhs.frame.minY < rhs.frame.minY
+        }
+        return lhs.frame.minX < rhs.frame.minX
     }
 
     private struct CoverArea {
         let app: XCUIApplication
         let screenPoint: CGPoint
 
+        private func absoluteCoordinate(x: CGFloat) -> XCUICoordinate {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+                .withOffset(CGVector(dx: x, dy: screenPoint.y))
+        }
+
         func leftSwipe() {
-            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
-                .withOffset(CGVector(dx: app.frame.width * 0.74, dy: screenPoint.y))
-            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
-                .withOffset(CGVector(dx: app.frame.width * 0.22, dy: screenPoint.y))
-            start.press(forDuration: 0.05, thenDragTo: end)
+            let start = absoluteCoordinate(x: app.frame.width * 0.88)
+            let end = absoluteCoordinate(x: app.frame.width * 0.08)
+            start.press(forDuration: 0.02, thenDragTo: end)
         }
 
         func rightSwipe() {
-            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
-                .withOffset(CGVector(dx: app.frame.width * 0.22, dy: screenPoint.y))
+            let start = absoluteCoordinate(x: app.frame.width * 0.12)
+            let end = absoluteCoordinate(x: app.frame.width * 0.92)
+            start.press(forDuration: 0.02, thenDragTo: end)
+        }
+
+        func dragDownToDismiss() {
+            let start = absoluteCoordinate(x: screenPoint.x)
             let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
-                .withOffset(CGVector(dx: app.frame.width * 0.74, dy: screenPoint.y))
+                .withOffset(CGVector(dx: screenPoint.x, dy: app.frame.height * 0.76))
             start.press(forDuration: 0.05, thenDragTo: end)
         }
     }
 
     @MainActor
-    private func waitForPlayerPage(_ title: String, timeout: TimeInterval = 2) -> Bool {
-        if title != "正在播放" {
-            let expectedPageIdentifier = title == "队列" ? "playerQueuePage" : "playerRecommendationsPage"
-            let expectedPage = element(expectedPageIdentifier)
-            if expectedPage.waitForExistence(timeout: timeout), expectedPage.isHittable {
-                return true
-            }
-        }
+    private func waitForSingleNowPlayingSurface(timeout: TimeInterval = 2) -> Bool {
+        let nowPlaying = element("nowPlayingView")
+        guard nowPlaying.waitForExistence(timeout: timeout) else { return false }
 
-        let hint = element("playerPageHint")
-        guard hint.waitForExistence(timeout: timeout) else { return false }
+        let topChrome = element("playerTopChrome")
+        guard topChrome.waitForExistence(timeout: timeout) else { return false }
 
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if hint.value as? String == title {
-                return true
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
-        }
-        return hint.value as? String == title
+        return true
     }
 
 }

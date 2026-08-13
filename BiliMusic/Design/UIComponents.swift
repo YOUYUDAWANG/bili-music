@@ -1,53 +1,5 @@
 import SwiftUI
 
-// MARK: - 长文本右侧渐变淡出
-
-struct FadeOutRightModifier: ViewModifier {
-    var fadeWidth: CGFloat = 16
-
-    func body(content: Content) -> some View {
-        content
-            .mask(
-                HStack(spacing: 0) {
-                    Rectangle()
-                    LinearGradient(
-                        colors: [.black, .clear],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                    .frame(width: fadeWidth)
-                }
-            )
-    }
-}
-
-extension View {
-    func fadeOutRight(width: CGFloat = 16) -> some View {
-        modifier(FadeOutRightModifier(fadeWidth: width))
-    }
-}
-
-// MARK: - Mini 播放器微进度条（隔离渲染，只订阅 currentTime）
-
-struct MiniProgressBar: View {
-    @Environment(PlayerEngine.self) private var engine
-
-    var body: some View {
-        GeometryReader { geo in
-            let progress = engine.duration > 0 ? CGFloat(engine.currentTime / engine.duration) : 0
-            Rectangle()
-                .fill(Color.primary.opacity(0.06))
-                .overlay(
-                    Rectangle()
-                        .fill(Color.primary.opacity(0.35))
-                        .frame(width: geo.size.width * progress),
-                    alignment: .leading
-                )
-        }
-        .frame(height: 1.5)
-    }
-}
-
 // MARK: - Mini 播放器控制按钮按压缩放
 
 struct MiniPlayerControlButtonStyle: ButtonStyle {
@@ -172,7 +124,7 @@ struct MusicLoadingBlock: View {
 }
 
 struct FeaturedTrackCard: View {
-    @AppStorage(TrackTitleFormatter.cleanListTitlesDefaultsKey) private var cleanListTitles = true
+    @AppStorage(TrackTitleFormatter.cleanListTitlesDefaultsKey) private var cleanListTitles = false
     let track: Track
     var isPlaying = false
 
@@ -180,7 +132,7 @@ struct FeaturedTrackCard: View {
         let display = TrackTitleFormatter.displayMetadata(for: track, clean: cleanListTitles)
         VStack(alignment: .leading, spacing: 10) {
             CachedAsyncImage(
-                url: thumbnailURL(track.coverURL, width: 640, height: 360),
+                url: BiliArtworkURL.thumbnail(track.coverURL, width: 640, height: 360),
                 targetSize: CGSize(width: 320, height: 180)
             ) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
@@ -220,114 +172,6 @@ struct FeaturedTrackCard: View {
         .contentShape(Rectangle())
     }
 
-    private func thumbnailURL(_ url: URL?, width: Int, height: Int) -> URL? {
-        guard let url else { return nil }
-        let raw = url.absoluteString
-        guard !raw.localizedCaseInsensitiveContains("transparent.png") else { return nil }
-        guard raw.contains("hdslb.com"), !raw.contains("@") else { return url }
-        return URL(string: raw + "@\(width)w_\(height)h_1c.webp")
-    }
-}
-
-struct MusicTrackRow: View {
-    @Environment(PlayerEngine.self) private var engine
-    @AppStorage(TrackTitleFormatter.cleanListTitlesDefaultsKey) private var cleanListTitles = true
-    let track: Track
-    var isPlaying = false
-    var showsMenu = true
-    var isLoading = false
-
-    var body: some View {
-        let display = TrackTitleFormatter.displayMetadata(for: track, clean: cleanListTitles)
-        HStack(spacing: 12) {
-            CachedAsyncImage(
-                url: thumbnailURL(track.coverURL, width: 192, height: 108),
-                targetSize: CGSize(width: 72, height: 40.5)
-            ) { image in
-                image.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: {
-                ZStack {
-                    AppTheme.secondaryBackground
-                    Image(systemName: "music.note")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(width: 72, height: 40.5)
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    if isPlaying {
-                        Image(systemName: "waveform")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(AppTheme.accent)
-                    }
-                    Text(display.title)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(2)
-                        .foregroundStyle(isPlaying ? AppTheme.accent : .primary)
-                }
-
-                Text("\(display.artist) · \(MusicFormatters.duration(track.duration))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 8)
-
-            trailingControl
-        }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 10)
-        .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
-        .contentShape(Rectangle())
-    }
-
-    @ViewBuilder
-    private var trailingControl: some View {
-        if isLoading {
-            ProgressView()
-                .scaleEffect(0.74)
-                .frame(width: 36, height: 36)
-        } else if showsMenu {
-            if isPlaying {
-                Image(systemName: "speaker.wave.2.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(AppTheme.accent)
-                    .frame(width: 36, height: 36)
-            } else {
-                Menu {
-                    Button {
-                        engine.appendToQueue([track])
-                    } label: {
-                        Label("添加到队列", systemImage: "text.badge.plus")
-                    }
-                    Button {
-                        Task { await engine.playRadio(seed: track) }
-                    } label: {
-                        Label("电台播放", systemImage: "antenna.radiowaves.left.and.right")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 36, height: 36)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    private func thumbnailURL(_ url: URL?, width: Int, height: Int) -> URL? {
-        guard let url else { return nil }
-        let raw = url.absoluteString
-        guard !raw.localizedCaseInsensitiveContains("transparent.png") else { return nil }
-        guard raw.contains("hdslb.com"), !raw.contains("@") else { return url }
-        return URL(string: raw + "@\(width)w_\(height)h_1c.webp")
-    }
 }
 
 enum MusicFormatters {
@@ -335,5 +179,10 @@ enum MusicFormatters {
         seconds >= 3600
             ? String(format: "%d:%02d:%02d", seconds / 3600, seconds % 3600 / 60, seconds % 60)
             : String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+
+    static func playbackTime(_ seconds: Double) -> String {
+        let value = Int(seconds.isFinite ? max(seconds, 0) : 0)
+        return String(format: "%d:%02d", value / 60, value % 60)
     }
 }

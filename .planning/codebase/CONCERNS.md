@@ -1,6 +1,45 @@
 # Codebase Concerns
 
-**Analysis Date:** 2026-06-26
+**Analysis Date:** 2026-07-25
+
+## Review Update: 2026-07-25
+
+### Resolved in the current stabilization pass
+
+- Bilibili API requests now validate HTTP status before envelope decoding, and favorite auth failures distinguish expired login.
+- WBI and LRCLIB requests now have bounded timeouts and reject non-2xx responses before decoding.
+- Concurrent search pages are restored to relevance order; stale requests are isolated and the in-memory snapshot cache is capped.
+- Prepared audio and MV stream caches now have TTL/count limits instead of growing for the full process lifetime.
+- Home and Now Playing recommendation requests use request identities so older responses cannot replace newer state.
+- Image loading uses target-sized downsampling and a bounded memory cache; duplicate artwork URL logic was consolidated.
+- AVPlayer callbacks validate playback generation, player identity, and item identity before mutating current state.
+- `.inactive` is treated as a snapshot transition rather than a real background transition.
+- Cache downloads validate HTTP status and non-empty output, replace existing files atomically, and flush their index before reporting success.
+- Recent-home exclusions now flush with cache/history state when the app enters the background.
+- Playback critical-path, image-cache, search-store, and gesture policy tests now cover several previously untested regressions.
+- Pending radio/direct-play work is invalidated by explicit selection, and transport commands cannot restart the
+  old AVPlayer item while the next radio track is still resolving.
+- Automatic end-of-item advancement, audio-interruption resume, buffer recovery, and failed-source recovery all
+  preserve the latest play/pause intent.
+- Progress scrub completion is track-bound, so a gesture that began on one song cannot seek a newly selected song.
+- Local-cache failure invalidates the corresponding in-memory stream before a fresh remote retry.
+- Startup CDN fallback and AVPlayer failure recovery have single ownership of source replacement for a generation.
+- Shared haptic feedback is attached once per screen instead of once per visible list row.
+
+### Current high-priority concerns
+
+- `PlayerEngine.swift` and `NowPlayingView.swift` remain the largest and most fragile types. Splitting them is worthwhile, but should be a dedicated phase with real-device playback and gesture gates rather than part of an opportunistic cleanup.
+- Expired cookies can still leave the settings UI reporting a logged-in state until a protected request fails. Authentication needs a shared expiry state and re-login transition.
+- JSON stores now serialize revisioned atomic writes, but still lack schema versions, corrupt-file quarantine, and orphaned-audio repair.
+- Automatic caching has no disk quota, free-space guard, LRU eviction, or background/resumable download support.
+- `BiliClient`, `LyricsClient`, and `WBISigner` still call concrete URL sessions, limiting deterministic transport/auth tests.
+- `NSAllowsArbitraryLoads` remains enabled. Removing it requires capturing real Bilibili CDN host/scheme behavior first so playback is not accidentally broken.
+- The app intentionally targets iOS 26 because it uses iOS 26 system tab accessory APIs; older-iOS support is not a deployment-target-only change.
+- Initial search waits for every page in its first request batch, so one slow page can delay the first visible result.
+- Full-screen MV still uses progressive DURL rather than separate DASH video/audio adaptation, and download retries do not yet rotate through CDN candidates.
+- Swift 6 strict-concurrency checking reports lock-protected singleton and detached-decode warnings; the current project remains on Swift 5.10.
+
+The remaining sections below are the original 2026-06-26 snapshot. Items listed there may have been superseded by the update above.
 
 ## Tech Debt
 

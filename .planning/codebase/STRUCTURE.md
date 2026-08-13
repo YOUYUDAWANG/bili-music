@@ -64,7 +64,7 @@ bilibili-music/
 **`BiliMusic/Features/`:**
 - Purpose: User-facing SwiftUI features and feature-specific state.
 - Contains: Root tab shell plus feature folders for home, search, favorites, library, player, and settings.
-- Key files: `BiliMusic/Features/RootView.swift`, `BiliMusic/Features/LibraryTabView.swift`
+- Key files: `BiliMusic/Features/RootView.swift`（tab shell + mini/全屏播放器浮层；`LibraryTabView.swift` 已删除，其职责并入 RootView 与 `Features/Library/LibraryView.swift`）
 
 **`BiliMusic/Features/Home/`:**
 - Purpose: Recommendation feed.
@@ -88,8 +88,8 @@ bilibili-music/
 
 **`BiliMusic/Features/Player/`:**
 - Purpose: Full-screen player UI and player-specific sheets/controls.
-- Contains: Now-playing surface, playback controls, lyrics/MV/playlist/favorite/download sheets.
-- Key files: `BiliMusic/Features/Player/NowPlayingView.swift`, `BiliMusic/Features/Player/PlayerControlViews.swift`, `BiliMusic/Features/Player/PlayerSheetViews.swift`, `BiliMusic/Features/Player/CLAUDE.md`
+- Contains: LNPopup-hosted now-playing surface, playback controls, a three-state queue/playlist/recommendation drawer, lyrics/MV/playlist/favorite/download sheets, and list-window pure helpers.
+- Key files: `BiliMusic/Features/Player/NowPlayingView.swift`, `BiliMusic/Features/Player/PlayerControlViews.swift`, `BiliMusic/Features/Player/PlayerSheetViews.swift`, `BiliMusic/Features/Player/PlayerListWindow.swift`, `BiliMusic/Features/Player/CLAUDE.md`
 
 **`BiliMusic/Features/Settings/`:**
 - Purpose: Settings, login, quality, cache policy, MV preference, and history UI.
@@ -99,7 +99,7 @@ bilibili-music/
 **`BiliMusic/Player/`:**
 - Purpose: Playback domain, media integration, recommendations, filters, history, and network reachability.
 - Contains: `PlayerEngine`, `Track`, `TrackKey`, queue controller, recommendation engine, music filter, stream resolver, network monitor, playback history store.
-- Key files: `BiliMusic/Player/PlayerEngine.swift`, `BiliMusic/Player/StreamResolver.swift`, `BiliMusic/Player/RecommendationEngine.swift`, `BiliMusic/Player/MusicFilter.swift`, `BiliMusic/Player/QueueController.swift`, `BiliMusic/Player/NetworkMonitor.swift`, `BiliMusic/Player/PlaybackHistoryStore.swift`, `BiliMusic/Player/CLAUDE.md`
+- Key files: `BiliMusic/Player/PlayerEngine.swift`, `BiliMusic/Player/StreamResolver.swift`, `BiliMusic/Player/RecommendationEngine.swift`, `BiliMusic/Player/MusicFilter.swift`, `BiliMusic/Player/QueueController.swift`, `BiliMusic/Player/AudioCDNSelector.swift`, `BiliMusic/Player/PlaybackDiagnostics.swift`, `BiliMusic/Player/NetworkMonitor.swift`, `BiliMusic/Player/PlaybackHistoryStore.swift`, `BiliMusic/Player/CLAUDE.md`
 
 **`BiliMusic/Support/`:**
 - Purpose: Debug and UI-test fixtures.
