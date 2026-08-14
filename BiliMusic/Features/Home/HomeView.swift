@@ -6,19 +6,28 @@ import SwiftUI
 struct HomeView: View {
     @Environment(PlayerEngine.self) private var engine
     @Binding var showSettings: Bool
+    @Binding var isCoverPlayerPresented: Bool
+    @Namespace private var coverTransitionNamespace
     @AppStorage(SettingsView.recommendFolderKey) private var libraryFolderId = 0
     @State private var tracks: [Track] = []
     @State private var loading = false
     @State private var errorMessage: String?
     @State private var trackTapTrigger = 0
     @State private var activeLoadID = UUID()
+    @State private var presentedCoverPlayerID: String?
+    @State private var isClosingCoverPlayer = false
+    @State private var coverPlayerDismissTask: Task<Void, Never>?
 
-    init(showSettings: Binding<Bool> = .constant(false)) {
+    init(
+        showSettings: Binding<Bool> = .constant(false),
+        isCoverPlayerPresented: Binding<Bool> = .constant(false)
+    ) {
         _showSettings = showSettings
+        _isCoverPlayerPresented = isCoverPlayerPresented
     }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
+        ZStack(alignment: .top) {
             ScrollView {
                 Group {
                     if tracks.isEmpty {
@@ -28,10 +37,10 @@ struct HomeView: View {
                     }
                 }
                 .padding(.horizontal, 8)
-                .padding(.bottom, 28)
+                .padding(.top, 44)
             }
             .accessibilityIdentifier("homeList")
-            .background(AppTheme.background.ignoresSafeArea())
+            .safeAreaPadding(.bottom, 8)
             .refreshable { await loadLibrary(forceRemoteRefresh: true) }
             .task {
                 if tracks.isEmpty { await loadLibrary() }
@@ -45,51 +54,152 @@ struct HomeView: View {
                 Task { await loadLibrary(forceRemoteRefresh: true) }
             }
 
-            HStack(spacing: 10) {
+            LinearGradient(
+                colors: [Color.black.opacity(0.65), Color.black.opacity(0.20), Color.clear],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 72)
+            .ignoresSafeArea(edges: .top)
+            .allowsHitTesting(false)
+
+            topControls
+
+            if let sourceID = presentedCoverPlayerID {
+                coverPlayerOverlay(sourceID: sourceID)
+            }
+        }
+        .background(AppTheme.background.ignoresSafeArea())
+        .sensoryFeedback(.intent(.lightImpact), trigger: trackTapTrigger)
+        .toolbar(.hidden, for: .navigationBar)
+        .toolbar(presentedCoverPlayerID == nil ? .visible : .hidden, for: .tabBar)
+        .onDisappear {
+            coverPlayerDismissTask?.cancel()
+        }
+    }
+
+    private func coverPlayerOverlay(sourceID: String) -> some View {
+        NowPlayingView(isPresented: true)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .matchedGeometryEffect(
+                id: sourceID,
+                in: coverTransitionNamespace,
+                properties: .frame,
+                anchor: .center
+            )
+            .zIndex(10)
+            .overlay(alignment: .top) {
+                Button {
+                    closeCoverPlayer()
+                } label: {
+                    Capsule()
+                        .fill(Color.white.opacity(0.72))
+                        .frame(width: 60, height: 5)
+                        .frame(width: 100, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("收起播放器")
+                .accessibilityIdentifier("coverPlayerCloseButton")
+            }
+            .allowsHitTesting(!isClosingCoverPlayer)
+    }
+
+    private var coverPlayerAnimation: Animation {
+        .spring(duration: 0.50, bounce: 0.08)
+    }
+
+    private func openCoverPlayer(sourceID: String) {
+        guard presentedCoverPlayerID == nil, !isClosingCoverPlayer else { return }
+        coverPlayerDismissTask?.cancel()
+        isCoverPlayerPresented = true
+        withAnimation(coverPlayerAnimation) {
+            presentedCoverPlayerID = sourceID
+        }
+    }
+
+    /// 动画层和手势层分离：播放器继续缩回原封面，但关闭一开始就不再拦截触摸。
+    private func closeCoverPlayer() {
+        guard presentedCoverPlayerID != nil, !isClosingCoverPlayer else { return }
+        isClosingCoverPlayer = true
+        coverPlayerDismissTask?.cancel()
+        coverPlayerDismissTask = Task { @MainActor in
+            // 先提交 allowsHitTesting(false)，再开始缩回，确保第一帧就把触摸交还给瀑布流。
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            withAnimation(coverPlayerAnimation) {
+                presentedCoverPlayerID = nil
+            }
+            try? await Task.sleep(for: .milliseconds(520))
+            guard !Task.isCancelled, presentedCoverPlayerID == nil else { return }
+            isCoverPlayerPresented = false
+            isClosingCoverPlayer = false
+        }
+    }
+
+    private var topControls: some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+
+            HStack(spacing: 0) {
                 Button {
                     guard !tracks.isEmpty else { return }
                     trackTapTrigger += 1
+                    let randomIndex = Int.random(in: tracks.indices)
                     Task {
                         await engine.play(
                             tracks: tracks,
-                            startAt: Int.random(in: tracks.indices),
+                            startAt: randomIndex,
                             queueMode: .shuffle)
                     }
                 } label: {
                     Image(systemName: "shuffle")
-                        .frame(width: 30, height: 30)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.white.opacity(0.92))
+                        .frame(width: 42, height: 34)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.glass)
-                .controlSize(.small)
                 .disabled(tracks.isEmpty)
                 .accessibilityLabel("随机播放资料库")
+
+                Divider()
+                    .frame(height: 14)
+                    .background(Color.white.opacity(0.25))
 
                 Button {
                     showSettings = true
                 } label: {
                     Image(systemName: "person.crop.circle")
-                        .frame(width: 30, height: 30)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color.white.opacity(0.92))
+                        .frame(width: 42, height: 34)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.glass)
-                .controlSize(.small)
                 .accessibilityLabel("设置")
             }
-            .padding(.top, 8)
-            .padding(.trailing, 12)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5)
+            )
+            .shadow(color: Color.black.opacity(0.25), radius: 8, x: 0, y: 4)
         }
-        .sensoryFeedback(.intent(.lightImpact), trigger: trackTapTrigger)
+        .padding(.horizontal, 10)
+        .padding(.top, 4)
     }
 
     private var coverWall: some View {
         LazyVStack(spacing: 8) {
             ForEach(Array(coverGroups.enumerated()), id: \.offset) { groupIndex, group in
-                if let featured = group.first {
-                    coverTile(for: featured, featured: true)
-                        .accessibilityIdentifier("homeTrackRow\(featured.index)")
-                }
+                VStack(spacing: 4) {
+                    if let featured = group.first {
+                        coverTile(for: featured, featured: true)
+                            .accessibilityIdentifier("homeTrackRow\(featured.index)")
+                    }
 
-                coverPair(Array(group.dropFirst().prefix(2)), groupIndex: groupIndex, row: 0)
-                coverPair(Array(group.dropFirst(3).prefix(2)), groupIndex: groupIndex, row: 1)
+                    coverPair(Array(group.dropFirst().prefix(2)), groupIndex: groupIndex, row: 0)
+                    coverPair(Array(group.dropFirst(3).prefix(2)), groupIndex: groupIndex, row: 1)
+                }
             }
         }
     }
@@ -97,7 +207,7 @@ struct HomeView: View {
     @ViewBuilder
     private func coverPair(_ pair: [CoverLibraryItem], groupIndex: Int, row: Int) -> some View {
         if !pair.isEmpty {
-            HStack(spacing: 8) {
+            HStack(spacing: 4) {
                 ForEach(pair) { item in
                     coverTile(for: item, featured: false)
                         .accessibilityIdentifier("homeTrackRow\(item.index)")
@@ -115,11 +225,13 @@ struct HomeView: View {
     private func coverTile(for item: CoverLibraryItem, featured: Bool) -> some View {
         let track = item.track
         let index = item.index
+        let transitionSourceID = item.id
         let isCurrent = engine.current.map { track.key.matches($0) } ?? false
         let pixelWidth = featured ? 1_200 : 620
         return Button {
             trackTapTrigger += 1
-            Task { await engine.play(tracks: tracks, startAt: index) }
+            engine.beginPlayback(tracks: tracks, startAt: index)
+            openCoverPlayer(sourceID: transitionSourceID)
         } label: {
             CachedAsyncImage(
                 url: BiliArtworkURL.widescreenThumbnail(track.coverURL, width: pixelWidth),
@@ -137,26 +249,21 @@ struct HomeView: View {
                 }
             }
             .aspectRatio(16 / 9, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(alignment: .bottomTrailing) {
+            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .overlay(alignment: .bottomLeading) {
                 if isCurrent {
-                    Image(systemName: engine.state == .playing ? "waveform" : "pause.fill")
-                        .font(.system(size: featured ? 17 : 13, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(featured ? 12 : 8)
-                        .shadow(color: .black.opacity(0.55), radius: 5)
-                        .accessibilityHidden(true)
+                    HomePlaybackProgressRail()
                 }
             }
-            .overlay {
-                if isCurrent {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(.white.opacity(0.82), lineWidth: 2)
-                }
-            }
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .modifier(CoverTransitionSourceModifier(
+                id: transitionSourceID,
+                namespace: coverTransitionNamespace,
+                isPlayerPresented: presentedCoverPlayerID == transitionSourceID
+            ))
+            .contentShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
         }
         .buttonStyle(.plain)
+        .disabled(isClosingCoverPlayer)
         .contextMenu {
             Button {
                 Task { await engine.playRadio(seed: track) }
@@ -164,7 +271,10 @@ struct HomeView: View {
                 Label("电台播放", systemImage: PlayerEngine.QueueMode.radio.icon)
             }
             Button {
-                Task { await engine.play(tracks: tracks, startAt: index, queueMode: .shuffle) }
+                trackTapTrigger += 1
+                Task {
+                    await engine.play(tracks: tracks, startAt: index, queueMode: .shuffle)
+                }
             } label: {
                 Label("随机播放资料库", systemImage: PlayerEngine.QueueMode.shuffle.icon)
             }
@@ -339,6 +449,51 @@ struct HomeView: View {
             guard track.coverURL != nil else { return false }
             return seen.insert(track.id).inserted
         }
+    }
+}
+
+/// 只让当前可见的一侧参与 matched geometry。封面占位始终留在 LazyVStack 中，
+/// 因此播放器展开/收回和用户在收回期间滚动都不会改变瀑布流排版。
+private struct CoverTransitionSourceModifier: ViewModifier {
+    let id: String
+    let namespace: Namespace.ID
+    let isPlayerPresented: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isPlayerPresented {
+            content.opacity(0)
+        } else {
+            content.matchedGeometryEffect(
+                id: id,
+                in: namespace,
+                properties: .frame,
+                anchor: .center
+            )
+        }
+    }
+}
+
+private struct HomePlaybackProgressRail: View {
+    @Environment(PlayerEngine.self) private var engine
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Color.black.opacity(0.65)
+                Color.white.opacity(0.95)
+                    .frame(width: proxy.size.width * progress)
+            }
+        }
+        .frame(height: 3)
+        .animation(.linear(duration: 0.45), value: progress)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private var progress: CGFloat {
+        guard engine.duration.isFinite, engine.duration > 0, engine.currentTime.isFinite else { return 0 }
+        return CGFloat(min(max(engine.currentTime / engine.duration, 0), 1))
     }
 }
 

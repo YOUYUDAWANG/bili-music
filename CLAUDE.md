@@ -4,7 +4,7 @@
 
 ## 项目一句话
 
-面向个人自用的 SwiftUI iPhone 音乐客户端，以接近 Apple Music 的体验快速、稳定地播放和管理 B 站音乐内容。
+面向个人自用的 SwiftUI iPhone 音乐客户端：沿用 Apple Music 式系统交互，使用 B 站 16:9 封面驱动的“横版影像唱片机”视觉，快速、稳定地播放和管理音乐内容。
 
 > Project Cairn 已按本项目自身定位和 provider 配置初始化；其他项目不得直接复制本配置，应分别初始化。
 
@@ -173,7 +173,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 
 ## 架构
 
-单 Module 的 SwiftUI app，iOS 26.0+（部署目标有意保持 26.0），`@Observable` MVVM。网络和播放层只用 URLSession + AVPlayer；播放器纵向开合使用项目内 vendored 的 MIT 依赖 LNPopupUI/LNPopupController。
+单 Module 的 SwiftUI app，iOS 26.0+（部署目标有意保持 26.0），`@Observable` MVVM。网络和播放层只用 URLSession + AVPlayer。首页封面到播放器使用 Home 局部 matched geometry 动画层；mini player 的展开、跟手下滑和收回继续使用项目内 vendored 的 MIT 依赖 LNPopupUI/LNPopupController。
 
 ### 全局状态
 
@@ -222,14 +222,14 @@ B 站视频可以有多个分 P（cid），缓存和去重不能只按 bvid。`T
 
 ### 设计（`BiliMusic/Design/`）
 
-- **`AppTheme`** —— `accent` 指向克制的 B 站蓝青 `brand`，并提供 pressed/soft 变体；无封面时的 `playerGradient` 在系统背景上加入轻微蓝青品牌感。
+- **`AppTheme`** —— 工具页继续使用克制的 B 站蓝青 `accent`；沉浸式播放器通过 `PlayerArtworkPalette` 从封面派生背景色，不用固定品牌色覆盖真实封面。
 - **`CachedAsyncImage`** —— 自定义图片加载 view（`CachedAsyncImage<Content, Placeholder>`）。2 层缓存：`ImageMemoryCache`（NSCache，cap 240 张/48MB）和 `ImageLoadCoordinator`（actor，URLSession + URLCache 32+128MB，同 URL 去重）。
 
 ### 功能页（`BiliMusic/Features/`）
 
-- **`RootView`** —— tab bar（推荐/搜索/收藏/缓存/设置）+ LNPopupUI 标准紧凑浮动播放条。LNPopupController 以 `.floatingCompact + .automatic` 承载 `NowPlayingView` 的展开、跟手惯性和收回；48pt mini bar 与折叠底栏按钮同高，封面是唯一 popup transition target。只有存在当前歌曲时才允许 `.onScrollDown` 底栏最小化，无歌曲时保持 `.never`，避免空 inline accessory 槽位。popup item 不订阅播放进度，避免首页滚动期间由 `currentTime` 驱动根视图刷新。`ScenePhase.background` 时 flush CacheStore + PlaybackHistoryStore。启动时 `AUTOPLAY_BV` 环境变量支持调试自动播。
-- **`NowPlayingView`** —— 单页播放器，当前列表、合集和推荐统一位于底部 collapsed → split → fullQueue 三段式抽屉。纵向开合由外层 LNPopupController 单独拥有，播放页不再叠加关闭手势；顶部安全区内保留 60×5pt 下滑提示条。慢速交互式下滑期间由 vendored LNPopupController 将整页临时栅格化为单一合成层。包含：播放模式切换（音乐/MV）、音质选择、播放模式（顺序/随机/单曲循环/电台）、收藏（短按/长按选夹）、下载、歌词页、MV 全屏、合集检测（`upPlaylistContaining`）。`PlayerProgressBar` 独立订阅 `currentTime`；collapsed 不创建列表，split/fullQueue 通过 `LazyVStack` 提供完整可滚动队列。
-- **`HomeView`** —— 出现时触发 `RecommendationEngine(.home)`；每次点「换一批」累积 `shownBVIDs` 以避免重复。去重机制：`RecentHomeFeedStore`（bvid → Date, 3h TTL, JSON 落盘，跨重启生效）。未登录/无收藏夹时显示引导。
+- **`RootView`** —— 原生 `TabView` + LNPopupUI 标准紧凑浮动播放条。LNPopupController 以 `.floatingCompact + .automatic` 承载从 mini player 打开的 `NowPlayingView`；首页走封面原位转场时暂时隐藏 popup，反向缩回完成后再恢复，避免双播放器和底部重叠。Tab Bar 固定不随滚动最小化，确保有 mini player 时四个系统 Tab 仍持续可见。popup item 不订阅播放进度。`ScenePhase.inactive` 只准备系统快照，真正进入 `.background` 才释放可重载图片、flush 持久化并切换 MV。
+- **`NowPlayingView`** —— “横版影像唱片机”的沉浸页：16:9 封面接近屏幕边缘，标题与歌手沿封面左缘排布，背景是从封面派生的干净双色光场；竖屏 Queue 与 AutoPlay 使用工具栏打开的独立队列页。mini player 路径的纵向开合只由 LNPopupController 拥有，播放页不叠加全屏关闭手势；MV、收藏、歌词、音质与播放模式行为保持不变。
+- **`HomeView`** —— 纯粹的私人海报瀑布流，不生成推荐、不在封面上叠标题。真实 16:9 封面按“1 张全宽 + 4 张双列”连续纵向排列；页面使用 8pt 外边距、4pt 组内、8pt 组间和 4pt 圆角，顶部操作收在右侧单一 Liquid Glass 胶囊。点击封面以同一帧提交真实播放选择，再用局部 matched geometry 动画层从被点封面原位展开并反向缩回；关闭第一帧让动画层停止命中测试，使常驻的 ScrollView 能与缩回动画同时交互。不常驻其他 Tab，不自绘底栏，不给播放器叠加全屏拖拽手势。
 - **`RecentHomeFeedStore`** —— 首页去重专用。bvid → 最近展示时间，JSON 落盘（`home-recent.json`），1s 防抖写盘。TTL 3h，max 400 条。
 - **`SearchView`** —— 搜索入口。聚焦空搜索框时只展示本地历史或空状态，不显示 Music/MV/expanded scope；结果合并为“最佳匹配 + 音乐结果”的单一可点击音乐表面，`TrackRow` 在列表间复用。
 - **`SearchStore`** —— `@Observable`。管理历史、结果缓存、请求身份、分页和内部 broaden 回退；`.expanded` 仍用于“更多结果”的内部搜索策略，不再作为可见 scope。`searchBatch` 并发请求多个关键词/页面，`dedupeSearchTracks` 去重，`MusicFilter.isSearchResult` 过滤。
@@ -250,9 +250,10 @@ B 站视频可以有多个分 P（cid），缓存和去重不能只按 bvid。`T
 ## 关键约束
 
 - **保留窄范围模拟器 UI 回归** —— 自动化保护关键手势、搜索和播放器布局；真机测试负责最终交互体感。
-- **品牌色保持克制** —— `AppTheme.accent` 使用当前蓝青 `brand`，不要回退为高饱和粉色或 B 站红。
+- **工具页品牌色保持克制** —— 搜索、缓存、设置与普通列表继续使用当前蓝青 `AppTheme.accent`；首页和播放器由真实封面主导，不用固定品牌色或高饱和生成色块压过封面。
+- **系统玻璃只做外壳** —— 原生 Tab Bar、mini player 和必要系统浮层可使用 Liquid Glass；首页封面墙和播放器内容层不堆玻璃按钮、悬浮胶囊或材质卡。
 - **歌曲播放态只高亮文字** —— `TrackRow` 与 `MusicTrackRow` 的当前歌曲标题使用 `AppTheme.accent`，不要为整行添加主题色背景或描边。
-- **不做专辑封面虚化背景** —— 用 `AppTheme.playerGradient`（中性）。
+- **不做专辑封面虚化背景** —— 播放器只用 `PlayerArtworkPalette` 的干净双色光场，不把封面放大模糊，也不叠加持续噪点或扫描线。
 - **封面是 16:9** —— B站封面是 16:9；用 `height: coverSize * 9/16`，不要用正方形。
 - **新增 Swift 文件要 `xcodegen generate`** —— `.xcodeproj` 是生成的；加文件不重新生成，Xcode 找不到。
 - **流 URL 不可持久化** —— 只把 bvid/cid 落盘；URL 约 2 小时后过期。

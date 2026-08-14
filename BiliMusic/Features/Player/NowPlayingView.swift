@@ -399,41 +399,24 @@ struct NowPlayingView: View {
             return min(max(168, size.width * 0.24), max(168, availableHeight * 0.48), 250)
         }
 
-        return min(max(296, size.width - 48), max(320, availableHeight * 0.52), 390)
+        let horizontalInset: CGFloat = availableHeight < 760 ? 32 : 24
+        return min(max(296, size.width - horizontalInset), max(320, availableHeight * 0.52), 390)
     }
 
     @ViewBuilder
     private var playerBackground: some View {
         let palette = engine.currentArtworkPalette
         ZStack {
-            Color(uiColor: palette.middle)
-
-            palette.gradient
-                .opacity(0.96)
-
-            palette.glow
-                .blendMode(.screen)
-                .opacity(0.56)
-
-            RadialGradient(
-                colors: [
-                    Color.white.opacity(0.12),
-                    Color.clear
-                ],
-                center: .topTrailing,
-                startRadius: 32,
-                endRadius: 520
-            )
-
             LinearGradient(
                 colors: [
-                    Color.white.opacity(0.04),
-                    Color.black.opacity(0.08),
-                    Color.black.opacity(0.34)
+                    Color(uiColor: palette.top),
+                    Color(uiColor: palette.bottom)
                 ],
-                startPoint: .top,
-                endPoint: .bottom
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
             )
+
+            Color.black.opacity(0.10)
         }
         .animation(.easeInOut(duration: 0.32), value: palette)
     }
@@ -452,7 +435,7 @@ struct NowPlayingView: View {
                 mediaView(coverSize: coverSize)
 
             VStack(spacing: 8) {
-                playerMetadata(compact: true)
+                playerMetadata(compact: true, centered: false)
 
                 playerControlStack(compact: true)
             }
@@ -467,7 +450,10 @@ struct NowPlayingView: View {
     private func portraitNowPlayingPage(coverSize: CGFloat, pageWidth: CGFloat) -> some View {
         GeometryReader { proxy in
             let isCompact = proxy.size.height < 760
-            let activeCoverSize = min(coverSize, proxy.size.width - (isCompact ? 40 : 32))
+            // Native zoom briefly proposes a zero-width destination while resolving
+            // the source geometry. Never feed that transient value into `.frame`.
+            let availableCoverWidth = max(1, proxy.size.width - (isCompact ? 32 : 24))
+            let activeCoverSize = max(1, min(coverSize, availableCoverWidth))
             let bottomInset: CGFloat = isCompact ? 16 : 36
             let fixedContentHeight = activeCoverSize * 9 / 16 + 237 + bottomInset
                 + (favorites.lastError == nil ? 0 : 32)
@@ -481,7 +467,7 @@ struct NowPlayingView: View {
                     .frame(height: gapBudget * 0.17)
 
                 appleMusicMetadataRow(compact: isCompact)
-                    .padding(.horizontal, 30)
+                    .frame(width: activeCoverSize)
 
                 Spacer()
                     .frame(height: gapBudget * 0.16)
@@ -701,18 +687,19 @@ struct NowPlayingView: View {
     }
 
     private func appleMusicMetadataRow(compact: Bool) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(alignment: .bottom, spacing: 12) {
+            VStack(alignment: .leading, spacing: compact ? 2 : 3) {
                 Text(displayTitle)
-                    .font(.system(size: compact ? 20 : 22, weight: .semibold))
+                    .font(.system(size: compact ? 20 : 23, weight: .bold))
                     .foregroundStyle(Color.white.opacity(0.96))
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
                     .accessibilityIdentifier("nowPlayingTitle")
 
                 Text(displayArtist)
-                    .font(.system(size: compact ? 16 : 18, weight: .regular))
-                    .foregroundStyle(Color.white.opacity(0.64))
+                    .font(.system(size: compact ? 14 : 15, weight: .medium))
+                    .tracking(0.35)
+                    .foregroundStyle(Color.white.opacity(0.66))
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1096,9 +1083,9 @@ struct NowPlayingView: View {
 
     @ViewBuilder
     private func mediaView(coverSize: CGFloat) -> some View {
+        let currentTrack = engine.current
+        let coverURL = BiliArtworkURL.thumbnail(currentTrack?.coverURL, width: 960, height: 540)
         ZStack(alignment: .topTrailing) {
-            let currentTrack = engine.current
-            let coverURL = BiliArtworkURL.thumbnail(currentTrack?.coverURL, width: 960, height: 540)
             ZStack {
                 if engine.playbackMode == .mv, let player = engine.avPlayer {
                     InlineMVPlayerView(player: player)
@@ -1143,15 +1130,15 @@ struct NowPlayingView: View {
                 .padding(8)
                 .accessibilityLabel("全屏播放 MV")
             }
-        }
+            }
             .frame(width: coverSize, height: coverSize * 9 / 16)
             .popupTransitionTarget()
-            .clipShape(RoundedRectangle(cornerRadius: AppTheme.playerCoverRadius))
+            .clipShape(RoundedRectangle(cornerRadius: AppTheme.playerCoverRadius, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: AppTheme.playerCoverRadius)
+                RoundedRectangle(cornerRadius: AppTheme.playerCoverRadius, style: .continuous)
                     .stroke(Color.primary.opacity(0.06), lineWidth: 1)
             }
-            .shadow(color: .black.opacity(0.42), radius: 28, y: 18)
+            .shadow(color: .black.opacity(0.28), radius: 16, y: 10)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("播放封面")
             .accessibilityIdentifier("nowPlayingArtwork")
@@ -1582,12 +1569,20 @@ struct NowPlayingView: View {
         action: @escaping () -> Void,
         @ViewBuilder label: () -> Label
     ) -> some View {
-        Button(action: action) {
-            label()
-        }
-        .buttonStyle(.plain)
+        label()
         .contentShape(Rectangle())
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                .onEnded { value in
+                    let distance = hypot(value.translation.width, value.translation.height)
+                    guard distance < 8 else { return }
+                    action()
+                }
+        )
         .accessibilityAddTraits(.isButton)
+        .accessibilityAction {
+            action()
+        }
     }
 
     private func playerPageState(
@@ -1663,7 +1658,7 @@ struct NowPlayingView: View {
             .frame(maxWidth: .infinity, maxHeight: queuePresentationState == .fullQueue ? .infinity : nil, alignment: .top)
             .background(alignment: .top) {
                 RoundedRectangle(cornerRadius: bottomContextCornerRadius, style: .continuous)
-                    .fill(.thinMaterial)
+                    .fill(Color(uiColor: engine.currentArtworkPalette.bottom))
                     .overlay {
                         RoundedRectangle(cornerRadius: bottomContextCornerRadius, style: .continuous)
                             .fill(Color.black.opacity(bottomContextBackgroundOpacity))
@@ -2245,6 +2240,7 @@ struct NowPlayingView: View {
         }
         .frame(height: Layout.bottomSheetRowHeight)
         .contentShape(Rectangle())
+        .accessibilityIdentifier("playerTrackRow-\(track.id)")
         .accessibilityLabel("\(index + 1). \(display.title)")
     }
 

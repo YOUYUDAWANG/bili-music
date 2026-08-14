@@ -23,7 +23,7 @@ enum AppTheme {
     static let error = Color.red
     static let success = Color.green
 
-    static let playerCoverRadius: CGFloat = 14
+    static let playerCoverRadius: CGFloat = 8
 }
 
 struct PlayerArtworkPalette: Equatable {

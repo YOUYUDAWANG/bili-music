@@ -522,13 +522,44 @@ final class PlayerEngine {
 
     /// 用一组曲目替换队列并从指定位置开播(搜索页点击)
     func play(tracks: [Track], startAt index: Int, queueMode: QueueMode? = nil) async {
-        guard tracks.indices.contains(index) else { return }
+        guard let shouldStart = preparePlaybackSelection(
+            tracks: tracks,
+            startAt: index,
+            queueMode: queueMode
+        ) else { return }
+        guard shouldStart else { return }
+        await startCurrent()
+    }
+
+    /// 同步提交选曲，再异步解析音频。供需要在同一帧读取新曲目信息的原生转场使用。
+    func beginPlayback(tracks: [Track], startAt index: Int, queueMode: QueueMode? = nil) {
+        guard let shouldStart = preparePlaybackSelection(
+            tracks: tracks,
+            startAt: index,
+            queueMode: queueMode
+        ) else { return }
+        guard shouldStart else { return }
+        Task { [weak self] in
+            await self?.startCurrent()
+        }
+    }
+
+    /// `nil` 表示索引无效，`false` 表示 UI fixture 已同步安装，`true` 表示应继续解析音频。
+    private func preparePlaybackSelection(
+        tracks: [Track],
+        startAt index: Int,
+        queueMode: QueueMode?
+    ) -> Bool? {
+        guard tracks.indices.contains(index) else { return nil }
         pendingRadioAdvance = nil
         directPlayRequestID = nil
 #if DEBUG
         if UITestFixtures.enabled && !startupTestHooks.isActive {
             installUITestFixture(tracks: tracks, startAt: index)
-            return
+            if let queueMode {
+                self.queueMode = queueMode
+            }
+            return false
         }
 #endif
         playbackDiagnostics.begin(track: tracks[index])
@@ -548,7 +579,7 @@ final class PlayerEngine {
             self.queueMode = .sequential
         }
         playbackMode = preferredModeForNewTrack()
-        await startCurrent()
+        return true
     }
 
     func playRadio(seed track: Track) async {

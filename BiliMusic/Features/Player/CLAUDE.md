@@ -2,13 +2,14 @@
 
 ## 模块职责
 
-全屏正在播放页的 UI 实现。包括当前歌曲、进度条、Apple Music 式同屏队列、歌词页、MV 全屏、收藏夹选择器、UP 主合集视图。
+全屏正在播放页的 UI 实现。内容视觉采用“横版影像唱片机”：16:9 封面、电影字幕式信息与封面派生双色光场。首页封面入口使用 Home 局部 matched geometry 动画层，mini player 入口使用 LNPopupController。
 
 ## 入口与启动
 
 - **文件**: `NowPlayingView.swift`（主入口）、`PlayerControlViews.swift`（控制子视图）、`PlayerSheetViews.swift`（歌词/合集/收藏等 sheet）
 - 由 `RootView` 的 LNPopupUI `.floatingCompact + .automatic` 容器承载。
-- 迷你播放器、主播放器开合、跟手下滑和安全区停靠由 vendored LNPopupController 统一管理；播放页不再维护第二套纵向转场状态机。
+- 首页被点封面通过 Home 局部 matched geometry 动画层原位展开并反向缩回；关闭第一帧动画层停止命中测试，让底层 ScrollView 同时保持可滚动。
+- 迷你播放器、主播放器开合、跟手下滑和安全区停靠由 vendored LNPopupController 统一管理；播放页自身不维护全屏级纵向关闭手势。
 
 ## 对外接口
 
@@ -28,6 +29,12 @@
 | 接下来播放页 | 与主播放器同屏切换；显示完整当前队列和 AutoPlay 相关推荐 |
 | 歌词页 | LyricSheetView（滚动高亮、自动居中） |
 | MV 全屏 | MVFullscreenView（全屏视频播放） |
+
+### 视觉边界
+
+- 竖屏封面接近屏幕边缘，标题/歌手左对齐并与封面左缘同基线；横屏信息也保持左对齐。
+- 背景仅使用 `PlayerArtworkPalette.top → bottom` 的克制双色渐变和轻微暗化，不做封面模糊、径向 glow 或高饱和硬撞色。
+- 系统 Liquid Glass 由 RootView 的底栏浮岛和必要 MV 浮层承担；播放内容层与队列不新增材质卡。
 
 ## 关键依赖与配置
 
@@ -55,6 +62,8 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-08-14 | 首页封面原位放大与反向缩回改为非阻塞局部动画层；缩回期间瀑布流仍可操作。 |
+| 2026-08-14 | 建立横版影像唱片机视觉：封面贴近边缘、电影字幕式左对齐、封面双色光场；系统玻璃只保留在外壳。 |
 | 2026-08-14 | 按 Apple 官方正在播放与队列行为重构：LNPopup 原生 grabber、系统音量/AirPlay、同屏 Queue + AutoPlay，移除主页面常驻抽屉。 |
 | 2026-08-14 | 收紧播放器纵向节奏；collapsed 显示下一首标题，split 在固定可视高度内开放完整队列滚动。 |
 | 2026-08-14 | 融合 LNPopup 性能架构与底部三段式抽屉；移除已由框架取代的自制开合手势和逐帧 frame 监听。 |

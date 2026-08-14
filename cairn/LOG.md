@@ -2,6 +2,64 @@
 
 本文件按反向时间顺序记录实质进展——最新记录放在本行下方最顶部。每条记录保持简短，只写摘要与指针；稳定结论沉淀到 `cairn/<topic>.md`。
 
+## 2026-08-14 · 封面收回动画与瀑布流手势并行并固定系统底栏
+
+- 首页改用局部 matched geometry 动画层完成封面原位放大与反向缩回；关闭第一帧先让动画层停止命中测试，底下始终挂载的 ScrollView 因而可以在播放器缩回期间继续上下滚动。
+- 转场只局限于 Home，不常驻其他 Tab、不自绘底栏、不复制播放状态；动画完成后再恢复标准 mini player。
+- 原生 TabView 固定使用 `.tabBarMinimizeBehavior(.never)`，有当前歌曲和 mini player 时滚动瀑布流也不再自动收起底栏。
+- iPhone 17 Pro / iOS 27 模拟器验证：generic build、封面原位进入/反向收回与首页恢复、mini 下的 Tab 滚动可见性、LNPopup mini 拖开/全屏下拉收回均通过；额外录屏逐帧确认反向缩回动画仍存在。
+- 当前真相见 `cairn/player-gesture-performance.md`、`cairn/visual-language.md`、根 `CLAUDE.md`、`HomeView.swift` 与 `RootView.swift`。
+
+## 2026-08-14 · 更正封面转场架构并修复性能/手势回归
+
+- 更正紧随其后的“纯 SwiftUI 底栏”阶段性记录：该实现让四个 Tab 常驻、以自绘浮岛替代系统外壳，并给播放页增加全屏拖拽，造成额外任务、底部重叠与队列/进度手势竞争；现已撤销这些架构改动，但不回退用户确认的视觉设计和“封面原位放大”需求。
+- 恢复原生 `TabView` + LNPopup：只有选中页面挂载；mini player 继续负责标准开合。首页局部 `NavigationStack` 使用系统 zoom，从唯一被点封面展开并返回同一封面/滚动位置。
+- 播放选择收敛到 `PlayerEngine` 的单一路径；`beginPlayback` 只负责在转场首帧提交真实队列/曲目，再复用同一音频解析流程，不再制造第二套预播放状态。
+- `scenePhase.inactive` 只准备系统快照，真正 `.background` 才清理资源或把 MV 切回音频；播放器移除全屏竞争手势，并保护系统 zoom 暂态的零宽布局。
+- 队列行只在移动距离小于 8pt 时执行点击，横向拖动不再误切歌；保留显式无障碍默认动作。
+- 重新生成 Xcode 工程以清掉已删除测试文件的陈旧引用；队列 UI 回归改为验证当前独立队列页，并移除废弃三态抽屉的假失败场景。
+- iPhone 17 Pro / iOS 27 模拟器验证：generic build 通过；播放关键路径 3/3、封面原位返回 1/1、mini/player/队列/progress/密度相关 UI 回归 10/10 通过。真机日常性能与视觉体感仍待确认。
+- 当前真相见 `cairn/visual-language.md`、`cairn/player-gesture-performance.md`、根 `CLAUDE.md`、`HomeView.swift` 与 `RootView.swift`。
+
+## 2026-08-14 · 落地封面原位放大展开与纯 SwiftUI 底栏消除重叠
+
+- 彻底消除 UIKit `UITabBarController` 产生的底栏重叠与坐标隔离，将 4 个 Tab 统一置于纯 SwiftUI `ZStack` 统一坐标系中。
+- 点击首页 16:9 海报卡片时，通过 `prepareTrackForPlayback` 同步预置曲目，并由 `@Namespace private var playerNamespace` 驱动 `.matchedGeometryEffect`，实现**封面直接从当前屏幕物理坐标原地放大展开飞跃至全屏放映厅**；
+- 全屏播放器下拉阻尼收回时，封面原路缩小吸附归位，底部悬浮浮岛（`FloatingBottomIsland`）智能淡入淡出，彻底消灭所有重叠与闪现。
+- generic Simulator 构建通过；详情见 `cairn/visual-language.md`、`RootView.swift` 与 `HomeView.swift`。
+
+## 2026-08-14 · 为纯瀑布流建立层级间距
+
+- 用户实图反馈统一 2pt 接缝显得廉价；保留“1 张全宽 + 4 张双列”单一骨架，改为 4pt 组内 / 10pt 组间、8pt 页面边距和 6pt continuous 圆角。
+- 移除首页取色环境背景与全宽封面视差；随机播放和设置移入独立 48pt 系统玻璃控制栏，不再覆盖第一张封面。
+- 保留 2pt 真实播放进度线；底部改用安全区 inset，不添加渐变或暗化遮罩。
+- generic Simulator 构建及首页封面点击稳定性单项 UI 回归通过；iPhone 17 Pro 模拟器 fixture 截图已检查，真实封面与真机滚动体感待确认。
+- 详情：见 `cairn/visual-language.md` 与 `BiliMusic/Features/Home/CLAUDE.md`。
+
+## 2026-08-14 · 为纯瀑布流加入窄色接缝与轻动态
+
+- 保留用户确认的“1 张全宽 + 4 张双列”顺序和单一纵向骨架，不引入新模板。
+- 8pt 固定沟槽收为 2pt 取色接缝；全宽封面驱动轻环境色，并加入遵守 Reduce Motion 的 8pt 内部微视差。
+- 当前播放态改为封面底部 2pt 真实进度线，移除整卡白色描边与 waveform 角标。
+- generic Simulator 构建及首页封面点击稳定性单项 UI 回归通过；真实封面模拟器截图已检查，真机滚动体感待确认。
+- 详情：见 `cairn/visual-language.md` 与 `BiliMusic/Features/Home/CLAUDE.md`。
+
+## 2026-08-14 · 首页恢复纯粹海报瀑布流
+
+- 用户实图确认 cinematic / film strip / offset masonry 的多模板首页不如原版连续瀑布流。
+- `HomeView` 精确恢复原有“1 张全宽 + 4 张双列”纵向节奏；播放器与系统 Liquid Glass 外壳保持上一轮方案。
+- 收藏夹 API 不提供原图宽高，现有缩略图也会主动裁为 16:9；下载分辨率不能作为稳定排版输入。
+- 详情：见 `cairn/visual-language.md`。
+
+## 2026-08-14 · 建立横版影像唱片机视觉语言
+
+- 用户根据模拟器实图否决高饱和“私人频道”方案，App Icon 也确认只是临时素材，不作为设计来源。
+- 系统 Tab/LNPopup 保留 Liquid Glass；内容层改为真实 16:9 封面主导的独立语言。
+- 首页以 cinematic、film strip、offset masonry 三种确定性节奏取代重复“1 大 + 4 小”。
+- 播放器封面靠近页面边缘，信息沿封面左缘排版，背景收敛为封面双色光场。
+- generic Simulator 构建与真实封面截图通过；iOS 27 / iPhone 17 Pro 的 3 条 mini player 开合与播放器密度窄测全部通过。
+- 详情：见 `cairn/visual-language.md`。
+
 ## 2026-08-14 · 收紧播放器节奏并开放一级完整队列
 
 - 移除收起状态对播放信息和控制区的 64pt 人为下沉，减少顶部、封面下方和控制区之间的断裂留白。

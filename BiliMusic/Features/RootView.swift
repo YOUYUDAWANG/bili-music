@@ -8,6 +8,7 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var isPopupBarPresented = false
     @State private var isPopupOpen = false
+    @State private var isCoverPlayerPresented = false
     @State private var showSettings = false
     @State private var selectedTab = 0
 
@@ -18,13 +19,9 @@ struct RootView: View {
                     isPopupOpen: $isPopupOpen
                 )
             }
-            // Automatic uses the framework's snapshot-backed artwork transition when
-            // opening, then resolves to a finger-tracking drag while the popup is open.
             .popupInteractionStyle(.automatic)
             .popupBarStyle(.floatingCompact)
             .popupBarInheritsBottomBarMetrics(true)
-            // Pin the Apple Music-style treatment explicitly. `.default` resolves
-            // to a trailing glass X on the current iOS 27 runtime.
             .popupCloseButtonStyle(.grabber)
             .popupCloseButtonPositioning(.center)
             .popupContentAllowsContentTransition(true)
@@ -38,16 +35,22 @@ struct RootView: View {
                 SettingsView()
             }
             .onAppear {
-                isPopupBarPresented = engine.current != nil
+                syncPopupPresentation()
             }
             .onChange(of: selectedTab) { _, _ in
                 engine.isMiniPlayerHidden = false
             }
             .onChange(of: engine.current?.id) { _, trackID in
-                isPopupBarPresented = trackID != nil
                 if trackID == nil {
                     isPopupOpen = false
                 }
+                syncPopupPresentation()
+            }
+            .onChange(of: isCoverPlayerPresented) { _, isPresented in
+                if isPresented {
+                    isPopupOpen = false
+                }
+                syncPopupPresentation()
             }
             .onChange(of: scenePhase) { _, phase in
                 switch phase {
@@ -56,9 +59,7 @@ struct RootView: View {
                         await AppResourceCleanup.handleBackgrounding(engine: engine)
                     }
                 case .inactive:
-                    Task {
-                        await engine.handleScenePhase(isBackground: true)
-                    }
+                    engine.prepareForInactiveSnapshot()
                 case .active:
                     Task {
                         await engine.handleScenePhase(isBackground: false)
@@ -88,7 +89,6 @@ struct RootView: View {
                     }
                 }
 #endif
-                // 调试用：simctl launch 注入 AUTOPLAY_BV 即可无交互验证播放链路。
                 if let bv = ProcessInfo.processInfo.environment["AUTOPLAY_BV"] {
 #if DEBUG
                     PlaybackDiagnostics.DebugRecentEventStore.shared.clear()
@@ -115,7 +115,10 @@ struct RootView: View {
     private var baseTabs: some View {
         TabView(selection: $selectedTab) {
             Tab("音乐", systemImage: "square.grid.2x2", value: 0) {
-                HomeView(showSettings: $showSettings)
+                HomeView(
+                    showSettings: $showSettings,
+                    isCoverPlayerPresented: $isCoverPlayerPresented
+                )
             }
 
             Tab("收藏夹", systemImage: "rectangle.stack", value: 1) {
@@ -131,15 +134,15 @@ struct RootView: View {
             }
         }
         .tint(AppTheme.accent)
-        // With no current track, minimizing would still reserve the inline-accessory
-        // slot and leave a conspicuous empty pill between the tab buttons.
-        // Once playback exists, preserve the compact geometry so an interactive
-        // close returns to the exact mini-player control it opened from.
-        .tabBarMinimizeBehavior(engine.current == nil ? .never : .onScrollDown)
+        .tabBarMinimizeBehavior(.never)
+    }
+
+    private func syncPopupPresentation() {
+        isPopupBarPresented = engine.current != nil && !isCoverPlayerPresented
     }
 }
 
-/// 把高频播放时间更新限制在 popup 内容内部，避免根 TabView 每半秒重建。
+/// 把高频播放状态更新限制在 popup 内容内部，避免根 TabView 跟随播放器重建。
 private struct PlayerPopupSurface: View {
     @Environment(PlayerEngine.self) private var engine
     @Environment(\.popupBarPlacement) private var popupBarPlacement
@@ -191,7 +194,6 @@ private struct PlayerPopupSurface: View {
         }
         return PopupItemImage(Image(systemName: "music.note"), contentMode: .fit)
     }
-
 }
 
 @MainActor

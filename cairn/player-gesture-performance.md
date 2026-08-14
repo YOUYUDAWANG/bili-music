@@ -15,32 +15,33 @@ authoring_mode: ai_generated
 
 - 进度条不能用 `minimumDistance: 0` 抢占整行触控；当前要求至少移动 8pt 且横向位移大于纵向位移的 1.6 倍，才进入 scrub。
 - 进度条交互带保持 24pt，外层翻页只排除该窄区域附近的起点。纵向或明显斜向手势即使从进度条附近开始，也不应 seek。
-- 当前播放器不提供左右翻页；队列、合集和推荐统一位于底部抽屉，避免横向页面手势与进度拖动冲突。
+- 当前播放器不提供左右翻页；竖屏 Queue 与 AutoPlay 推荐位于工具栏打开的独立队列页，列表滚动不与进度拖动或播放器关闭手势共享所有权。历史三态底部抽屉代码不是当前活跃路径。
+- 队列/推荐行只在触点总移动小于 8pt 时执行选择；横向拖动与纵向滚动不会在结束时误触发切歌，同时保留无障碍默认动作。
 - 纵向开合不再由 RootView 自制 offset/scale/弹簧状态机；标准紧凑浮动播放条和全屏页统一交给 LNPopupController 的 `.floatingCompact + .automatic` 交互管理。`.automatic` 在打开时使用 snap/transition target，在已展开的下滑关闭阶段保持跟手 drag。
-- 封面容器是播放页中唯一的 `.popupTransitionTarget()`；展开和收回沿同一条原生交互轨迹在播放条封面与全屏封面之间连续变形。
+- 播放器封面容器是播放页中唯一的 `.popupTransitionTarget()`；从 mini player 展开和收回沿同一条 LNPopup 原生交互轨迹连续变形。
+- 用户指定的首页封面原位放大是另一条局部路径：首页保持 ScrollView 常驻，以唯一被点封面和播放页之间的 matched geometry 动画层负责放大与反向缩回。关闭第一帧先对动画层设置 `allowsHitTesting(false)`，因此缩回动画继续运行时，底层瀑布流已经可以滚动；动画结束后再恢复 LNPopup bar。该路径不常驻其他 Tab、不自绘底栏，也不在播放页添加全屏拖拽。
 - `CADisableMinimumFrameDurationOnPhone=true` 已开启，LNPopupController 的交互 display link 也请求 `UIScreen.main.maximumFramesPerSecond`；ProMotion 门禁不是当前慢拖掉帧的根因。低电量模式或系统“限制帧率”仍可能将刷新率封顶。
-- 有当前歌曲时 LNPopup 维持 mini player 与全屏内容的统一生命周期；播放内容保持单页，列表按抽屉状态和可视窗口加载。
-- collapsed 状态不创建列表；split/fullQueue 使用 `LazyVStack` 直接遍历索引，一级展开即可滚动完整队列，同时避免复制整张 Track 数组。
-- 中央页只承担封面、元数据、进度和播放操作；合集与队列明细只在左页出现，避免重复信息和重复列表渲染。
+- 有当前歌曲时 LNPopup 维持 mini player 与全屏内容的统一生命周期；播放内容保持单页，队列页按需显示并使用 Lazy 容器渲染列表。
+- 主播放页只承担封面、元数据、进度和播放操作；队列明细只在独立队列页出现，避免重复信息和重复列表渲染。
 - 播放页自身不再挂中心区/顶部纵向 dismiss 手势，避免和 popup controller 的惯性、取消及横向分页竞争；顶部向下箭头已移除，整页下滑只由同一个 popup controller 接管。
 - mini player 使用 LNPopupUI 标准 bar 而不是 custom bar，以保留上游多年打磨的 docking、安全区、惯性、玻璃样式和收回细节。
-- Tab Bar 的 `.onScrollDown` 最小化策略在 popup 打开期间必须保持不变；切换到 `.never` 会改变关闭目标几何，使播放页无法收回打开前的 inline 控件。
-- `.onScrollDown` 只在存在当前歌曲时启用；首次启动尚未播放时使用 `.never`。否则系统底栏虽没有 popup bar，滚动后仍会切换到为 inline accessory 预留中央槽位的形态，形成空白 mini player 占位。
+- Tab Bar 固定使用 `.never`：用户要求有 mini player 时底部四个系统 Tab 仍持续可见、可点，不随首页滚动收起。iOS 27 模拟器已验证该策略下 LNPopup 仍可从 mini 拖开并从全屏下拉收回。
 - popup bar 使用固定 48pt 的 `.floatingCompact` 并继承 bottom bar metrics；inline 状态只保留播放/暂停按钮并隐藏下一首，使播放控件与两侧折叠底栏按钮等高。普通 `.floating` 固定为 58pt，不能用于该布局。
-- iOS 27 开启 popup content transition，使展开与收回末帧由 snapshot 连续交接到 live view，避免收进底栏时的闪切；列表重内容留在底部抽屉中，不参与横向分页合成。
+- iOS 27 开启 popup content transition，使展开与收回末帧由 snapshot 连续交接到 live view，避免收进底栏时的闪切；列表重内容留在独立队列页中。
 - popup item 不暴露进度值；播放进度只由全屏页的局部 `PlayerProgressBar` 订阅，避免 0.5 秒一次的 `currentTime` 更新使 RootView、TabView 和首页滚动树同步刷新。
 - popup 内容开合使用 0.62 秒弹簧时长（上游默认 0.50 秒），保留速度继承但让 mini player 与全屏页之间的几何变化更容易被视觉连续追踪；这是 vendored LNPopupController 的项目级补丁。
 - 慢速交互式下滑开始后，LNPopupController 将完整播放器内容控制器按当前屏幕 scale 临时栅格化，手指移动时只合成一个缓存层；收起、取消或回弹完成后立即关闭栅格化，恢复实时进度与控件渲染。
 - LNPopupUI 4.0.1、LNPopupController 4.5.5 及两个小型传递依赖以 MIT 源码精简 vendored；LNPopupController 清单的递归私有头路径加 `./`，规避 Xcode 27 Beta 路径截断。
 - LNPopupUI 主 product 必须静态链接；动态 product 在当前 XcodeGen 工程中不会自动进入真机 App 的 `Frameworks`，会导致 dyld 启动即退。
-- 移除中央列表后，播放控制区通过底部保留 54pt（紧凑）/88pt（常规）空间，上移到中央偏下位置。参考 Apple Music，顶部安全区底部放置 60×5pt 下滑提示条；`safeAreaInset` 自行消费系统顶部安全区，不再额外叠加 `safeAreaTop`。竖屏顶部栏后的固定 inset 为 4pt，封面额外顶距为紧凑 12pt、常规 18–32pt，避免顶部空旷。
+- 移除主播放页常驻列表后，播放控制区上移到中央偏下位置。参考 Apple Music，顶部安全区底部放置 60×5pt 下滑提示条；`safeAreaInset` 自行消费系统顶部安全区，不再额外叠加 `safeAreaTop`。
 
 ## 决策记录
 
-- 保留既有队列、合集和推荐能力，但统一放入底部三态抽屉；纵向 mini/full 转场只由 LNPopupController 管理。
+- 保留既有队列、合集和推荐能力；当前 Queue 与 AutoPlay 使用独立队列页，mini/full 纵向转场只由 LNPopupController 管理。
+- 保留用户提出的封面原位放大与反向缩回，但只用首页局部 matched geometry 动画层实现；动画层与 ScrollView 手势所有权分离。不要回到全 Tab 常驻、自绘底栏、重复播放状态或全屏拖拽方案。
 - 用户明确拒绝近似的自制定时曲线后，纵向架构以 Apple Music 同类开源容器替换，不再继续调参模拟。
 - 用纯逻辑测试保护进度横向意图，用 UI 测试覆盖正常 scrub、抽屉列表滚动和播放器开合互不误触。
-- “所在合集”和实际播放队列统一归入左侧上下文页；中央页不再用紧凑列表重复展示同一批歌曲。
+- 实际播放队列归入独立队列页；主播放页不再用紧凑列表重复展示同一批歌曲。
 
 ## 经验与教训
 

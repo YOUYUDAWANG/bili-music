@@ -54,6 +54,24 @@ final class PlaybackCriticalPathTests: XCTestCase {
         XCTAssertEqual(engine.current?.bvid, track.bvid)
     }
 
+    func testBeginPlaybackAssignsCurrentInTheCoverTransitionFrame() {
+        let track = Self.track(bvid: "BVCOVERZOOM")
+        let stream = Self.stream(
+            url: URL(fileURLWithPath: "/tmp/cover-zoom.m4a"),
+            cid: 1001,
+            duration: 211,
+            quality: 30280,
+            bandwidth: 0)
+        let engine = PlayerEngine(
+            streamResolver: CriticalPathAudioResolver(cached: stream, prepared: stream),
+            startupTestHooks: .init(startPlaybackOverride: { _, _, _ in }))
+
+        engine.beginPlayback(tracks: [track], startAt: 0)
+
+        XCTAssertEqual(engine.current?.bvid, track.bvid)
+        XCTAssertEqual(engine.queue.count, 1)
+    }
+
     func testInvalidQueueSelectionDoesNotDiscardCurrentPlayback() async {
         let track = Self.track()
         let stream = Self.stream(

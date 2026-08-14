@@ -8,7 +8,7 @@ status: complete
 stopped_at: Completed 04-01-PLAN.md
 last_updated: "2026-08-14T00:00:00Z"
 last_activity: 2026-08-14
-last_activity_desc: Reframed Home as a cover-driven private music library
+last_activity_desc: Made cover reverse animation and waterfall gestures run concurrently while keeping the system Tab Bar visible
 progress:
   total_phases: 4
   completed_phases: 4
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-27)
 
 **Core value:** 让音乐尽快、稳定地响起来；当功能冲突时，播放启动速度和不中断播放优先于推荐、歌词、MV、UI 动效和其他增强体验。
-**Current focus:** Preserve first sound and playback correctness while making the cover library the primary entry experience
+**Current focus:** Validate the finalized waterfall, nonblocking cover transition layer, fixed system Tab Bar, and LNPopup performance on device
 
 ## Current Position
 
 Phase: 4 — Interface Cohesion and Search Polish
 Plan: 1 of 1 — 04-01
 Status: Complete
-Last activity: 2026-07-25 — Completed post-milestone deep stability review and P1 hardening
+Last activity: 2026-08-14 — Preserved cover-origin expansion and reverse shrink while letting Home scroll during close, and stopped the native Tab Bar from minimizing under the mini player
 
 Progress: [##########] 100%
 
@@ -127,18 +127,22 @@ Recent decisions affecting current work:
 - [Phase 03-01]: Mini-player pull-up completion uses deterministic policy thresholds, including distance and projected velocity, rather than view-local ad hoc gesture checks.
 - [Phase 03-01]: The full-player overlay tracks rendered open progress for offset, opacity, and scale while Reduced Motion keeps scale disabled through existing guards.
 - [Phase 03-01]: The UI fixture uses mini-player-relative drag coordinates to avoid simulator-global coordinate drift while preserving deliberate-open and shallow-cancel coverage.
-- [Current player model]: Queue, playlist context, and current-track recommendations live in one bottom drawer; the earlier horizontal side-page navigation was removed to avoid gesture conflicts.
+- [Current player model]: Portrait queue and AutoPlay recommendations use the active dedicated queue page opened from the utility bar; the dormant historical three-state drawer is not part of the current route.
 - [Current player model]: MV/music switching remains in the persistent toolbar and does not block initial audio playback.
 - [Current Home model]: Home no longer runs discovery recommendations; it renders a persisted favorite-cover snapshot first, then merges cache/history and refreshes the selected Bilibili folder in the background.
 - [Current Home model]: Recommendation remains a secondary player/radio capability and is intentionally absent from the app-launch surface.
 - [Phase 03-player-interaction-and-regression-coverage]: Recommendation tap stability is protected by a regression assertion that suppression is assigned before related playback starts.
-- [Current player model]: LNPopup owns mini/full vertical presentation; queue, playlist, and recommendation list bodies keep their own scrolling inside the bottom drawer.
+- [Current player model]: LNPopup owns mini/full vertical presentation; Home cover taps use a Home-local system zoom and temporarily hide the popup bar, while the active queue page owns its own list scrolling.
 - [Phase 03-03]: Progress scrub owns the full progress block, including label hit targets, so page swipes cannot steal scrub gestures.
 - [Phase 03-03]: Compact and modern player chrome UI suites plus preserved search/playback/recommendation/image regressions form the v1 stabilization gate.
 - [Phase 04-01]: Daily UI polish uses the calmer Bilibili blue-cyan accent instead of pink while keeping Apple Music-style structure.
 - [Phase 04-01]: Search focus shows only local history or an empty-history state; visible search scopes and separate MV search mode are removed from the search chrome.
 - [Phase 04-01]: Display title cleaning is conservative and only applies high-confidence structured parses; broader parsing remains available for lyrics matching.
 - [Phase 04-01]: Player toolbar actions sit in one compact grouped control with a text music/MV toggle and layout spacing protected by the modern bottom-gap UI test.
+- [Current visual model]: Apple Music remains the interaction reference, while Home and Now Playing use a distinct widescreen image-player language; Liquid Glass stays in system Tab/LNPopup chrome rather than the content canvas.
+- [Current visual model]: Home keeps the previous continuous 1-full-width + 4-two-column poster waterfall without horizontal sections; Now Playing aligns film-like metadata to the 16:9 cover edge over a restrained cover-derived two-color field.
+- [Current visual model]: Home uses 8pt outer margins, 4pt spacing inside each 1+4 group, 8pt between groups, 4pt corners, and static gutters; shuffle/settings share one trailing Liquid Glass capsule above the first cover.
+- [Current transition model]: Cover-origin zoom is a user requirement. It must use the exact tapped cover as a unique native transition source, return to the same scroll position, and must not require keeping all tabs alive, a custom bottom bar, duplicated playback state, or a global player drag gesture.
 
 ### Pending Todos
 
