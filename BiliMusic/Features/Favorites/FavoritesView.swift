@@ -318,10 +318,7 @@ struct FavFolderDetailView: View {
                 hasMore = result.has_more
                 newTracks = (result.medias ?? [])
                     .filter { $0.attr == 0 }   // 跳过已失效的收藏
-                    .map { item in
-                        Track(bvid: item.bvid, title: item.title, artist: item.upper.name,
-                              coverURL: URL(string: item.cover), duration: item.duration)
-                    }
+                    .map(Track.init(fav:))
                     .filter(MusicFilter.isMusic)
                 if !newTracks.isEmpty || !hasMore { break }
             }

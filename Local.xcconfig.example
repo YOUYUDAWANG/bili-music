@@ -14,3 +14,8 @@ DEVELOPMENT_TEAM =
 // 如果 Xcode 报 “Failed Registering Bundle Identifier”，把这里改成更独特的值，
 // 例如 com.<你的 GitHub 用户名小写>.BiliMusic 或 com.<你的域名反写>.BiliMusic。
 BILIMUSIC_BUNDLE_ID = com.example.BiliMusic
+
+// 歌曲清洗 Worker。URL 可直接使用默认值；访问令牌不要提交到 Git。
+// 真机构建时建议从 macOS 钥匙串注入 BILIMUSIC_METADATA_API_KEY。
+BILIMUSIC_METADATA_API_URL = https:/$()/bilimusic-metadata.mercari-email-sale-worker.workers.dev/v1/music/normalize
+BILIMUSIC_METADATA_API_KEY =

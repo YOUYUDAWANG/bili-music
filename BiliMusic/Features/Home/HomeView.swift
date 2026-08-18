@@ -6,24 +6,20 @@ import SwiftUI
 struct HomeView: View {
     @Environment(PlayerEngine.self) private var engine
     @Binding var showSettings: Bool
-    @Binding var isCoverPlayerPresented: Bool
-    @Namespace private var coverTransitionNamespace
+    let openPlayer: () -> Void
     @AppStorage(SettingsView.recommendFolderKey) private var libraryFolderId = 0
     @State private var tracks: [Track] = []
     @State private var loading = false
     @State private var errorMessage: String?
     @State private var trackTapTrigger = 0
     @State private var activeLoadID = UUID()
-    @State private var presentedCoverPlayerID: String?
-    @State private var isClosingCoverPlayer = false
-    @State private var coverPlayerDismissTask: Task<Void, Never>?
 
     init(
         showSettings: Binding<Bool> = .constant(false),
-        isCoverPlayerPresented: Binding<Bool> = .constant(false)
+        openPlayer: @escaping () -> Void = {}
     ) {
         _showSettings = showSettings
-        _isCoverPlayerPresented = isCoverPlayerPresented
+        self.openPlayer = openPlayer
     }
 
     var body: some View {
@@ -64,77 +60,10 @@ struct HomeView: View {
             .allowsHitTesting(false)
 
             topControls
-
-            if let sourceID = presentedCoverPlayerID {
-                coverPlayerOverlay(sourceID: sourceID)
-            }
         }
         .background(AppTheme.background.ignoresSafeArea())
         .sensoryFeedback(.intent(.lightImpact), trigger: trackTapTrigger)
         .toolbar(.hidden, for: .navigationBar)
-        .toolbar(presentedCoverPlayerID == nil ? .visible : .hidden, for: .tabBar)
-        .onDisappear {
-            coverPlayerDismissTask?.cancel()
-        }
-    }
-
-    private func coverPlayerOverlay(sourceID: String) -> some View {
-        NowPlayingView(isPresented: true)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .matchedGeometryEffect(
-                id: sourceID,
-                in: coverTransitionNamespace,
-                properties: .frame,
-                anchor: .center
-            )
-            .zIndex(10)
-            .overlay(alignment: .top) {
-                Button {
-                    closeCoverPlayer()
-                } label: {
-                    Capsule()
-                        .fill(Color.white.opacity(0.72))
-                        .frame(width: 60, height: 5)
-                        .frame(width: 100, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("收起播放器")
-                .accessibilityIdentifier("coverPlayerCloseButton")
-            }
-            .allowsHitTesting(!isClosingCoverPlayer)
-    }
-
-    private var coverPlayerAnimation: Animation {
-        .spring(duration: 0.50, bounce: 0.08)
-    }
-
-    private func openCoverPlayer(sourceID: String) {
-        guard presentedCoverPlayerID == nil, !isClosingCoverPlayer else { return }
-        coverPlayerDismissTask?.cancel()
-        isCoverPlayerPresented = true
-        withAnimation(coverPlayerAnimation) {
-            presentedCoverPlayerID = sourceID
-        }
-    }
-
-    /// 动画层和手势层分离：播放器继续缩回原封面，但关闭一开始就不再拦截触摸。
-    private func closeCoverPlayer() {
-        guard presentedCoverPlayerID != nil, !isClosingCoverPlayer else { return }
-        isClosingCoverPlayer = true
-        coverPlayerDismissTask?.cancel()
-        coverPlayerDismissTask = Task { @MainActor in
-            // 先提交 allowsHitTesting(false)，再开始缩回，确保第一帧就把触摸交还给瀑布流。
-            await Task.yield()
-            guard !Task.isCancelled else { return }
-            withAnimation(coverPlayerAnimation) {
-                presentedCoverPlayerID = nil
-            }
-            try? await Task.sleep(for: .milliseconds(520))
-            guard !Task.isCancelled, presentedCoverPlayerID == nil else { return }
-            isCoverPlayerPresented = false
-            isClosingCoverPlayer = false
-        }
     }
 
     private var topControls: some View {
@@ -225,13 +154,12 @@ struct HomeView: View {
     private func coverTile(for item: CoverLibraryItem, featured: Bool) -> some View {
         let track = item.track
         let index = item.index
-        let transitionSourceID = item.id
         let isCurrent = engine.current.map { track.key.matches($0) } ?? false
         let pixelWidth = featured ? 1_200 : 620
         return Button {
             trackTapTrigger += 1
             engine.beginPlayback(tracks: tracks, startAt: index)
-            openCoverPlayer(sourceID: transitionSourceID)
+            openPlayer()
         } label: {
             CachedAsyncImage(
                 url: BiliArtworkURL.widescreenThumbnail(track.coverURL, width: pixelWidth),
@@ -255,15 +183,9 @@ struct HomeView: View {
                     HomePlaybackProgressRail()
                 }
             }
-            .modifier(CoverTransitionSourceModifier(
-                id: transitionSourceID,
-                namespace: coverTransitionNamespace,
-                isPlayerPresented: presentedCoverPlayerID == transitionSourceID
-            ))
             .contentShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
         }
         .buttonStyle(.plain)
-        .disabled(isClosingCoverPlayer)
         .contextMenu {
             Button {
                 Task { await engine.playRadio(seed: track) }
@@ -390,14 +312,7 @@ struct HomeView: View {
                 guard !Task.isCancelled, activeLoadID == loadID, CookieStore.mid == accountID else { return }
                 let batch = (result.medias ?? [])
                     .filter { $0.attr == 0 }
-                    .map { item in
-                        Track(
-                            bvid: item.bvid,
-                            title: item.title,
-                            artist: item.upper.name,
-                            coverURL: URL(string: item.cover),
-                            duration: item.duration)
-                    }
+                    .map(Track.init(fav:))
                 favoriteTracks = deduplicated(favoriteTracks + batch)
                 hasMore = result.has_more
                 page += 1
@@ -444,33 +359,7 @@ struct HomeView: View {
     }
 
     private func deduplicated(_ source: [Track]) -> [Track] {
-        var seen = Set<String>()
-        return source.filter { track in
-            guard track.coverURL != nil else { return false }
-            return seen.insert(track.id).inserted
-        }
-    }
-}
-
-/// 只让当前可见的一侧参与 matched geometry。封面占位始终留在 LazyVStack 中，
-/// 因此播放器展开/收回和用户在收回期间滚动都不会改变瀑布流排版。
-private struct CoverTransitionSourceModifier: ViewModifier {
-    let id: String
-    let namespace: Namespace.ID
-    let isPlayerPresented: Bool
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if isPlayerPresented {
-            content.opacity(0)
-        } else {
-            content.matchedGeometryEffect(
-                id: id,
-                in: namespace,
-                properties: .frame,
-                anchor: .center
-            )
-        }
+        Track.uniquedByBVIDPreferringCID(source.filter { $0.coverURL != nil })
     }
 }
 
@@ -501,35 +390,4 @@ private struct CoverLibraryItem: Identifiable {
     let index: Int
     let track: Track
     var id: String { "\(index)-\(track.id)" }
-}
-
-private struct CoverLibrarySnapshot: Codable {
-    let folderID: Int
-    let savedAt: Date
-    let tracks: [Track]
-}
-
-private actor CoverLibrarySnapshotStore {
-    static let shared = CoverLibrarySnapshotStore()
-
-    private let fileURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("cover-library.json")
-
-    func load(preferredFolderID: Int) -> CoverLibrarySnapshot? {
-        guard let data = try? Data(contentsOf: fileURL),
-              let snapshot = try? JSONDecoder().decode(CoverLibrarySnapshot.self, from: data),
-              preferredFolderID == 0 || preferredFolderID == snapshot.folderID else {
-            return nil
-        }
-        return snapshot
-    }
-
-    func save(folderID: Int, tracks: [Track]) {
-        let snapshot = CoverLibrarySnapshot(
-            folderID: folderID,
-            savedAt: Date(),
-            tracks: Array(tracks.prefix(480)))
-        guard let data = try? JSONEncoder().encode(snapshot) else { return }
-        try? data.write(to: fileURL, options: .atomic)
-    }
 }

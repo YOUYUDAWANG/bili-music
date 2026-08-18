@@ -259,6 +259,45 @@ final class SearchStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testInitialSearchShowsFirstPageBeforeLaterPagesFinish() async {
+        let gate = SearchPageGate()
+        let store = SearchStore(searchPageForTesting: { _, page, _ in
+            if page == 2 {
+                await gate.wait()
+                return [
+                    makeTrack(
+                        bvid: "BVSEARCH002",
+                        title: "周杰伦 晴天 官方 MV 2")
+                ]
+            }
+            return [
+                makeTrack(
+                    bvid: "BVSEARCH00\(page)",
+                    title: "周杰伦 晴天 官方 MV \(page)")
+            ]
+        })
+
+        store.submitSearch("晴天", preload: { _ in })
+        await waitBounded(description: "first search page should appear while still searching") {
+            !store.results.isEmpty && store.searching
+        }
+
+        XCTAssertTrue(store.searching)
+        XCTAssertEqual(store.results.map(\.bvid), ["BVSEARCH001"])
+        XCTAssertFalse(store.results.contains { $0.bvid == "BVSEARCH002" })
+        XCTAssertTrue(store.shouldShowResults(query: "晴天"))
+
+        await gate.open()
+        for _ in 0..<200 where store.searching {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        XCTAssertFalse(store.searching)
+        XCTAssertEqual(Set(store.results.map(\.bvid)), ["BVSEARCH001", "BVSEARCH002", "BVSEARCH003"])
+        XCTAssertTrue(store.hasMoreResults)
+    }
+
+    @MainActor
     func testKnownCIDNeverFallsBackToAnotherCachedPart() async {
         let (_, cache) = await makeIsolatedStores()
         let cachedTrack = Track(
@@ -354,4 +393,39 @@ private func makeTrack(
     duration: Int = 269
 ) -> Track {
     Track(typeID: typeID, bvid: bvid, title: title, artist: artist, coverURL: nil, duration: duration)
+}
+
+actor SearchPageGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if isOpen { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func open() {
+        isOpen = true
+        let waiters = waiters
+        self.waiters = []
+        waiters.forEach { $0.resume() }
+    }
+}
+
+@MainActor
+private func waitBounded(
+    description: String,
+    timeout: TimeInterval = 5,
+    until condition: @MainActor () -> Bool
+) async {
+    let deadline = Date().addingTimeInterval(timeout)
+    var yields = 0
+    while !condition() {
+        yields += 1
+        if yields > 20_000 || Date() > deadline {
+            XCTFail("timed out: \(description)")
+            return
+        }
+        await Task.yield()
+    }
 }

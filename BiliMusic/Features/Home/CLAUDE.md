@@ -6,8 +6,8 @@
 
 ## 入口与启动
 
-- **文件**: `HomeView.swift`
-- 页面出现时先读取持久化封面快照，再合并缓存和播放历史；收藏夹网络刷新在后台完成。
+- 文件: `HomeView.swift`, `CoverLibrarySnapshotStore.swift`
+- 页面出现时先读取持久化封面快照，再合并缓存和播放历史；收藏夹网络刷新在后台完成。收藏条目带 cid 时写入 `Track`；快照按 bvid 去重并优先保留已解析 cid。
 
 ## 对外接口
 
@@ -21,7 +21,7 @@
 - 随机播放与设置在右上角共用一块 34pt 高的 Liquid Glass 胶囊；封面在其下方连续滚动，顶部 72pt 静态暗色渐变只保护状态栏与按钮对比度且不拦截手势。
 - 第一张封面在静止状态与顶部胶囊保持呼吸空间；ScrollView 依赖 LNPopup 动态安全区，并额外保留 8pt resting buffer。
 - 点击封面直接播放；长按可电台播放、随机播放资料库或加入队列。
-- 点击封面时，`PlayerEngine.beginPlayback` 在同一帧提交唯一真实选曲，再由首页局部 matched geometry 动画层从该封面原位展开并反向缩回；关闭第一帧先让动画层停止命中测试，底层 ScrollView 可以在缩回期间继续滚动，完成后恢复 LNPopup mini player。该路径不以四个 Tab 常驻、自绘底栏或全屏抢手势为代价。
+- 点击封面时，`PlayerEngine.beginPlayback` 在同一帧提交唯一真实选曲，随后由 RootView 打开同一个 LNPopup 播放器。Home 不再挂载 `NowPlayingView`、matched geometry、关闭延时 Task 或第二套关闭按钮；mini/full 开合全部由 LNPopupController 管理。
 - 下拉刷新会重新同步指定收藏夹。
 - 封面快照保存在 `Documents/cover-library.json`，15 分钟内冷启动不重复请求收藏夹。
 
@@ -39,11 +39,14 @@
 ## 相关文件清单
 
 - `HomeView.swift`
+- `CoverLibrarySnapshotStore.swift`
 
 ## 变更记录
 
 | 日期 | 变更 |
 |------|------|
+| 2026-08-19 | 收藏夹封面快照写入 cid，按 bvid 去重时优先保留已有 cid。 |
+| 2026-08-19 | 撤销 Home 自制 matched-geometry 播放器层；封面点击、mini/full 开合统一回归 LNPopup。 |
 | 2026-06-24 | 初始文档创建。 |
 | 2026-08-14 | 首页从推荐列表改为封面驱动的私人音乐库。 |
 | 2026-08-14 | 模拟器实图确认多模板节奏不如原版纯粹，恢复“1 张全宽 + 4 张双列”的连续海报瀑布流。 |

@@ -37,8 +37,8 @@ struct Track: Identifiable, Equatable, Codable, Sendable {
     let typeID: Int?
     let bvid: String
     var cid: Int?          // 搜索结果没有 cid,首次播放时补全
-    let title: String
-    let artist: String
+    var title: String
+    var artist: String
     let coverURL: URL?
     var duration: Int
     var key: TrackKey { TrackKey(bvid: bvid, cid: cid) }
@@ -71,6 +71,31 @@ struct Track: Identifiable, Equatable, Codable, Sendable {
                   title: item.title, artist: artist,
                   coverURL: item.pic.flatMap(URL.init(string:)), duration: item.duration ?? 0)
     }
+
+    init(fav item: BiliClient.FavItem) {
+        self.init(
+            bvid: item.bvid,
+            cid: item.resolvedCID,
+            title: item.title,
+            artist: item.upper.name,
+            coverURL: URL(string: item.cover),
+            duration: item.duration)
+    }
+
+    /// 首页/收藏按 bvid 去重；同一 BV 优先保留已解析 cid 的那条，避免重复封面，也避免把已有 cid 丢掉。
+    static func uniquedByBVIDPreferringCID(_ tracks: [Track]) -> [Track] {
+        var best: [String: Track] = [:]
+        var order: [String] = []
+        for track in tracks {
+            if best[track.bvid] == nil {
+                order.append(track.bvid)
+                best[track.bvid] = track
+            } else if best[track.bvid]?.cid == nil, track.cid != nil {
+                best[track.bvid] = track
+            }
+        }
+        return order.compactMap { best[$0] }
+    }
 }
 
 enum TrackTitleFormatter {
@@ -97,6 +122,7 @@ enum TrackTitleFormatter {
     }
 
     static func displayMetadata(for track: Track, clean: Bool = shouldCleanListTitles) -> DisplayMetadata {
+        let track = TrackMetadataStore.shared.applyingCachedMetadata(to: track)
         let cacheKey = DisplayMetadataCacheKey(
             trackKey: track.key,
             title: track.title,
@@ -107,7 +133,7 @@ enum TrackTitleFormatter {
         }
         let metadata: DisplayMetadata
         if clean {
-            let parsed = LyricsClient.parseSongForDisplay(from: track.title, fallbackArtist: track.artist)
+            let parsed = TrackTitleParser.parseSongForDisplay(from: track.title, fallbackArtist: track.artist)
             let parsedTitle = parsed.title.trimmingCharacters(in: .whitespacesAndNewlines)
             let parsedArtist = parsed.artist?.trimmingCharacters(in: .whitespacesAndNewlines)
             metadata = DisplayMetadata(
@@ -242,7 +268,7 @@ enum PlaybackPreferences {
 
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
-            autoCacheKey: false,
+            autoCacheKey: true,
             playbackQualityKey: 30280,
             downloadQualityKey: 0,
             preferMVOnWiFiKey: true,
@@ -324,7 +350,7 @@ final class PlayerEngine {
         }
     }
 
-    enum QueueMode: String, CaseIterable, Identifiable {
+    enum QueueMode: String, CaseIterable, Identifiable, Codable {
         case sequential = "顺序"
         case shuffle = "随机"
         case repeatOne = "单曲循环"
@@ -387,11 +413,34 @@ final class PlayerEngine {
         }
     }
 
+    struct LyricWord: Identifiable, Equatable {
+        let id = UUID()
+        let from: Double
+        let to: Double
+        let text: String
+    }
+
     struct LyricLine: Identifiable, Equatable {
         let id = UUID()
         let from: Double
         let to: Double
         let text: String
+        let translation: String?
+        let words: [LyricWord]
+
+        init(
+            from: Double,
+            to: Double,
+            text: String,
+            translation: String? = nil,
+            words: [LyricWord] = []
+        ) {
+            self.from = from
+            self.to = to
+            self.text = text
+            self.translation = translation
+            self.words = words
+        }
     }
 
     private(set) var state: State = .idle
@@ -402,6 +451,13 @@ final class PlayerEngine {
     private(set) var isScrubbing = false
     private var scrubTrackKey: TrackKey?
     private(set) var lyrics: [LyricLine] = []
+    private(set) var lyricsDocument: LyricsDocument?
+    private(set) var lyricSearchResults: [LyricsSearchResult] = []
+    private(set) var lyricSearchKeyword = ""
+    private(set) var lyricProvider: LyricsProvider = .netease
+    private(set) var lyricOffsetMilliseconds = 0
+    private(set) var lyricsLoading = false
+    private(set) var lyricSearchError: String?
     private(set) var videoAvailable = false
     private(set) var currentAudioQuality: Int?
     private(set) var currentAudioBandwidth: Int?
@@ -414,6 +470,9 @@ final class PlayerEngine {
 
     var current: Track? { queue.indices.contains(queueIndex) ? queue[queueIndex] : nil }
     var duration: Double { Double(current?.duration ?? 0) }
+    var adjustedLyricTime: Double {
+        currentTime + Double(lyricOffsetMilliseconds) / 1000
+    }
     var hasNext: Bool {
         queueIndex + 1 < queue.count || queueMode == .radio || queueMode == .repeatOne || (queueMode == .shuffle && queue.count > 1)
     }
@@ -421,11 +480,16 @@ final class PlayerEngine {
     var avPlayer: AVPlayer? { player }
 
     private let client = BiliClient()
-    private let lyricsClient = LyricsClient()
+    private let lyricsClient = MetingLyricsClient()
     private let streamResolver: any AudioStreamResolving
     private let playbackDiagnostics: PlaybackDiagnostics
     private let startupTestHooks: PlaybackStartupTestHooks
     private let radioTrackProvider: (@MainActor (Track, Set<TrackKey>) async -> Track?)?
+    private let queueStore: PlaybackQueueStore
+    private let metadataStore: TrackMetadataStore
+    private let metadataResolver: TrackMetadataResolver
+    private let persistsPlaybackQueue: Bool
+    private var isRestoringQueue = false
     private var player: AVPlayer?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
@@ -493,12 +557,26 @@ final class PlayerEngine {
         playbackDiagnostics: PlaybackDiagnostics = PlaybackDiagnostics(),
         streamResolver: (any AudioStreamResolving)? = nil,
         startupTestHooks: PlaybackStartupTestHooks = .none,
-        radioTrackProvider: (@MainActor (Track, Set<TrackKey>) async -> Track?)? = nil
+        radioTrackProvider: (@MainActor (Track, Set<TrackKey>) async -> Track?)? = nil,
+        queueStore: PlaybackQueueStore? = nil,
+        metadataStore: TrackMetadataStore? = nil,
+        metadataNormalizer: (any TrackMetadataNormalizing)? = nil
     ) {
+        let resolvedMetadataStore = metadataStore ?? .shared
         self.playbackDiagnostics = playbackDiagnostics
         self.streamResolver = streamResolver ?? StreamResolver()
         self.startupTestHooks = startupTestHooks
         self.radioTrackProvider = radioTrackProvider
+        self.queueStore = queueStore ?? .shared
+        self.metadataStore = resolvedMetadataStore
+        self.metadataResolver = TrackMetadataResolver(
+            store: resolvedMetadataStore,
+            normalizer: metadataNormalizer ?? MetadataNormalizationClient())
+#if DEBUG
+        self.persistsPlaybackQueue = queueStore != nil || !startupTestHooks.isActive
+#else
+        self.persistsPlaybackQueue = true
+#endif
         Task(priority: .userInitiated) {
             Self.configureAudioSession()
         }
@@ -562,6 +640,7 @@ final class PlayerEngine {
             return false
         }
 #endif
+        let tracks = tracks.map { metadataStore.applyingCachedMetadata(to: $0) }
         playbackDiagnostics.begin(track: tracks[index])
         playbackDiagnostics.record(.tap, track: tracks[index])
         prefetchTask?.cancel()
@@ -579,6 +658,7 @@ final class PlayerEngine {
             self.queueMode = .sequential
         }
         playbackMode = preferredModeForNewTrack()
+        persistPlaybackQueue()
         return true
     }
 
@@ -596,13 +676,14 @@ final class PlayerEngine {
         queuePrefetchTask?.cancel()
         autoMVTask?.cancel()
         remoteStartupFallbackTask?.cancel()
-        queue = [track]
+        queue = [metadataStore.applyingCachedMetadata(to: track)]
         queueIndex = 0
         playedKeys = []
         prefetchedRadio = nil
         manualPlaybackModeOverride = nil
         queueMode = .radio
         playbackMode = preferredModeForNewTrack()
+        persistPlaybackQueue()
         await startCurrent()
     }
 
@@ -761,6 +842,7 @@ final class PlayerEngine {
             pendingRadioAdvance = nil
         }
         queueMode = mode
+        persistPlaybackQueue()
         prefetchedRadio = nil
         prefetchTask?.cancel()
         if mode == .radio, state == .playing {
@@ -785,6 +867,7 @@ final class PlayerEngine {
             currentTime = duration
         }
         state = .paused
+        persistPlaybackQueue()
         updateNowPlayingInfo()
     }
 
@@ -830,6 +913,7 @@ final class PlayerEngine {
 
     func appendToQueue(_ tracks: [Track]) {
         let additions = QueueController.appendUnique(tracks, to: &queue)
+        persistPlaybackQueue()
         preload(tracks: additions)
     }
 
@@ -870,6 +954,13 @@ final class PlayerEngine {
             if current != nil {
                 state = .loading
                 updateNowPlayingInfo()
+#if DEBUG
+                if UITestFixtures.enabled && !startupTestHooks.isActive {
+                    return
+                }
+#endif
+                let resumeAt = currentTime.isFinite ? currentTime : 0
+                Task { await self.startCurrent(resumeAt: resumeAt, shouldPlay: true) }
             }
             return
         }
@@ -887,6 +978,7 @@ final class PlayerEngine {
         remoteStartupFallbackTask?.cancel()
         player?.pause()
         setPausedStatePreservingFailure()
+        persistPlaybackQueue()
         updateNowPlayingInfo()
     }
 
@@ -897,7 +989,70 @@ final class PlayerEngine {
         player?.seek(to: CMTime(seconds: target, preferredTimescale: 600),
                      toleranceBefore: .zero, toleranceAfter: .zero)
         currentTime = target
+        persistPlaybackQueue()
         updateNowPlayingInfo()
+    }
+
+    func restorePersistedQueueIfNeeded() async {
+        guard persistsPlaybackQueue else { return }
+#if DEBUG
+        if UITestFixtures.enabled { return }
+#endif
+        guard queue.isEmpty, current == nil else { return }
+        await queueStore.loadIfNeeded()
+        guard let snapshot = queueStore.snapshot,
+              !snapshot.queue.isEmpty,
+              snapshot.queue.indices.contains(snapshot.queueIndex) else { return }
+        isRestoringQueue = true
+        defer { isRestoringQueue = false }
+        queue = snapshot.queue.map { metadataStore.applyingCachedMetadata(to: $0) }
+        queueIndex = snapshot.queueIndex
+        queueMode = snapshot.queueMode == .radio ? .sequential : snapshot.queueMode
+        let resume = snapshot.resumePosition
+        currentTime = resume.isFinite ? max(0, resume) : 0
+        wantsPlayback = false
+        state = .paused
+        player = nil
+        activePlaybackSource = nil
+        activePlaybackGeneration = nil
+        playbackGeneration = UUID()
+#if DEBUG
+        if !startupTestHooks.isActive {
+            CacheStore.shared.setPlaybackProtectedKey(current?.key)
+        }
+#else
+        CacheStore.shared.setPlaybackProtectedKey(current?.key)
+#endif
+        isMiniPlayerHidden = false
+        updateNowPlayingInfo()
+    }
+
+    func flushPlaybackQueue() async {
+        persistPlaybackQueue()
+        guard persistsPlaybackQueue else { return }
+        await queueStore.flush()
+    }
+
+    private func persistPlaybackQueue() {
+        guard persistsPlaybackQueue, !isRestoringQueue else { return }
+#if DEBUG
+        if UITestFixtures.enabled { return }
+#endif
+        if queue.isEmpty {
+            if queueStore.snapshot != nil {
+                queueStore.replace(nil)
+            }
+            return
+        }
+        let window = PlaybackQueueWindow.capped(queue: queue, index: queueIndex)
+        queueStore.replace(
+            PersistedPlaybackQueue(
+                version: 1,
+                queue: window.queue,
+                queueIndex: window.index,
+                queueMode: queueMode == .radio ? .sequential : queueMode,
+                resumePosition: currentTime.isFinite ? max(0, currentTime) : 0,
+                savedAt: Date()))
     }
 
     private func restartCurrentPlaybackAfterFailure() {
@@ -962,6 +1117,81 @@ final class PlayerEngine {
         seek(to: seconds)
     }
 
+    func searchLyrics(keyword: String, provider: LyricsProvider) async {
+        guard let track = current else { return }
+        let expectedKey = track.key
+        lyricProvider = provider
+        lyricSearchKeyword = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        lyricSearchError = nil
+        lyricsLoading = true
+        do {
+            let results = try await lyricsClient.search(
+                keyword: lyricSearchKeyword,
+                provider: provider)
+            guard current.map({ expectedKey.matches($0) }) ?? false else { return }
+            lyricSearchResults = results
+            if results.isEmpty {
+                lyricSearchError = "没有搜索到候选歌曲"
+            }
+        } catch {
+            guard current.map({ expectedKey.matches($0) }) ?? false else { return }
+            lyricSearchResults = []
+            lyricSearchError = error.localizedDescription
+        }
+        if current.map({ expectedKey.matches($0) }) ?? false {
+            lyricsLoading = false
+        }
+    }
+
+    func selectLyricsResult(_ result: LyricsSearchResult) async {
+        guard let track = current else { return }
+        let expectedKey = track.key
+        lyricsLoading = true
+        lyricSearchError = nil
+        do {
+            let document = try await lyricsClient.fetchLyrics(for: result)
+            guard current.map({ expectedKey.matches($0) }) ?? false else { return }
+            lyricProvider = result.provider
+            applyLyrics(document, to: track, offsetMilliseconds: lyricOffsetMilliseconds)
+            await LyricsStore.shared.save(
+                document: document,
+                offsetMilliseconds: lyricOffsetMilliseconds,
+                for: track)
+        } catch {
+            guard current.map({ expectedKey.matches($0) }) ?? false else { return }
+            lyricSearchError = error.localizedDescription
+        }
+        if current.map({ expectedKey.matches($0) }) ?? false {
+            lyricsLoading = false
+        }
+    }
+
+    func adjustLyricOffset(by milliseconds: Int) {
+        guard let track = current else { return }
+        lyricOffsetMilliseconds = min(max(lyricOffsetMilliseconds + milliseconds, -10_000), 10_000)
+        Task {
+            await LyricsStore.shared.updateOffset(lyricOffsetMilliseconds, for: track)
+        }
+    }
+
+    func resetLyricOffset() {
+        guard let track = current else { return }
+        lyricOffsetMilliseconds = 0
+        Task {
+            await LyricsStore.shared.updateOffset(0, for: track)
+        }
+    }
+
+    func seek(to lyricLine: LyricLine) {
+        let offset = Double(lyricOffsetMilliseconds) / 1000
+        seek(to: max(0, lyricLine.from - offset))
+    }
+
+    func retryLyrics() async {
+        guard let track = current else { return }
+        await loadLyrics(for: track, generation: playbackGeneration, ignoreCache: true)
+    }
+
     func setPlaybackMode(_ mode: PlaybackMode) async {
         guard mode != playbackMode else { return }
         let shouldPlay = wantsPlayback
@@ -1019,6 +1249,7 @@ final class PlayerEngine {
             return
         }
         autoMVTask?.cancel()
+        await LyricsStore.shared.flush()
         guard playbackMode == .mv else { return }
         let shouldPlay = wantsPlayback
         playbackMode = .music
@@ -1129,6 +1360,10 @@ final class PlayerEngine {
         pendingRadioAdvance = nil
         isMiniPlayerHidden = false
         guard var track = current else { return }
+        track = metadataStore.applyingCachedMetadata(to: track)
+        if queue.indices.contains(queueIndex) {
+            queue[queueIndex] = track
+        }
         // 先停掉旧 player:新流解析弱网可达数秒,不暂停会让上一首继续出声,
         // 且期间 seek 会作用在旧 item 上。与失败路径 catch 分支的 pause 对齐。
         player?.pause()
@@ -1151,6 +1386,13 @@ final class PlayerEngine {
 #endif
         currentTime = resumeAt
         lyrics = []
+        lyricsDocument = nil
+        lyricSearchResults = []
+        lyricSearchKeyword = ""
+        lyricProvider = .netease
+        lyricOffsetMilliseconds = 0
+        lyricsLoading = false
+        lyricSearchError = nil
         videoAvailable = false
         currentAudioQuality = nil
         currentAudioBandwidth = nil
@@ -1169,6 +1411,20 @@ final class PlayerEngine {
                   current.map({ track.key.matches($0) }) ?? false,
                   queue.indices.contains(queueIndex) else { return }
             queue[queueIndex] = track
+            persistPlaybackQueue()
+#if DEBUG
+            if !startupTestHooks.isActive {
+                CacheStore.shared.setPlaybackProtectedKey(track.key)
+                if let cid = track.cid {
+                    Task { await CoverLibrarySnapshotStore.shared.enrichCID(cid, for: track.bvid) }
+                }
+            }
+#else
+            CacheStore.shared.setPlaybackProtectedKey(track.key)
+            if let cid = track.cid {
+                Task { await CoverLibrarySnapshotStore.shared.enrichCID(cid, for: track.bvid) }
+            }
+#endif
             if source.kind == .mvRemote {
                 videoAvailable = true
                 currentVideoQuality = source.videoQuality
@@ -1225,6 +1481,33 @@ final class PlayerEngine {
         isScrubbing = false
         scrubTrackKey = nil
         lyrics = []
+        lyricsDocument = nil
+        lyricSearchResults = []
+        lyricSearchKeyword = ""
+        lyricProvider = .netease
+        lyricOffsetMilliseconds = 0
+        lyricsLoading = false
+        lyricSearchError = nil
+        if UITestFixtures.includesLyrics, let track = current {
+            let result = LyricsSearchResult(
+                provider: .netease,
+                id: "fixture-lyrics",
+                title: track.title,
+                artist: track.artist,
+                album: "Fixture Album",
+                duration: track.duration,
+                artworkID: nil
+            )
+            let document = LyricsDocument(
+                result: result,
+                lyric: "[00:00.00]Electric night begins\n[00:05.00]Signals cross the skyline\n[00:10.00]We keep the station glowing",
+                translatedLyric: "[00:00.00]电光之夜开始\n[00:05.00]讯号掠过天际线\n[00:10.00]我们让电台继续发光",
+                romanizedLyric: nil,
+                karaokeLyric: "[0,5000](0,800,0)Electric (800,1000,0)night (1800,1200,0)begins\n[5000,5000](0,1200,0)Signals (1200,900,0)cross (2100,900,0)the (3000,1600,0)skyline",
+                karaokeTranslatedLyric: nil
+            )
+            applyLyrics(document, to: track, offsetMilliseconds: 0)
+        }
         videoAvailable = !tracks.isEmpty
         currentAudioQuality = nil
         currentAudioBandwidth = nil
@@ -1308,6 +1591,13 @@ final class PlayerEngine {
         if let cached = CacheStore.shared.entry(for: track) {
             track.cid = cached.cid
             track.duration = cached.duration
+#if DEBUG
+            if !startupTestHooks.isActive {
+                CacheStore.shared.touch(cached.key)
+            }
+#else
+            CacheStore.shared.touch(cached.key)
+#endif
             return PlaybackSource(
                 track: track,
                 url: CacheStore.audioDir.appendingPathComponent(cached.fileName),
@@ -1458,10 +1748,7 @@ final class PlayerEngine {
         startupTestHooks.record(.lyricsScheduled)
         postPlaybackTask = Task(priority: .utility) { [weak self, track, generation, shouldRecordHistory] in
             guard let self else { return }
-
-            if shouldRecordHistory {
-                PlaybackHistoryStore.shared.record(track)
-            }
+            async let normalizedTrack = self.resolveTrackMetadata(for: track, generation: generation)
 
             try? await Task.sleep(for: .milliseconds(900))
             guard self.isCurrent(track, generation: generation) else { return }
@@ -1469,12 +1756,17 @@ final class PlayerEngine {
 
             try? await Task.sleep(for: .milliseconds(900))
             guard self.isCurrent(track, generation: generation) else { return }
-            await self.loadLyrics(for: track, generation: generation)
+            let effectiveTrack = await normalizedTrack
+            guard self.isCurrent(effectiveTrack, generation: generation) else { return }
+            if shouldRecordHistory {
+                PlaybackHistoryStore.shared.record(effectiveTrack)
+            }
+            await self.loadLyrics(for: effectiveTrack, generation: generation)
         }
         if PlaybackPreferences.autoCache, CacheStore.shared.entry(for: track) == nil {
             startupTestHooks.record(.autoCacheScheduled)
             autoCacheTask = Task(priority: .background) { [weak self, track, generation] in
-                try? await Task.sleep(for: .seconds(8))
+                try? await Task.sleep(for: .milliseconds(1500))
                 guard !Task.isCancelled,
                       let self,
                       self.isCurrent(track, generation: generation) else { return }
@@ -1489,7 +1781,22 @@ final class PlayerEngine {
         }
     }
 
-    private func scheduleStartupArtworkPrefetch(for track: Track, generation: UUID) {
+    private func resolveTrackMetadata(for track: Track, generation: UUID) async -> Track {
+        do {
+            let normalized = try await metadataResolver.resolve(track)
+            guard isCurrent(track, generation: generation),
+                  queue.indices.contains(queueIndex) else { return normalized }
+            queue[queueIndex] = normalized
+            persistPlaybackQueue()
+            updateNowPlayingInfo()
+            return normalized
+        } catch {
+            log.info("metadata normalization unavailable: \(error.localizedDescription, privacy: .public)")
+            return track
+        }
+    }
+
+    private func scheduleStartupArtworkPrefetch(for track: Track, generation _: UUID) {
 #if DEBUG
         artworkDiag(
             "startupPrefetch.enter",
@@ -1510,21 +1817,7 @@ final class PlayerEngine {
             track: track,
             extra: "needsUpgrade=\(currentCoverImageNeedsUpgrade)")
 #endif
-        guard currentCoverImageNeedsUpgrade else {
-#if DEBUG
-            artworkDiag("startupPrefetch.skip.coverReady", track: track)
-#endif
-            return
-        }
-
-        startupArtworkTask = Task(priority: .userInitiated) { [weak self, track, generation] in
-            await self?.loadCover(
-                for: track,
-                generation: generation,
-                width: 320,
-                height: 180,
-                priority: .userInitiated)
-        }
+        // 内存命中即可。网络封面改到出声后再拉，避免和 playurl/音频首包抢连接。
     }
 
     private func isCurrent(_ track: Track, generation: UUID) -> Bool {
@@ -1558,7 +1851,6 @@ final class PlayerEngine {
         remoteStartupFallbackTask = nil
         tearDownPlayerObservers()
         player?.pause()
-        player?.replaceCurrentItem(with: nil)
         activePlaybackSource = source
         activePlaybackGeneration = generation
         if let startPlaybackOverride = startupTestHooks.startPlaybackOverride {
@@ -1582,10 +1874,11 @@ final class PlayerEngine {
         if source.isLocal {
             asset = AVURLAsset(url: source.url)
         } else {
+            let playbackHeaders = BiliClient.playbackHeaders
             var options: [String: Any] = [
-                "AVURLAssetHTTPHeaderFieldsKey": BiliClient.headers
+                "AVURLAssetHTTPHeaderFieldsKey": playbackHeaders
             ]
-            if let userAgent = BiliClient.headers["User-Agent"] {
+            if let userAgent = playbackHeaders["User-Agent"] {
                 options[AVURLAssetHTTPUserAgentKey] = userAgent
             }
             if source.kind != .mvRemote, let mimeType = source.mimeType, !mimeType.isEmpty {
@@ -1603,11 +1896,17 @@ final class PlayerEngine {
         item.canUseNetworkResourcesForLiveStreamingWhilePaused =
             PlaybackBufferPolicy.allowsNetworkUseWhilePaused(for: source)
         recordPlayerItemCreated(for: source)
-        let player = AVPlayer(playerItem: item)
-        // false = 数据一到就播,起播快;代价是断流后不会自己恢复,
-        // 所以下面用 bufferObserver 手动续播,兼顾「快起播」和「不中途卡死」。
-        player.automaticallyWaitsToMinimizeStalling = false
-        self.player = player
+        let player: AVPlayer
+        if let existing = self.player {
+            existing.replaceCurrentItem(with: item)
+            player = existing
+        } else {
+            player = AVPlayer(playerItem: item)
+            // false = 数据一到就播,起播快;代价是断流后不会自己恢复,
+            // 所以下面用 bufferObserver 手动续播,兼顾「快起播」和「不中途卡死」。
+            player.automaticallyWaitsToMinimizeStalling = false
+            self.player = player
+        }
         timeObserver = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main
         ) { [weak self] time in
@@ -1620,6 +1919,7 @@ final class PlayerEngine {
                 let seconds = time.seconds
                 guard seconds.isFinite, seconds >= 0 else { return }
                 self.currentTime = seconds
+                self.persistPlaybackQueue()
             }
         }
         // 让播放/暂停状态始终跟随播放器真实状态(缓冲、卡顿、自动暂停都能同步 UI)
@@ -1755,9 +2055,10 @@ final class PlayerEngine {
 
         remoteStartupFallbackTask?.cancel()
         remoteStartupFallbackTask = Task { [weak self, source, generation, candidates, resumeAt] in
+            async let probed = AudioCDNSelector.fastestReachableURL(from: candidates)
             try? await Task.sleep(for: .milliseconds(1200))
             guard !Task.isCancelled else { return }
-            let fallbackURL = await AudioCDNSelector.fastestReachableURL(from: candidates)
+            let fallbackURL = await probed
             guard !Task.isCancelled, let fallbackURL else { return }
 
             await MainActor.run {
@@ -2130,12 +2431,74 @@ final class PlayerEngine {
     }
 #endif
 
-    private func loadLyrics(for track: Track, generation: UUID) async {
-        // 只用 LRCLIB 在线歌词。不再 fallback 到 B 站字幕——音乐区"字幕"多是自动生成的 CC,
-        // 把伴奏标成"♪音乐♪",当歌词用纯属错配,宁可显示"无歌词"。
-        let online = try? await lyricsClient.lyrics(for: track)
-        guard playbackGeneration == generation, current.map({ track.key.matches($0) }) ?? false else { return }
-        lyrics = online ?? []
+    private func loadLyrics(
+        for track: Track,
+        generation: UUID,
+        ignoreCache: Bool = false
+    ) async {
+        lyricsLoading = true
+        lyricSearchError = nil
+
+        if !ignoreCache, let cached = await LyricsStore.shared.entry(for: track) {
+            guard playbackGeneration == generation,
+                  current.map({ track.key.matches($0) }) ?? false else { return }
+            applyLyrics(
+                cached.document,
+                to: track,
+                offsetMilliseconds: cached.offsetMilliseconds)
+            lyricsLoading = false
+            return
+        }
+
+        do {
+            let match = try await lyricsClient.automaticLyrics(for: track)
+            guard playbackGeneration == generation,
+                  current.map({ track.key.matches($0) }) ?? false else { return }
+            lyricSearchKeyword = match.keyword
+            lyricProvider = match.provider
+            lyricSearchResults = match.candidates
+            if let document = match.document {
+                log.info("lyrics loaded provider=\(match.provider.rawValue, privacy: .public) candidates=\(match.candidates.count)")
+                applyLyrics(document, to: track, offsetMilliseconds: 0)
+                await LyricsStore.shared.save(
+                    document: document,
+                    offsetMilliseconds: 0,
+                    for: track)
+            } else {
+                log.warning("lyrics no match provider=\(match.provider.rawValue, privacy: .public) candidates=\(match.candidates.count)")
+                lyrics = []
+                lyricsDocument = nil
+                lyricSearchError = "自动匹配失败，可手动搜索歌词"
+            }
+        } catch {
+            guard playbackGeneration == generation,
+                  current.map({ track.key.matches($0) }) ?? false else { return }
+            log.error("lyrics load failed: \(error.localizedDescription, privacy: .public)")
+            lyrics = []
+            lyricsDocument = nil
+            lyricSearchError = error.localizedDescription
+        }
+        lyricsLoading = false
+    }
+
+    private func applyLyrics(
+        _ document: LyricsDocument,
+        to track: Track,
+        offsetMilliseconds: Int
+    ) {
+        lyricsDocument = document
+        lyricProvider = document.result.provider
+        lyricOffsetMilliseconds = offsetMilliseconds
+        lyrics = LyricsParser.lines(from: document, duration: track.duration).map { line in
+            LyricLine(
+                from: line.from,
+                to: line.to,
+                text: line.text,
+                translation: line.translation,
+                words: line.words.map { word in
+                    LyricWord(from: word.from, to: word.to, text: word.text)
+                })
+        }
     }
 
     private func prepareVideoIfUseful(for track: Track, generation: UUID) async {

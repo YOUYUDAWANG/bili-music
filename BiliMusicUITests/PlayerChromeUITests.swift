@@ -12,6 +12,9 @@ final class PlayerChromeUITests: XCTestCase {
             "-cleanListTitles", "false"
         ]
         app.launchEnvironment["BILIMUSIC_UITEST_FIXTURE"] = "1"
+        if name.contains("Lyrics") {
+            app.launchEnvironment["BILIMUSIC_UITEST_LYRICS"] = "1"
+        }
         app.launch()
     }
 
@@ -105,6 +108,29 @@ final class PlayerChromeUITests: XCTestCase {
         XCTAssertTrue(staticText(containing: "AutoPlay").waitForExistence(timeout: 2), "The queue page should keep AutoPlay recommendations in the same scroll surface.")
         XCTAssertFalse(element("playerBottomContextDrawer").exists, "The retired three-state drawer should not be part of the active player route.")
         XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 1), "Opening the queue page should keep the player presented.")
+    }
+
+    @MainActor
+    func testLyricsSheetShowsSyncedTranslationAndOffsetControls() throws {
+        try openFullPlayerFromMini()
+
+        let lyricsButton = app.buttons["歌词"]
+        XCTAssertTrue(lyricsButton.waitForExistence(timeout: 3), "Loaded lyrics should expose the lyrics action.")
+        lyricsButton.tap()
+
+        let lyricsSheet = app.navigationBars["Fixture Song One"]
+        XCTAssertTrue(lyricsSheet.waitForExistence(timeout: 3), "Lyrics action should open the native lyrics sheet.")
+        XCTAssertTrue(staticText(containing: "Electric night begins").waitForExistence(timeout: 2), "The sheet should render synchronized lyrics.")
+        XCTAssertTrue(staticText(containing: "电光之夜开始").waitForExistence(timeout: 2), "The sheet should render the aligned translation.")
+
+        let offset = element("lyricsOffsetControl")
+        XCTAssertTrue(offset.waitForExistence(timeout: 2), "Lyrics timing controls should stay available.")
+        XCTAssertTrue(offset.label.contains("重置歌词偏移"), "The offset control should remain accessible.")
+
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Lyrics sheet"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
     }
 
     @MainActor
@@ -444,20 +470,18 @@ final class PlayerChromeUITests: XCTestCase {
         firstRow.tap()
 
         let nowPlaying = element("nowPlayingView")
-        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Tapping a cover should open the full player from that cover.")
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Tapping a cover should open the shared LNPopup full player.")
 
         let miniPlayer = element("miniPlayer")
-        XCTAssertFalse(miniPlayer.exists, "The popup bar should stay hidden during the direct cover-to-player presentation.")
+        XCTAssertFalse(element("coverPlayerCloseButton").exists, "Home should not create a second custom player or close target.")
 
-        let closeButton = element("coverPlayerCloseButton")
-        XCTAssertTrue(closeButton.waitForExistence(timeout: 2), "The direct cover player should expose a stable close target.")
-        closeButton.tap()
+        centerPlayerCoverArea().dragDownToDismiss()
 
-        XCTAssertTrue(nowPlaying.waitForNonExistence(timeout: 3), "Closing should return to the cover wall.")
+        XCTAssertTrue(nowPlaying.waitForNonExistence(timeout: 3), "LNPopup should minimize back to its standard bar.")
         let homeList = element("homeList")
-        XCTAssertTrue(homeList.waitForExistence(timeout: 1), "Closing should immediately return gesture ownership to the cover wall.")
-        XCTAssertTrue(homeList.isHittable, "The cover wall should be draggable as soon as the direct player closes.")
-        XCTAssertTrue(miniPlayer.waitForExistence(timeout: 3), "The standard mini player should resume after the cover transition finishes.")
+        XCTAssertTrue(homeList.waitForExistence(timeout: 1), "The cover wall should remain mounted under LNPopup.")
+        XCTAssertTrue(homeList.isHittable, "The cover wall should be draggable after LNPopup minimizes.")
+        XCTAssertTrue(miniPlayer.waitForExistence(timeout: 3), "The same LNPopup lifecycle should expose its mini player after minimizing.")
         XCTAssertTrue(firstRow.waitForExistence(timeout: 2), "The cover library should reappear after closing the player.")
         XCTAssertEqual(firstRow.frame.minY, frameBefore.minY, accuracy: 12, "The cover library should not jump after tapping a song.")
     }

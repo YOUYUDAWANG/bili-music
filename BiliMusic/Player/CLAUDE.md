@@ -8,7 +8,7 @@
 
 - **文件**: `PlayerEngine.swift`（主入口）
 - `PlayerEngine` 由 `BiliMusicApp` 创建并通过 `.environment(engine)` 注入。
-- 其他文件：`QueueController.swift`, `RecommendationEngine.swift`, `MusicFilter.swift`, `StreamResolver.swift`, `AudioCDNSelector.swift`, `PlaybackDiagnostics.swift`, `NetworkMonitor.swift`, `PlaybackHistoryStore.swift`
+- 其他文件：`QueueController.swift`, `RecommendationEngine.swift`, `MusicFilter.swift`, `StreamResolver.swift`, `AudioCDNSelector.swift`, `PlaybackDiagnostics.swift`, `NetworkMonitor.swift`, `PlaybackHistoryStore.swift`, `PlaybackQueueStore.swift`, `LyricsStore.swift`
 
 ## 对外接口
 
@@ -22,7 +22,9 @@
 - `current` — 当前曲目
 - `queueMode` — 顺序/随机/单曲循环/电台
 - `playbackMode` — 音乐/MV
-- `lyrics` — `[LyricLine]` 歌词
+- `lyrics` / `lyricsDocument` — 当前逐行歌词与来源文档（含翻译、逐字时间）
+- `lyricSearchResults` / `lyricProvider` — 手动匹配候选与当前平台
+- `lyricOffsetMilliseconds` — 当前曲目的用户校准偏移
 - `isScrubbing` — 是否正在拖动进度条
 
 核心方法：
@@ -35,6 +37,9 @@
 | `appendToQueue(_:)` | 追加到队列尾部 |
 | `togglePlayPause()` / `play()` / `pause()` | 播放/暂停 |
 | `seek(to:)` | 跳转到指定秒 |
+| `searchLyrics(keyword:provider:)` / `selectLyricsResult(_:)` | 手动搜索并切换歌词候选 |
+| `adjustLyricOffset(by:)` / `resetLyricOffset()` | 以 500ms 步进校准歌词并持久化 |
+| `seek(to lyricLine:)` | 点击歌词行跳转播放进度 |
 | `beginScrub()` / `endScrub(to:)` | 进度条拖动开始/结束 |
 | `setPlaybackMode(_:)` | 切换音乐/MV 模式 |
 | `setPlaybackQuality(_:)` | 切换音质 |
@@ -102,15 +107,31 @@
 - `flush()` — 立即写盘
 - 上限 300 条，JSON 持久化到 `Documents/playback-history.json`
 
+### PlaybackQueueStore（`@MainActor` 单例）
+
+- 冷启动恢复队列、下标、模式和进度；JSON 持久化到 `Documents/playback-queue.json`
+- 最多 200 首，超出时保留当前曲附近窗口；电台恢复为顺序播放
+- 只持久化曲目元数据，不保存会过期的流 URL；恢复后暂停待命，不自动续播
+- `flush()` 立即写盘（切后台）
+
+### LyricsStore（`@MainActor` 单例）
+
+- 保存用户选定的 `LyricsDocument`、平台和时间偏移，按 `TrackKey` 支持 cid 补全匹配。
+- 上限 300 条，JSON 持久化到 `Documents/lyrics-library.json`；换曲优先读取本地缓存。
+
 ## 关键依赖与配置
 
-- `AVPlayer` — 核心播放器
+- `AVPlayer` — 核心播放器；换曲复用同一实例，只 `replaceCurrentItem`
 - `AVAudioSession.category(.playback, mode: .default)` — 后台播放
 - `AVPlayer.automaticallyWaitsToMinimizeStalling = false` — 快起播 + 手动断流恢复
-- `preferredForwardBufferDuration = 10`（在线流）/ `0`（本地）
+- 远程拉流使用 `BiliClient.playbackHeaders`（UA + Referer + Origin + 可选 Cookie）
+- 点歌时只从内存恢复封面；网络封面等到出声后再拉
+- 自动缓存默认开启，出声约 1.5s 后后台落盘
+- `preferredForwardBufferDuration = 30`（在线音频）/ `6`（MV）/ `0`（本地）
 - StreamResolver 的 playurl 缓存 TTL：90 分钟
 - RecommendationPoolCache 的候选池 TTL：8 分钟
 - PlaybackHistoryStore 上限：300 条
+- PlaybackQueueStore 上限：200 首
 - 音质偏好：`UserDefaults.integer(forKey: "playbackQuality")`
 
 ## 数据模型
@@ -134,10 +155,14 @@
 - `PlaybackDiagnostics.swift`
 - `NetworkMonitor.swift`
 - `PlaybackHistoryStore.swift`
+- `PlaybackQueueStore.swift`
+- `LyricsStore.swift`
 
 ## 变更记录
 
 | 日期 | 变更 |
 |------|------|
+| 2026-08-19 | 冷启动恢复队列与进度；收藏/首页写入 cid；本地缓存命中会 touch。 |
+| 2026-08-19 | 起播加速：换曲复用 AVPlayer、拉流带 Cookie、点歌不抢网拉封面、自动缓存默认开启并在出声 1.5s 后落盘、慢启动 CDN 探测与等待并行。 |
 | 2026-07-27 | 全项目 review 修复 + 文档同步：新增 AudioCDNSelector / PlaybackDiagnostics；QueueController 签名改 `nextIndex(mode:queueCount:currentIndex:automatic:)`（repeatOne 手动切歌队尾回绕）；PlayerEngine freshRemote 重试、repeatOne 免重建、观察器清理、UI 测试 fixture 注入。 |
 | 2026-06-24 | 初始文档创建。 |

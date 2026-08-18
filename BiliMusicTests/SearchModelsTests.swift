@@ -160,74 +160,179 @@ final class SearchModelsTests: XCTestCase {
             TrackTitleFormatter.DisplayMetadata(title: "【4K修复】晴天 Official MV", artist: "音乐分享UP"))
     }
 
-    func testLyricsClientBuildsBroadDedupedSearchPlans() {
-        let client = LyricsClient()
-        let artists = client.artistCandidates(parsedArtist: "周杰伦", trackArtist: "音乐分享UP")
-        let plans = client.queryPlans(
+    func testMetingLyricsProviderUsesKugouForJayAndNeteaseOtherwise() {
+        XCTAssertEqual(MetingLyricsClient.preferredProvider(for: "周杰伦 - 晴天"), .kugou)
+        XCTAssertEqual(MetingLyricsClient.preferredProvider(for: "YOASOBI アイドル"), .netease)
+    }
+
+    func testMetingLyricsSearchKeywordUsesCleanTrackMetadataDirectly() async {
+        let track = Track(
+            bvid: "BVJAPAN",
+            title: "アイドル",
+            artist: "YOASOBI",
+            coverURL: nil,
+            duration: 213)
+
+        let keyword = await MetingLyricsClient().resolveSearchKeyword(for: track)
+
+        XCTAssertEqual(keyword, "アイドル-YOASOBI")
+    }
+
+    func testMetingLyricsRanksExactTitleAheadOfSameArtistWrongSong() {
+        let wrong = LyricsSearchResult(
+            provider: .netease,
+            id: "wrong",
+            title: "君は水、私は魚",
+            artist: "花譜",
+            album: nil,
+            duration: nil,
+            artworkID: nil)
+        let exact = LyricsSearchResult(
+            provider: .netease,
+            id: "exact",
+            title: "夏夜のマジック",
+            artist: "土岐麻子",
+            album: nil,
+            duration: nil,
+            artworkID: nil)
+
+        let ranked = MetingLyricsClient.rankedCandidates(
+            [wrong, exact],
+            keyword: "夏夜のマジック-花谱")
+
+        XCTAssertEqual(ranked.map(\.id), ["exact", "wrong"])
+    }
+
+    func testLyricsParserPrefersKaraokeWordsAndAlignsTranslation() throws {
+        let result = LyricsSearchResult(
+            provider: .netease,
+            id: "1",
             title: "晴天",
-            rawTitle: "【4K修复】周杰伦《晴天》Official MV",
-            artists: artists,
-            duration: 269)
+            artist: "周杰伦",
+            album: "叶惠美",
+            duration: 269,
+            artworkID: nil)
+        let document = LyricsDocument(
+            result: result,
+            lyric: "[00:28.95]故事的小黄花",
+            translatedLyric: "[00:28.95]The little yellow flower",
+            romanizedLyric: nil,
+            karaokeLyric: "[28950,1600](0,500,0)故事(500,400,0)的小(900,700,0)黄花",
+            karaokeTranslatedLyric: nil)
 
-        XCTAssertEqual(artists, ["周杰伦"])
-        XCTAssertTrue(plans.contains { plan in
-            if case .exactGet(track: "晴天", artist: "周杰伦", duration: 269) = plan.kind { return true }
-            return false
-        })
-        XCTAssertTrue(plans.contains { plan in
-            if case .searchText("晴天") = plan.kind { return true }
-            return false
-        })
-        XCTAssertTrue(plans.contains { plan in
-            if case .searchText("周杰伦 晴天") = plan.kind { return true }
-            return false
-        })
-        XCTAssertEqual(Set(plans).count, plans.count)
+        let line = try XCTUnwrap(LyricsParser.lines(from: document, duration: 269).first)
+
+        XCTAssertEqual(line.text, "故事的小黄花")
+        XCTAssertEqual(line.translation, "The little yellow flower")
+        XCTAssertEqual(line.words.map(\.text), ["故事", "的小", "黄花"])
+        XCTAssertEqual(try XCTUnwrap(line.words.first).from, 28.95, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(line.words.last).to, 30.55, accuracy: 0.001)
     }
 
-    func testLyricsClientMatchesLongerMVDurationWhenArtistMatches() throws {
-        let client = LyricsClient()
-        let candidate = LyricsClient.Candidate(
-            id: 1,
-            trackName: "晴天",
-            artistName: "周杰伦",
-            albumName: "叶惠美",
-            duration: 270,
-            instrumental: false,
-            syncedLyrics: nil,
-            plainLyrics: "故事的小黄花\n从出生那年就飘着")
+    func testLyricsParserExpandsMultipleLRCTimestamps() {
+        let result = LyricsSearchResult(
+            provider: .tencent,
+            id: "2",
+            title: "重复句",
+            artist: "歌手",
+            album: nil,
+            duration: 120,
+            artworkID: nil)
+        let document = LyricsDocument(
+            result: result,
+            lyric: "[00:01.00][00:05.50]同一句",
+            translatedLyric: nil,
+            romanizedLyric: nil,
+            karaokeLyric: nil,
+            karaokeTranslatedLyric: nil)
 
-        let best = try XCTUnwrap(client.bestCandidate(
-            [candidate],
-            songTitle: "晴天",
-            artists: ["周杰伦"],
-            duration: 304))
-        let lines = client.lyricLines(from: best, duration: 304)
+        let lines = LyricsParser.lines(from: document, duration: 120)
 
-        XCTAssertEqual(best.trackName, "晴天")
-        XCTAssertEqual(lines.map(\.text), ["故事的小黄花", "从出生那年就飘着"])
-        XCTAssertGreaterThan(lines[1].from, lines[0].from)
+        XCTAssertEqual(lines.map(\.text), ["同一句", "同一句"])
+        XCTAssertEqual(lines.map(\.from), [1, 5.5])
     }
 
-    func testLyricsClientUsesArtistEmbeddedInTitleForMVDurationTolerance() throws {
-        let client = LyricsClient()
-        let candidate = LyricsClient.Candidate(
-            id: 2,
-            trackName: "晴天",
-            artistName: "周杰伦",
-            albumName: "叶惠美",
-            duration: 270,
-            instrumental: false,
-            syncedLyrics: "[00:01.00]故事的小黄花",
-            plainLyrics: nil)
+    @MainActor
+    func testLyricsStorePersistsManualSelectionAndOffset() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LyricsStoreTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let fileURL = directory.appendingPathComponent("lyrics.json")
+        let track = Track(bvid: "BVLYRIC", cid: 42, title: "晴天", artist: "周杰伦", coverURL: nil, duration: 269)
+        let result = LyricsSearchResult(
+            provider: .kugou,
+            id: "hash",
+            title: "晴天",
+            artist: "周杰伦",
+            album: "叶惠美",
+            duration: 269,
+            artworkID: nil)
+        let document = LyricsDocument(
+            result: result,
+            lyric: "[00:01.00]故事的小黄花",
+            translatedLyric: nil,
+            romanizedLyric: nil,
+            karaokeLyric: nil,
+            karaokeTranslatedLyric: nil)
+        let store = LyricsStore(fileURLForTesting: fileURL)
 
-        let best = try XCTUnwrap(client.bestCandidate(
-            [candidate],
-            songTitle: "周杰伦 晴天",
-            artists: [],
-            duration: 304))
+        await store.save(document: document, offsetMilliseconds: 500, for: track)
 
-        XCTAssertEqual(best.artistName, "周杰伦")
+        let reloaded = LyricsStore(fileURLForTesting: fileURL)
+        let entry = await reloaded.entry(for: track)
+        XCTAssertEqual(entry?.document, document)
+        XCTAssertEqual(entry?.offsetMilliseconds, 500)
+    }
+
+    func testTrackMetadataStorePersistsAndResolverSkipsSecondOnlineNormalization() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TrackMetadataStoreTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let fileURL = directory.appendingPathComponent("track-metadata.json")
+        let dirtyTrack = Track(
+            bvid: "BVCLEAN",
+            cid: 88,
+            title: "【4K/中字】YOASOBI《アイドル》Official MV",
+            artist: "搬运UP",
+            coverURL: nil,
+            duration: 213)
+        let metadata = NormalizedTrackMetadata(
+            canonicalTitle: "アイドル",
+            artists: ["YOASOBI"],
+            performers: [],
+            uploader: "搬运UP",
+            language: "ja",
+            aliases: [],
+            searchQueries: ["アイドル YOASOBI"],
+            confidence: 0.98,
+            needsReview: false,
+            serviceVersion: "test-v1")
+        let firstNormalizer = CountingMetadataNormalizer(result: metadata)
+        let firstStore = TrackMetadataStore(fileURLForTesting: fileURL)
+        let firstResolver = TrackMetadataResolver(store: firstStore, normalizer: firstNormalizer)
+
+        let first = try await firstResolver.resolve(dirtyTrack)
+
+        XCTAssertEqual(first.title, "アイドル")
+        XCTAssertEqual(first.artist, "YOASOBI")
+        let firstCallCount = await firstNormalizer.callCount()
+        XCTAssertEqual(firstCallCount, 1)
+
+        let secondNormalizer = CountingMetadataNormalizer(result: metadata)
+        let reloadedStore = TrackMetadataStore(fileURLForTesting: fileURL)
+        let secondResolver = TrackMetadataResolver(store: reloadedStore, normalizer: secondNormalizer)
+        let second = try await secondResolver.resolve(dirtyTrack)
+
+        XCTAssertEqual(second.title, "アイドル")
+        XCTAssertEqual(second.artist, "YOASOBI")
+        let secondCallCount = await secondNormalizer.callCount()
+        XCTAssertEqual(secondCallCount, 0)
     }
 
     @MainActor
@@ -407,6 +512,22 @@ private enum SearchStoreTestError: LocalizedError {
     case pageFailed
 
     var errorDescription: String? { "page failed" }
+}
+
+private actor CountingMetadataNormalizer: TrackMetadataNormalizing {
+    private let result: NormalizedTrackMetadata
+    private var calls = 0
+
+    init(result: NormalizedTrackMetadata) {
+        self.result = result
+    }
+
+    func normalize(_ track: Track) async throws -> NormalizedTrackMetadata {
+        calls += 1
+        return result
+    }
+
+    func callCount() -> Int { calls }
 }
 
 private func makeTrack(

@@ -19,7 +19,7 @@ authoring_mode: ai_generated
 - 队列/推荐行只在触点总移动小于 8pt 时执行选择；横向拖动与纵向滚动不会在结束时误触发切歌，同时保留无障碍默认动作。
 - 纵向开合不再由 RootView 自制 offset/scale/弹簧状态机；标准紧凑浮动播放条和全屏页统一交给 LNPopupController 的 `.floatingCompact + .automatic` 交互管理。`.automatic` 在打开时使用 snap/transition target，在已展开的下滑关闭阶段保持跟手 drag。
 - 播放器封面容器是播放页中唯一的 `.popupTransitionTarget()`；从 mini player 展开和收回沿同一条 LNPopup 原生交互轨迹连续变形。
-- 用户指定的首页封面原位放大是另一条局部路径：首页保持 ScrollView 常驻，以唯一被点封面和播放页之间的 matched geometry 动画层负责放大与反向缩回。关闭第一帧先对动画层设置 `allowsHitTesting(false)`，因此缩回动画继续运行时，底层瀑布流已经可以滚动；动画结束后再恢复 LNPopup bar。该路径不常驻其他 Tab、不自绘底栏，也不在播放页添加全屏拖拽。
+- 首页封面点击不再使用独立转场路径：Home 只同步提交真实选曲并请求 RootView 打开 LNPopup。mini bar、full player、跟手关闭和 dock 收回由同一个 LNPopupController 生命周期管理；Home 不挂载第二个 `NowPlayingView`，也不维护动画状态或延时 Task。
 - `CADisableMinimumFrameDurationOnPhone=true` 已开启，LNPopupController 的交互 display link 也请求 `UIScreen.main.maximumFramesPerSecond`；ProMotion 门禁不是当前慢拖掉帧的根因。低电量模式或系统“限制帧率”仍可能将刷新率封顶。
 - 有当前歌曲时 LNPopup 维持 mini player 与全屏内容的统一生命周期；播放内容保持单页，队列页按需显示并使用 Lazy 容器渲染列表。
 - 主播放页只承担封面、元数据、进度和播放操作；队列明细只在独立队列页出现，避免重复信息和重复列表渲染。
@@ -38,7 +38,7 @@ authoring_mode: ai_generated
 ## 决策记录
 
 - 保留既有队列、合集和推荐能力；当前 Queue 与 AutoPlay 使用独立队列页，mini/full 纵向转场只由 LNPopupController 管理。
-- 保留用户提出的封面原位放大与反向缩回，但只用首页局部 matched geometry 动画层实现；动画层与 ScrollView 手势所有权分离。不要回到全 Tab 常驻、自绘底栏、重复播放状态或全屏拖拽方案。
+- 用户在真机使用后明确选择放弃封面原位 matched-geometry 转场：性能和稳定性优先，首页点击、mini/full 开合统一交给 LNPopup。不要重新引入 Home 第二播放器、自绘底栏、重复播放状态或全屏拖拽方案。
 - 用户明确拒绝近似的自制定时曲线后，纵向架构以 Apple Music 同类开源容器替换，不再继续调参模拟。
 - 用纯逻辑测试保护进度横向意图，用 UI 测试覆盖正常 scrub、抽屉列表滚动和播放器开合互不误触。
 - 实际播放队列归入独立队列页；主播放页不再用紧凑列表重复展示同一批歌曲。

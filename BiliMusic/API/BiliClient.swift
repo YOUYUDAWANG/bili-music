@@ -30,6 +30,16 @@ struct BiliClient {
         "Referer": "https://www.bilibili.com",
     ]
 
+    /// 拉音频/视频 CDN 时用的请求头。登录时附带 Cookie，部分线路没有它会更慢或直接 403。
+    static var playbackHeaders: [String: String] {
+        var headers = Self.headers
+        headers["Origin"] = "https://www.bilibili.com"
+        if let cookie = CookieStore.cookie, !cookie.isEmpty {
+            headers["Cookie"] = cookie
+        }
+        return headers
+    }
+
     // 默认 URLSession.shared 的请求超时是 60s——某个接口卡住时用户要干等一分钟,
     // 预取任务也会一直挂着。元数据接口都很轻,12s 足够,失败快速暴露。
     private static let session: URLSession = {
@@ -279,8 +289,24 @@ struct BiliClient {
     /// 偏好 0 = 最高(含 Hi-Res);否则选不超过偏好的最高一档。
     /// preferredQuality:0 = 最高(含 Hi-Res),否则选不超过该 id 的最高一档。播放/下载各传各的偏好。
     func audioStream(bvid: String, cid: Int, preferredQuality pref: Int) async throws -> AudioStream {
+        do {
+            return try await audioStreamOnce(bvid: bvid, cid: cid, preferredQuality: pref)
+        } catch let error as APIError where error.code == -403 {
+            await WBISigner.invalidateCachedKey()
+            return try await audioStreamOnce(bvid: bvid, cid: cid, preferredQuality: pref)
+        }
+    }
+
+    private func audioStreamOnce(bvid: String, cid: Int, preferredQuality pref: Int) async throws -> AudioStream {
+        let query = try await WBISigner.sign([
+            "bvid": bvid,
+            "cid": String(cid),
+            "fnval": "16",
+            "fnver": "0",
+            "fourk": "1",
+        ])
         let info: PlayInfo = try await get(
-            "https://api.bilibili.com/x/player/playurl?bvid=\(bvid)&cid=\(cid)&fnval=16&fourk=1")
+            "https://api.bilibili.com/x/player/wbi/playurl?\(query)")
         guard let dash = info.dash, let audios = dash.audio, !audios.isEmpty else {
             throw APIError(code: -1, message: "无 DASH 音频流")
         }
@@ -615,12 +641,25 @@ struct BiliClient {
     /// 收藏夹内的一条内容（attr≠0 表示已失效）。
     struct FavItem: Decodable {
         struct Upper: Decodable { let name: String }
+        struct UGC: Decodable {
+            let firstCID: Int?
+            enum CodingKeys: String, CodingKey { case firstCID = "first_cid" }
+        }
         let bvid: String
         let title: String
         let cover: String
         let duration: Int
         let upper: Upper
         let attr: Int   // 非 0 = 已失效
+        let cid: Int?
+        let ugc: UGC?
+
+        /// 收藏列表常见 `ugc.first_cid`；部分响应也会带顶层 `cid`。
+        var resolvedCID: Int? {
+            if let cid, cid > 0 { return cid }
+            if let firstCID = ugc?.firstCID, firstCID > 0 { return firstCID }
+            return nil
+        }
     }
 
     /// 收藏夹内容分页。

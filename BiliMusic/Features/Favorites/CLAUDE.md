@@ -49,7 +49,7 @@ B 站收藏夹的浏览和管理。将 B 站收藏夹当歌单使用，支持分
 ## 数据模型
 
 - `BiliClient.FavFolder` — 收藏夹（id, title, media_count）
-- `BiliClient.FavItem` — 收藏内容（bvid, title, cover, duration, upper, attr）
+- `BiliClient.FavItem` — 收藏内容（bvid, title, cover, duration, upper, attr, `resolvedCID`）
 
 ## 相关文件清单
 
@@ -60,4 +60,5 @@ B 站收藏夹的浏览和管理。将 B 站收藏夹当歌单使用，支持分
 
 | 日期 | 变更 |
 |------|------|
+| 2026-08-19 | 收藏内容映射 `Track(fav:)`，带上 `ugc.first_cid`。 |
 | 2026-06-24 | 初始文档创建。 |

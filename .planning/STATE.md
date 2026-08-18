@@ -6,9 +6,9 @@ current_phase: 4
 current_phase_name: Interface Cohesion and Search Polish
 status: complete
 stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-08-14T00:00:00Z"
-last_activity: 2026-08-14
-last_activity_desc: Made cover reverse animation and waterfall gestures run concurrently while keeping the system Tab Bar visible
+last_updated: "2026-08-19T00:00:00Z"
+last_activity: 2026-08-19
+last_activity_desc: Migrated the metadata Worker from Workers AI to private gpt-5.6-luna and verified live latency and accuracy; iOS integration remains pending
 progress:
   total_phases: 4
   completed_phases: 4
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-27)
 
 **Core value:** 让音乐尽快、稳定地响起来；当功能冲突时，播放启动速度和不中断播放优先于推荐、歌词、MV、UI 动效和其他增强体验。
-**Current focus:** Validate the finalized waterfall, nonblocking cover transition layer, fixed system Tab Bar, and LNPopup performance on device
+**Current focus:** Replace the iOS BM resolver with the deployed private metadata Worker, then validate lyrics and the finalized player flow on device
 
 ## Current Position
 
 Phase: 4 — Interface Cohesion and Search Polish
 Plan: 1 of 1 — 04-01
 Status: Complete
-Last activity: 2026-08-14 — Preserved cover-origin expansion and reverse shrink while letting Home scroll during close, and stopped the native Tab Bar from minimizing under the mini player
+Last activity: 2026-08-19 — Migrated the Japanese-safe metadata Worker to private gpt-5.6-luna via chat-json-object, removed Workers AI usage, and verified live samples and KV latency; the iOS app has not switched endpoints yet
 
 Progress: [##########] 100%
 
@@ -59,13 +59,13 @@ track identity, persistence ordering, and memory bounds.
 ### Remaining P2 work
 
 - Split `PlayerEngine`, `NowPlayingView`, and `BiliClient` only in a dedicated phase with real-device gates.
-- Add versioned persistence envelopes, corrupt-file quarantine, cache orphan repair, disk quota, and LRU eviction.
+- Add versioned persistence envelopes and corrupt-file quarantine beyond the current queue/cache JSON files.
 - Add a shared authentication-expiry state instead of waiting for a protected request to reveal stale cookies.
 - Replace broad ATS allowance after real Bilibili CDN host/scheme capture.
-- Make initial search results incremental instead of waiting for all first-batch pages.
 - Resolve Swift 6 strict-concurrency warnings before changing the project language mode.
 - Validate Dolby response schema and full-screen DASH MV support against real API samples before exposing them
   as guaranteed quality paths.
+- Independent `CoverTile` plus smaller 1200w home thumbnails, if visual QA still shows decode/layout cost.
 
 ### Verification
 
@@ -111,6 +111,7 @@ Recent decisions affecting current work:
 - [v1]: Project mode is MVP; phases are vertical stabilization slices rather than broad subsystem rewrites.
 - [v1]: Phase 1 prioritizes first sound, first-play recommendation stability, search focus responsiveness, and memory/image guardrails.
 - [v1]: Broader API/auth/cache hardening stays in v2 unless a narrow change is required for v1 stability.
+- [post-v1]: Lyrics now use BM only for title normalization, then query NetEase/Kugou/QQ directly; LRCLIB scoring is retired and manual source selection remains the recovery path.
 - [01-02]: First playback now assigns current before awaited source resolution and reaches AVPlayer through cache, prepared audio, or one fresh stream only.
 - [01-02]: Prepared remote audio failure invalidates matching/fallback resolver entries and retries one fresh stream without a second user tap.
 - [01-03]: Search focus and typing stay local; Bilibili search starts from explicit submit, retry, broaden, or pagination only.

@@ -229,6 +229,55 @@ final class PlaybackCriticalPathTests: XCTestCase {
         XCTAssertFalse(events.contains(.autoCacheScheduled))
     }
 
+    func testFirstObservedPlayingSchedulesAutoCacheAfterFirstSoundWhenEnabled() async {
+        let defaults = UserDefaults.standard
+        let previousAutoCache = defaults.object(forKey: PlaybackPreferences.autoCacheKey)
+        defaults.set(true, forKey: PlaybackPreferences.autoCacheKey)
+        defer {
+            if let previousAutoCache {
+                defaults.set(previousAutoCache, forKey: PlaybackPreferences.autoCacheKey)
+            } else {
+                defaults.removeObject(forKey: PlaybackPreferences.autoCacheKey)
+            }
+        }
+        let track = Self.track()
+        let cached = Self.stream(
+            url: URL(string: "https://example.invalid/remote.m4s")!,
+            cid: 1001,
+            duration: 211,
+            quality: 30280,
+            bandwidth: 192_000)
+        let resolver = CriticalPathAudioResolver(
+            cached: cached,
+            prepared: cached)
+        var events: [PlayerEngine.PlaybackStartupTestEvent] = []
+        let engine = PlayerEngine(
+            streamResolver: resolver,
+            startupTestHooks: .init(
+                record: { events.append($0) },
+                startPlaybackOverride: { _, _, _ in },
+                reportFirstPlayingImmediately: true))
+
+        await engine.play(tracks: [track], startAt: 0)
+
+        let firstPlayingIndex = events.firstIndex(of: .firstPlaying(.preparedRemote))
+        let autoCacheIndex = events.firstIndex(of: .autoCacheScheduled)
+        XCTAssertNotNil(firstPlayingIndex)
+        XCTAssertNotNil(autoCacheIndex)
+        XCTAssertLessThan(firstPlayingIndex!, autoCacheIndex!)
+    }
+
+    func testPlaybackHeadersIncludeBrowserIdentityAndOptionalCookie() {
+        let headers = BiliClient.playbackHeaders
+        XCTAssertEqual(headers["User-Agent"], BiliClient.headers["User-Agent"])
+        XCTAssertEqual(headers["Referer"], BiliClient.headers["Referer"])
+        XCTAssertEqual(headers["Origin"], "https://www.bilibili.com")
+        if let cookie = headers["Cookie"] {
+            XCTAssertFalse(cookie.isEmpty)
+            XCTAssertFalse(cookie.localizedCaseInsensitiveContains("\n"))
+        }
+    }
+
     func testFirstObservedPlayingSchedulesUpcomingTrackPrewarmAfterFirstPlaying() async throws {
         let current = Self.track()
         let next = Self.track(bvid: "BVPATH002", cid: 1002)

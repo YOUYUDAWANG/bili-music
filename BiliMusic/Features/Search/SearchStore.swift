@@ -303,8 +303,7 @@ final class SearchStore {
     }
 
     func shouldShowResults(query: String) -> Bool {
-        !searching
-            && !results.isEmpty
+        !results.isEmpty
             && query.trimmingCharacters(in: .whitespacesAndNewlines) == resultsQuery
     }
 
@@ -365,37 +364,92 @@ final class SearchStore {
                 refreshingFromCache = false
             }
         }
-        do {
-            let keywords = Self.searchKeywords(for: text)
-            let pageStart = 1
-            let pageCount = 3
-            let batch = try await Self.searchBatch(
-                searchPage: searchPage,
-                keywords: keywords,
-                pages: pageStart...(pageStart + pageCount - 1),
-                query: text,
-                mode: requestMode)
-
-            guard !Task.isCancelled,
-                  activeSearchID == searchID,
-                  activeQuery == text,
-                  mode == requestMode else { return }
-            results = batch.tracks
-            sections = SearchResultSections.make(from: batch.tracks)
-            resultsQuery = text
-            activeQuery = text
-            activeKeywords = keywords
-            nextPage = pageStart + pageCount
-            hasMoreResults = batch.rawCount > 0 && nextPage <= 30
-            cacheCurrentSnapshot()
-            preload(batch.tracks)
-        } catch {
-            guard !Task.isCancelled,
-                  activeSearchID == searchID,
-                  activeQuery == text,
-                  mode == requestMode else { return }
-            errorMessage = error.localizedDescription
-        }
+        let keywords = Self.searchKeywords(for: text)
+        let pages = 1...3
+        let fetchPage = searchPage
+            var expectedOrders: [Int] = []
+            expectedOrders.reserveCapacity(keywords.count * pages.count)
+            await withTaskGroup(of: SearchPageResult.self) { group in
+                for (keywordIndex, keyword) in keywords.enumerated() {
+                    for page in pages {
+                        let order = keywordIndex * 1_000 + page
+                        expectedOrders.append(order)
+                        group.addTask {
+                            do {
+                                return SearchPageResult(
+                                    order: order,
+                                    tracks: try await fetchPage(keyword, page, requestMode.usesBiliMusicOnlySearch),
+                                    errorMessage: nil)
+                            } catch {
+                                return SearchPageResult(
+                                    order: order,
+                                    tracks: nil,
+                                    errorMessage: error.localizedDescription)
+                            }
+                        }
+                    }
+                }
+                var collected: [Int: [Track]] = [:]
+                var failed = Set<Int>()
+                var firstError: String?
+                var didPreload = false
+                for await pageResult in group {
+                    guard !Task.isCancelled,
+                          activeSearchID == searchID,
+                          activeQuery == text,
+                          mode == requestMode else {
+                        group.cancelAll()
+                        return
+                    }
+                    if let tracks = pageResult.tracks {
+                        collected[pageResult.order] = tracks
+                    } else {
+                        failed.insert(pageResult.order)
+                        firstError = firstError ?? pageResult.errorMessage
+                    }
+                    let rawTracks = Self.contiguousRawTracks(
+                        collected: collected,
+                        failed: failed,
+                        expectedOrders: expectedOrders)
+                    guard !rawTracks.isEmpty else { continue }
+                    let filtered = await Self.filteredSearchTracks(
+                        rawTracks,
+                        query: text,
+                        mode: requestMode)
+                    guard !Task.isCancelled,
+                          activeSearchID == searchID,
+                          activeQuery == text,
+                          mode == requestMode else {
+                        group.cancelAll()
+                        return
+                    }
+                    results = filtered
+                    sections = SearchResultSections.make(from: filtered)
+                    resultsQuery = text
+                    activeQuery = text
+                    activeKeywords = keywords
+                    errorMessage = nil
+                    if !didPreload, !filtered.isEmpty {
+                        didPreload = true
+                        preload(filtered)
+                    }
+                }
+                guard !Task.isCancelled,
+                      activeSearchID == searchID,
+                      activeQuery == text,
+                      mode == requestMode else { return }
+                if collected.isEmpty {
+                    errorMessage = firstError ?? "搜索请求失败"
+                    return
+                }
+                nextPage = pages.upperBound + 1
+                let rawCount = collected.values.reduce(0) { $0 + $1.count }
+                hasMoreResults = rawCount > 0 && nextPage <= 30
+                cacheCurrentSnapshot()
+                if !results.isEmpty {
+                    preload(results)
+                }
+            }
     }
 
     private func cacheCurrentSnapshot() {
@@ -478,12 +532,36 @@ final class SearchStore {
                 message: pageResults.compactMap(\.errorMessage).first ?? "搜索请求失败")
         }
         let pageItems = successfulPages.flatMap { $0 }
-        let filtered = await Task.detached(priority: .userInitiated) {
-            dedupeSearchTracks(pageItems
-                .filter { !excluded.contains($0.bvid) }
-                .filter { MusicFilter.isSearchResult($0, query: query, mode: mode) })
-        }.value
+        let filtered = await filteredSearchTracks(pageItems.filter { !excluded.contains($0.bvid) }, query: query, mode: mode)
         return SearchBatch(tracks: filtered, rawCount: pageItems.count)
+    }
+
+    private static func filteredSearchTracks(
+        _ tracks: [Track],
+        query: String,
+        mode: SearchResultMode
+    ) async -> [Track] {
+        await Task.detached(priority: .userInitiated) {
+            dedupeSearchTracks(tracks.filter { MusicFilter.isSearchResult($0, query: query, mode: mode) })
+        }.value
+    }
+
+    private static func contiguousRawTracks(
+        collected: [Int: [Track]],
+        failed: Set<Int>,
+        expectedOrders: [Int]
+    ) -> [Track] {
+        var raw: [Track] = []
+        for order in expectedOrders {
+            if let tracks = collected[order] {
+                raw.append(contentsOf: tracks)
+            } else if failed.contains(order) {
+                continue
+            } else {
+                break
+            }
+        }
+        return raw
     }
 
     private static func defaultSearchPage(keyword: String, page: Int, musicOnly: Bool) async throws -> [Track] {

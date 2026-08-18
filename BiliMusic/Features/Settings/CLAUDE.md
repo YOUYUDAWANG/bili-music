@@ -21,7 +21,7 @@
 | 账号 | 扫码登录 / 退出登录 | Keychain (CookieStore) |
 | 音乐资料库 | 首页音乐收藏夹选择器 | `UserDefaults.recommendFolderId` |
 | 音质 | 播放音质、下载音质 | `UserDefaults.playbackQuality` / `downloadQuality` |
-| 缓存 | 自动缓存开关 | `UserDefaults.autoCache` |
+| 缓存 | 自动缓存开关（默认开） | `UserDefaults.autoCache` |
 | 播放 | Wi-Fi 优先 MV、播放历史入口 | `UserDefaults.preferMVOnWiFi` |
 
 ### QRLoginView
@@ -52,4 +52,5 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-08-19 | 自动缓存默认开启。 |
 | 2026-06-24 | 初始文档创建。 |

@@ -728,7 +728,7 @@ struct NowPlayingView: View {
     private var appleMusicUtilityBar: some View {
         HStack {
             Button {
-                guard !engine.lyrics.isEmpty else { return }
+                guard engine.current != nil else { return }
                 showLyrics = true
             } label: {
                 Image(systemName: engine.lyrics.isEmpty ? "quote.bubble" : "quote.bubble.fill")
@@ -737,9 +737,9 @@ struct NowPlayingView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(engine.lyrics.isEmpty)
-            .opacity(engine.lyrics.isEmpty ? 0.34 : 0.76)
-            .accessibilityLabel(engine.lyrics.isEmpty ? "暂无歌词" : "歌词")
+            .disabled(engine.current == nil)
+            .opacity(engine.current == nil ? 0.34 : 0.76)
+            .accessibilityLabel(engine.lyrics.isEmpty ? "查找歌词" : "歌词")
 
             Spacer()
 
@@ -1318,15 +1318,16 @@ struct NowPlayingView: View {
 
     private var lyricsButton: some View {
         let hasLyrics = !engine.lyrics.isEmpty
+        let canOpen = engine.current != nil
         return PlayerToolbarActionButton(
-            title: hasLyrics ? "歌词" : "暂无歌词",
+            title: hasLyrics ? "歌词" : "查找歌词",
             systemName: hasLyrics ? "quote.bubble.fill" : "quote.bubble",
             isActive: showLyrics && hasLyrics,
-            isEnabled: hasLyrics,
-            accessibilityLabel: hasLyrics ? "歌词" : "暂无歌词",
-            accessibilityValue: hasLyrics ? "可打开" : "不可用"
+            isEnabled: canOpen,
+            accessibilityLabel: hasLyrics ? "歌词" : "查找歌词",
+            accessibilityValue: canOpen ? "可打开" : "不可用"
         ) {
-            guard hasLyrics else { return }
+            guard canOpen else { return }
             showLyrics = true
         }
     }
@@ -1475,9 +1476,9 @@ struct NowPlayingView: View {
                 Button {
                     showLyrics = true
                 } label: {
-                    Label(hasLyrics ? "打开歌词" : "暂无歌词", systemImage: hasLyrics ? "quote.bubble.fill" : "quote.bubble")
+                    Label(hasLyrics ? "打开歌词" : "查找歌词", systemImage: hasLyrics ? "quote.bubble.fill" : "quote.bubble")
                 }
-                .disabled(!hasLyrics)
+                .disabled(track == nil)
             }
 
             Section("播放模式") {

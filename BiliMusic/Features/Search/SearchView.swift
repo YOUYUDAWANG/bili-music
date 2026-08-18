@@ -86,15 +86,19 @@ struct SearchView: View {
                     coverShelf(title: "最近播放", subtitle: "继续听上次打开过的歌曲", tracks: content.recentTracks)
                     coverShelf(title: "已缓存", subtitle: "离线也能播放", tracks: content.cachedTracks)
                 }
+            } else if store.shouldShowResults(query: query), let sections = store.sections {
+                resultSections(sections)
+                if store.searching {
+                    loadingRow
+                } else {
+                    paginationControl
+                }
             } else if store.searching {
                 loadingRow
             } else if let errorMessage = store.errorMessage {
                 errorRow(errorMessage)
             } else if store.shouldShowNoResults(query: query) {
                 noResultsRow
-            } else if store.shouldShowResults(query: query), let sections = store.sections {
-                resultSections(sections)
-                paginationControl
             }
         }
     }

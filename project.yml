@@ -38,8 +38,18 @@ targets:
         UILaunchScreen: {}
         UIBackgroundModes: [audio]
         CADisableMinimumFrameDurationOnPhone: true
+        BiliMusicMetadataAPIURL: $(BILIMUSIC_METADATA_API_URL)
+        BiliMusicMetadataAPIKey: $(BILIMUSIC_METADATA_API_KEY)
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
+    postBuildScripts:
+      - name: Inject metadata Worker access token from macOS Keychain
+        basedOnDependencyAnalysis: false
+        script: |
+          if metadata_worker_token="$(security find-generic-password -a BiliMusic -s com.youyudawang.BiliMusic.metadata-api -w 2>/dev/null)"; then
+            /usr/libexec/PlistBuddy -c "Set :BiliMusicMetadataAPIKey ${metadata_worker_token}" "${TARGET_BUILD_DIR}/${INFOPLIST_PATH}"
+            unset metadata_worker_token
+          fi
   BiliMusicTests:
     type: bundle.unit-test
     platform: iOS

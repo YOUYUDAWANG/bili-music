@@ -8,7 +8,6 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var isPopupBarPresented = false
     @State private var isPopupOpen = false
-    @State private var isCoverPlayerPresented = false
     @State private var showSettings = false
     @State private var selectedTab = 0
 
@@ -42,12 +41,6 @@ struct RootView: View {
             }
             .onChange(of: engine.current?.id) { _, trackID in
                 if trackID == nil {
-                    isPopupOpen = false
-                }
-                syncPopupPresentation()
-            }
-            .onChange(of: isCoverPlayerPresented) { _, isPresented in
-                if isPresented {
                     isPopupOpen = false
                 }
                 syncPopupPresentation()
@@ -87,7 +80,15 @@ struct RootView: View {
                     if ProcessInfo.processInfo.environment["BILIMUSIC_UITEST_OPEN_FULL_PLAYER"] != nil {
                         isPopupOpen = true
                     }
+                } else {
+                    await engine.restorePersistedQueueIfNeeded()
+                    isPopupBarPresented = engine.current != nil
+                    await CacheStore.shared.enforceRetentionLimit()
                 }
+#else
+                await engine.restorePersistedQueueIfNeeded()
+                isPopupBarPresented = engine.current != nil
+                await CacheStore.shared.enforceRetentionLimit()
 #endif
                 if let bv = ProcessInfo.processInfo.environment["AUTOPLAY_BV"] {
 #if DEBUG
@@ -117,7 +118,7 @@ struct RootView: View {
             Tab("音乐", systemImage: "square.grid.2x2", value: 0) {
                 HomeView(
                     showSettings: $showSettings,
-                    isCoverPlayerPresented: $isCoverPlayerPresented
+                    openPlayer: openPopupPlayer
                 )
             }
 
@@ -138,7 +139,13 @@ struct RootView: View {
     }
 
     private func syncPopupPresentation() {
-        isPopupBarPresented = engine.current != nil && !isCoverPlayerPresented
+        isPopupBarPresented = engine.current != nil
+    }
+
+    private func openPopupPlayer() {
+        guard engine.current != nil else { return }
+        isPopupBarPresented = true
+        isPopupOpen = true
     }
 }
 
@@ -203,6 +210,7 @@ enum AppResourceCleanup {
         ImageMemoryCache.shared.releaseReloadableImages()
         try? await CacheStore.shared.flush()
         await PlaybackHistoryStore.shared.flush()
+        await engine.flushPlaybackQueue()
         await engine.handleScenePhase(isBackground: true)
     }
 

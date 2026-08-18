@@ -173,7 +173,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 
 ## 架构
 
-单 Module 的 SwiftUI app，iOS 26.0+（部署目标有意保持 26.0），`@Observable` MVVM。网络和播放层只用 URLSession + AVPlayer。首页封面到播放器使用 Home 局部 matched geometry 动画层；mini player 的展开、跟手下滑和收回继续使用项目内 vendored 的 MIT 依赖 LNPopupUI/LNPopupController。
+单 Module 的 SwiftUI app，iOS 26.0+（部署目标有意保持 26.0），`@Observable` MVVM。网络和播放层只用 URLSession + AVPlayer。首页封面、mini player 与全屏播放器的展开、跟手下滑和收回统一使用项目内 vendored 的 MIT 依赖 LNPopupUI/LNPopupController。
 
 ### 全局状态
 
@@ -194,15 +194,15 @@ B 站视频可以有多个分 P（cid），缓存和去重不能只按 bvid。`T
 
 ### API 层（`BiliMusic/API/`）
 
-- **`BiliClient`** —— 所有 B站接口。每个请求都必须带上 `BiliClient.headers`（Referer + 浏览器 UA），否则 CDN 返回 403。存在 Cookie（`CookieStore.cookie`）时一并附上。包含：视频信息、音频流、搜索（WBI）、相关推荐、字幕、扫码登录、收藏夹 CRUD、UP 主合集/系列、首页推荐流、用户信息。
+- **`BiliClient`** —— 所有 B站接口。每个请求都必须带上 `BiliClient.headers`（Referer + 浏览器 UA），否则 CDN 返回 403。存在 Cookie（`CookieStore.cookie`）时一并附上。音频流走 WBI `/x/player/wbi/playurl`；真正拉 CDN 时用 `playbackHeaders`（额外带 Origin 与 Cookie）。包含：视频信息、音频流、搜索（WBI）、相关推荐、字幕、扫码登录、收藏夹 CRUD、UP 主合集/系列、首页推荐流、用户信息。
 - **`WBISigner`** —— 搜索和首页推荐接口需要 WBI 签名。用 nav 接口的 img/sub key + 64 字符重排表混淆 → mixin key → 参数排序 + wts + MD5。key 缓存 12 小时。启动时调用 `WBISigner.prewarm()`。
-- **`LyricsClient`** —— 仅用 LRCLIB。不 fallback 到 B站字幕（自动 CC 会产生「♪音乐♪」噪声）。从标题解析真实歌名/歌手 → LRCLIB 搜索 → 歌名相似 + 时长（差 ≤12 秒）双门槛匹配 → LRC 解析。
+- **`MetingLyricsClient` / `TrackTitleParser`** —— 复用 AprDeci BiliMusic 的歌词路径：先由 BM `/ai` 把 B 站标题整理为“歌名-歌手”关键词，再直连网易云、酷狗或 QQ 音乐搜索并解析 LRC/翻译/逐字歌词；不 fallback 到 B 站字幕。自动匹配只做标题/歌手一致性排序，LRCLIB 与其评分系统已移除。
 - 音质 ID：`30216`=64K，`30232`=132K，`30280`=192K，`30250`=杜比，`30251`=Hi-Res。权威清单是 `BiliClient.qualityOptions` —— 各处引用它，不要重复定义。
 - URLSession 超时设为 12s（metadata 接口轻量），`waitsForConnectivity = true`。GET 方法走统一信封解析、解码在后台 Task 执行。
 
 ### 播放器（`BiliMusic/Player/`）
 
-- **`PlayerEngine`** —— `@Observable @MainActor`。持有 `AVPlayer`、队列（`[Track]`）、`queueIndex`、播放状态、歌词以及 MV/音乐模式。核心方法：`play(tracks:startAt:)`、`playRadio(seed:)`、`playNext()`、`playPrevious()`、`jump(to:)`、`togglePlayPause()`。真正的状态通过 `player.timeControlStatus` KVO 同步 UI（`.playing`、`.paused`（用户主动 vs 缓冲断流）、`.waitingToPlayAtSpecifiedRate`）。`isScrubbing` 标志位防止拖动进度条时时间观察器与手势冲突。`preload(tracks:)` 支持批量预取；`schedulePreload(_:)` 供列表滚动时按需预加载。
+- **`PlayerEngine`** —— `@Observable @MainActor`。持有可复用的 `AVPlayer`、队列（`[Track]`）、`queueIndex`、播放状态、歌词以及 MV/音乐模式。换曲只替换 `AVPlayerItem`，不重建 player。核心方法：`play(tracks:startAt:)`、`playRadio(seed:)`、`playNext()`、`playPrevious()`、`jump(to:)`、`togglePlayPause()`。真正的状态通过 `player.timeControlStatus` KVO 同步 UI（`.playing`、`.paused`（用户主动 vs 缓冲断流）、`.waitingToPlayAtSpecifiedRate`）。`isScrubbing` 标志位防止拖动进度条时时间观察器与手势冲突。`preload(tracks:)` 支持批量预取；`schedulePreload(_:)` 供列表滚动时按需预加载。
 - **`QueueController`** —— static 枚举，纯粹的队列操作函数：`nextIndex(mode:queueCount:currentIndex:)`（计算下一曲下标）、`appendUnique(_:to:)`（去重追加）、`remove(at:from:currentIndex:)`（删除并维护当前下标）。不持有状态，纯函数式。
 - **`QueueMode`**：`.sequential`、`.shuffle`、`.repeatOne`、`.radio`。电台模式在当前歌曲开始播放后，通过 `RecommendationEngine` 预取下一首（`scheduleRadioPrefetch()` 延迟 700ms 触发）。
 - **`RecommendationEngine`** —— 无状态 struct，`@MainActor`。三种模式：`.home`、`.radio`、`.relatedPanel`。从收藏夹（随机页）、相关推荐视频（`BiliClient.related`）、播放历史、歌单相邻曲目中取候选；用 `scoredPool`（确定性打分 + ±10 随机扰动）排序，`weightedSample`（Efraimidis–Spirakis 算法）加权随机抽样。缓存打分的候选池（8 分钟 TTL），每次调用从池子重新加权抽样（所以「换一批」每次结果不同）。`nextRadioTrack(after:excludedKeys:)` 取最佳下一首（不缓存、不随机）。
@@ -210,6 +210,8 @@ B 站视频可以有多个分 P（cid），缓存和去重不能只按 bvid。`T
 - **`StreamResolver`** —— `@MainActor` class。负责把 Track 解析成可播放的音频流，维护短期 playurl 内存缓存（90 分钟 TTL）。`prepareAudio(for:preferredQuality:)` 返回 `PreparedAudioStream`（url, cid, duration, quality, bandwidth）。内部维护 `preparingStreams` 字典去重并发。`resolveCidDuration` 在 cid/duration 缺失时补全。
 - **`NetworkMonitor`** —— `@Observable` 单例。用 `NWPathMonitor` 监测 `isWiFi` 状态，供「Wi-Fi 优先 MV」策略判断。
 - **`PlaybackHistoryStore.shared`** —— `@Observable` 单例。JSON 存于 `Documents/playback-history.json`，上限 300 条。`record(_:)` 防抖写盘（1s 延迟）；`flush()` 立即写盘。后台 decode/encode。
+- **`PlaybackQueueStore.shared`** —— 冷启动恢复队列、下标、播放模式和进度；JSON 存于 `Documents/playback-queue.json`，最多 200 首（保留当前曲附近窗口）。只持久化 bvid/cid/元数据，不保存流 URL；电台恢复为顺序播放、暂停待命，不自动续播。
+- **`LyricsStore.shared`** —— 歌词候选、来源与用户校准偏移持久化到 `Documents/lyrics-library.json`，上限 300 条；换曲优先读本地，避免重复请求 BM 与歌词平台。
 
 ### 鉴权（`BiliMusic/Auth/`）
 
@@ -217,7 +219,7 @@ B 站视频可以有多个分 P（cid），缓存和去重不能只按 bvid。`T
 
 ### 缓存（`BiliMusic/Cache/`）
 
-- **`CacheStore.shared`** —— `@Observable`。JSON 索引在 `Documents/cache_index.json`；音频文件在 `Documents/audio/{bvid}_{cid}.m4a`。`entry(for:)` 精确到 cid，多分 P 时 `ambiguousBVIDs` 避免误匹配。`add(_:)` / `remove(_:)` / `removeAll()`。防抖写盘。后台 decode/encode。
+- **`CacheStore.shared`** —— `@Observable`。JSON 索引在 `Documents/cache_index.json`；音频文件在 `Documents/audio/{bvid}_{cid}.m4a`。`entry(for:)` 精确到 cid，多分 P 时 `ambiguousBVIDs` 避免误匹配。`addPersisting` / `remove` / `removeAll`。上限 120 首，按访问时间 LRU 淘汰，不删正在播放或正在下载的文件；命中本地缓存会 `touch`。防抖写盘。后台 decode/encode。自动缓存默认开启，出声约 1.5s 后后台落盘，下次优先本地起播。
 - **`DownloadManager.shared`** —— `@Observable` 单例。用 `URLSessionDownloadTask`（不是 `AsyncBytes`）。下载时带 `BiliClient.headers`。`progress` 字典暴露下载进度。`download(track:)` 补全 cid → 取流 → 下载 → 写索引。`preferredQuality` 从 `UserDefaults.integer(forKey: "downloadQuality")` 读。
 
 ### 设计（`BiliMusic/Design/`）
@@ -227,17 +229,17 @@ B 站视频可以有多个分 P（cid），缓存和去重不能只按 bvid。`T
 
 ### 功能页（`BiliMusic/Features/`）
 
-- **`RootView`** —— 原生 `TabView` + LNPopupUI 标准紧凑浮动播放条。LNPopupController 以 `.floatingCompact + .automatic` 承载从 mini player 打开的 `NowPlayingView`；首页走封面原位转场时暂时隐藏 popup，反向缩回完成后再恢复，避免双播放器和底部重叠。Tab Bar 固定不随滚动最小化，确保有 mini player 时四个系统 Tab 仍持续可见。popup item 不订阅播放进度。`ScenePhase.inactive` 只准备系统快照，真正进入 `.background` 才释放可重载图片、flush 持久化并切换 MV。
+- **`RootView`** —— 原生 `TabView` + LNPopupUI 标准紧凑浮动播放条。LNPopupController 以 `.floatingCompact + .automatic` 统一承载首页封面点击、mini player 和 `NowPlayingView` 的完整开合生命周期；Home 不再创建第二套播放器或转场状态。Tab Bar 固定不随滚动最小化，确保有 mini player 时四个系统 Tab 仍持续可见。popup item 不订阅播放进度。启动时在 UI 测试 fixture 之外恢复上次队列（暂停、显示 mini player）。`ScenePhase.inactive` 只准备系统快照，真正进入 `.background` 才释放可重载图片、flush 持久化并切换 MV。
 - **`NowPlayingView`** —— “横版影像唱片机”的沉浸页：16:9 封面接近屏幕边缘，标题与歌手沿封面左缘排布，背景是从封面派生的干净双色光场；竖屏 Queue 与 AutoPlay 使用工具栏打开的独立队列页。mini player 路径的纵向开合只由 LNPopupController 拥有，播放页不叠加全屏关闭手势；MV、收藏、歌词、音质与播放模式行为保持不变。
-- **`HomeView`** —— 纯粹的私人海报瀑布流，不生成推荐、不在封面上叠标题。真实 16:9 封面按“1 张全宽 + 4 张双列”连续纵向排列；页面使用 8pt 外边距、4pt 组内、8pt 组间和 4pt 圆角，顶部操作收在右侧单一 Liquid Glass 胶囊。点击封面以同一帧提交真实播放选择，再用局部 matched geometry 动画层从被点封面原位展开并反向缩回；关闭第一帧让动画层停止命中测试，使常驻的 ScrollView 能与缩回动画同时交互。不常驻其他 Tab，不自绘底栏，不给播放器叠加全屏拖拽手势。
+- **`HomeView`** —— 纯粹的私人海报瀑布流，不生成推荐、不在封面上叠标题。真实 16:9 封面按“1 张全宽 + 4 张双列”连续纵向排列；页面使用 8pt 外边距、4pt 组内、8pt 组间和 4pt 圆角，顶部操作收在右侧单一 Liquid Glass 胶囊。点击封面以同一帧提交真实播放选择并请求 RootView 打开同一个 LNPopup 播放器；Home 不持有播放器视图、动画 Task 或 matched geometry 状态。收藏夹条目带 `ugc.first_cid` 时写入 `Track.cid`；封面快照按 bvid 去重并优先保留已有 cid。
 - **`RecentHomeFeedStore`** —— 首页去重专用。bvid → 最近展示时间，JSON 落盘（`home-recent.json`），1s 防抖写盘。TTL 3h，max 400 条。
 - **`SearchView`** —— 搜索入口。聚焦空搜索框时只展示本地历史或空状态，不显示 Music/MV/expanded scope；结果合并为“最佳匹配 + 音乐结果”的单一可点击音乐表面，`TrackRow` 在列表间复用。
-- **`SearchStore`** —— `@Observable`。管理历史、结果缓存、请求身份、分页和内部 broaden 回退；`.expanded` 仍用于“更多结果”的内部搜索策略，不再作为可见 scope。`searchBatch` 并发请求多个关键词/页面，`dedupeSearchTracks` 去重，`MusicFilter.isSearchResult` 过滤。
+- **`SearchStore`** —— `@Observable`。管理历史、结果缓存、请求身份、分页和内部 broaden 回退；`.expanded` 仍用于“更多结果”的内部搜索策略，不再作为可见 scope。首次搜索并发拉页 1…3，按页序到达后立刻展示已连续完成的前缀（第一页不必等后面几页）；`loadMore` 仍按批等待。`dedupeSearchTracks` 去重，`MusicFilter.isSearchResult` 过滤。
 - **`SearchModels`** —— `SearchResultMode`（内部 music/expanded 策略）、`SearchCacheKey`（归一化后的缓存 key）、`SearchCachedSnapshot`（缓存快照）和 `SearchResultSections`（当前音乐结果分段）。
 - **`FavoritesView`** —— 收藏夹列表（B 站收藏夹当歌单用）。点击进入 `FavFolderDetailView` 分页加载，过滤失效稿件与非音乐。支持电台播放、随机播放、预加载。
 - **`FavoriteManager`** —— `@Observable` 单例。维护已收藏 bvid 全集（跨收藏夹合并，10 分钟缓存）。`toggle(track:)` CRUD，带 busy 去重。默认收藏夹记忆（`lastFavoriteFolderId` UserDefaults）。`syncAllFavoriteIDs()` 供推荐去重使用。
 - **`LibraryView`** —— 已缓存曲目列表。支持搜索、5 种排序（最近/标题/UP主/大小/音质）、删除（单个/swipe）、清空。缓存统计（数量+大小）。离线播放。
-- **`SettingsView`** —— 设置页。账号：扫码登录 (`QRLoginView`)/登出。推荐种子收藏夹选择器。音质：播放音质 + 下载音质独立设置。缓存：自动缓存开关。播放：Wi-Fi 优先 MV、播放历史。`QRLoginView` 用 CIFilter 生成二维码，2s 轮询扫码结果。
+- **`SettingsView`** —— 设置页。账号：扫码登录 (`QRLoginView`)/登出。推荐种子收藏夹选择器。音质：播放音质 + 下载音质独立设置。缓存：自动缓存开关（默认开）。播放：Wi-Fi 优先 MV、播放历史。`QRLoginView` 用 CIFilter 生成二维码，2s 轮询扫码结果。
 
 ### 测试策略
 
@@ -259,10 +261,12 @@ B 站视频可以有多个分 P（cid），缓存和去重不能只按 bvid。`T
 - **流 URL 不可持久化** —— 只把 bvid/cid 落盘；URL 约 2 小时后过期。
 - **不要在 URL 上二次 `addingPercentEncoding`** —— WBISigner 已做百分号编码；二次编码会把 `%E5` 变成 `%25E5`，服务器收到字面量而非中文。
 - **搜索默认只显示音乐内容** —— 不暴露模式 scope；`.expanded` 只作为内部“更多结果”回退策略。
-- **不 fallback 到 B 站字幕** —— 自动 CC 会把伴奏标成「♪音乐♪」，只用 LRCLIB 在线歌词。
+- **不 fallback 到 B 站字幕** —— 自动 CC 会把伴奏标成「♪音乐♪」；只使用 BM 整理出的关键词，从网易云、酷狗或 QQ 音乐取得歌词。
 
 ## 变更记录 (Changelog)
 
 | 日期 | 变更 |
 |------|------|
+| 2026-08-19 | 冷启动恢复队列与进度；收藏夹 cid 写入封面快照；音频缓存 LRU 120；搜索第一页增量展示。 |
+| 2026-08-19 | 起播加速：复用 AVPlayer、WBI playurl、拉流带 Cookie、点歌不抢网、自动缓存默认开启。 |
 | 2026-06-24 | 初始架构文档生成。覆盖全部 13 个模块 / 28 Swift 文件 / 1 测试文件。 |

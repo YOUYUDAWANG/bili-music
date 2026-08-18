@@ -358,8 +358,7 @@ struct RecommendationEngine {
                     guard let result = try? await self.client.favItems(folderId: folder.id, page: pageNum) else { return [] }
                     return (result.medias ?? [])
                         .filter { $0.attr == 0 }
-                        .map { Track(bvid: $0.bvid, title: $0.title, artist: $0.upper.name,
-                                     coverURL: URL(string: $0.cover), duration: $0.duration) }
+                        .map(Track.init(fav:))
                         .filter(MusicFilter.isStrictMusic)
                 }
             }

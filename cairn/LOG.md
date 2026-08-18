@@ -2,6 +2,56 @@
 
 本文件按反向时间顺序记录实质进展——最新记录放在本行下方最顶部。每条记录保持简短，只写摘要与指针；稳定结论沉淀到 `cairn/<topic>.md`。
 
+## 2026-08-19 · 队列恢复、cid、缓存限额与搜索首屏
+
+- 冷启动从 `playback-queue.json` 恢复队列、下标、模式和进度，暂停待命并显示 mini player；电台恢复为顺序播放。
+- 收藏夹解码 `ugc.first_cid`，首页快照按 bvid 去重并优先保留 cid；播放补全后写回封面库。
+- `CacheStore` 上限 120 首，按访问 LRU 淘汰，不删正在播放或下载的文件。
+- 首次搜索在第一页返回后立刻展示，页 2 失败仍保留页 1+3。
+- 窄测通过：`PlaybackPersistenceTests`、`CacheStoreTests`、`SearchStoreTests` 与全套 `BiliMusicTests`。
+- 当前真相见 `cairn/playback-startup.md`、`PlaybackQueueStore.swift`、`CacheStore.swift`、`SearchStore.swift`。
+
+## 2026-08-19 · 元数据 Worker 改用私有 GPT-5.6 Luna
+
+- 将 `bilimusic-metadata` 从 Workers AI 切到用户的 OpenAI 兼容上游 `gpt-5.6-luna`；上游密钥仅保存为 Cloudflare Secret，仓库和笔记不保存明文。
+- 实测网关不接受严格 JSON Schema，但支持 `v1/chat/completions + json_object`；固定成功协议，保留普通 JSON/Responses 降级兼容与服务端日文原名保护。
+- Workers AI 绑定已移除；降级结果不写 KV，避免上游短暂错误污染 30 天缓存。
+- 本地测试 7/7；线上中日文三组样本均 `degraded=false`，新请求约 3.57–3.87 秒，KV 命中约 0.057 秒。
+- iOS App 仍未切换自建 endpoint；当前真相见 `cairn/lyrics-architecture.md` 与 `services/metadata-worker/README.md`。
+
+## 2026-08-19 · 自建歌词元数据清洗 Worker 上线
+
+- 在 Cloudflare 部署 `bilimusic-metadata`：Workers AI 结构化清洗，KV 缓存 30 天，Bearer Secret 阻止公开滥用。
+- 服务端硬性保护日文原名，双语标题把译名降为 alias；同时区分原作者、翻唱者和 B 站 UP 主，返回有序搜索词与置信度。
+- 本地规则测试 4/4；线上 `夏夜のマジック / 花譜`、`アイドル / YOASOBI`、`晴天 / 周杰伦` 均正确，未授权 401，缓存命中正常。
+- 本轮只完成服务部署，iOS App 仍调用旧 BM `/ai`；切换 endpoint 与安全注入 Bearer 密钥是下一步。
+- 当前真相见 `cairn/lyrics-architecture.md` 与 `services/metadata-worker/README.md`。
+
+## 2026-08-19 · 对照 AprDeci 后收紧起播路径
+
+- 换曲复用同一个 AVPlayer，只替换 item；CDN 拉流/下载改用带 Origin 与 Cookie 的 `playbackHeaders`。
+- 音频改走 WBI `/x/player/wbi/playurl`；点歌时只恢复内存封面，网络封面改到出声后。
+- 自动缓存默认开启，出声约 1.5s 后后台落盘；慢启动 CDN 探测与 1.2s 等待并行。
+- 窄测通过：`PlaybackCriticalPathTests` 与 `PreparedStreamRetryTests` 全绿，含自动缓存出声后调度与 `playbackHeaders` 断言。
+- 当前真相见 `cairn/playback-startup.md`、`PlayerEngine.swift`、`BiliClient.swift`。
+
+## 2026-08-19 · 歌词改用 BM + 多平台直连
+
+- 移除 LRCLIB 与旧评分链路；BM `/ai` 只负责把 B 站标题整理为搜索词，app 直连网易云、酷狗、QQ 音乐搜索与取词。
+- 支持自动一致性排序、手动来源/候选、普通 LRC、多时间标签、翻译、逐字歌词、点击跳转与 ±0.5s 偏移。
+- 新增 `LyricsStore` 持久化最终候选和用户偏移；歌词错误或外部服务不可用不阻断播放。
+- 窄测通过：歌词纯逻辑/持久化单测与独立歌词页 UI 回归；BM→网易云真实冒烟命中《夏夜のマジック》并落盘。
+- Release 包签名校验通过，已覆盖安装并成功启动于用户的 iPhone 17 Pro；设备侧进程确认存活。
+- 当前真相见 `cairn/lyrics-architecture.md`、`MetingLyricsClient.swift`、`LyricsStore.swift` 与 `PlayerSheetViews.swift`。
+
+## 2026-08-19 · 首页播放器完整回归 LNPopup
+
+- 用户真机反馈 Home 自制 matched-geometry 播放器层性能差且 bug 多，明确选择稳定性优先并放弃封面原位转场。
+- 删除 Home 的第二个 `NowPlayingView`、namespace、转场状态、关闭按钮与 520ms 延时 Task；封面点击只提交真实选曲，再由 RootView 直接打开现有 LNPopup。
+- mini bar、full player、跟手下滑和 dock 收回重新统一到 `.floatingCompact + .automatic` 的同一生命周期；纯海报瀑布流视觉与 Tab Bar 常驻策略不变。
+- iPhone 17 Pro / iOS 27 模拟器验证：封面直开 LNPopup、标准 mini/full 开合、mini 下滚动时 Tab 常驻共 3/3 UI 回归通过。测试构建同时纳入工作区现有歌词文件，但本轮未修改其内容。
+- 当前真相见 `cairn/player-gesture-performance.md`、`cairn/visual-language.md`、根 `CLAUDE.md`、`HomeView.swift` 与 `RootView.swift`。
+
 ## 2026-08-14 · 封面收回动画与瀑布流手势并行并固定系统底栏
 
 - 首页改用局部 matched geometry 动画层完成封面原位放大与反向缩回；关闭第一帧先让动画层停止命中测试，底下始终挂载的 ScrollView 因而可以在播放器缩回期间继续上下滚动。

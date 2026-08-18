@@ -25,13 +25,41 @@ struct CachedEntry: Codable, Identifiable, Equatable, Sendable {
     let fileSize: Int64
     let downloadedAt: Date
     let quality: Int?    // 音质 id,旧索引没有该字段
+    var accessedAt: Date?
 
     var key: TrackKey { TrackKey(bvid: bvid, cid: cid) }
     var id: String { key.description }
+    var lastAccessedAt: Date { accessedAt ?? downloadedAt }
 
     var track: Track {
         Track(bvid: bvid, cid: cid, title: title, artist: artist,
               coverURL: coverURL.flatMap(URL.init(string:)), duration: duration)
+    }
+
+    init(
+        bvid: String,
+        cid: Int,
+        title: String,
+        artist: String,
+        coverURL: String?,
+        duration: Int,
+        fileName: String,
+        fileSize: Int64,
+        downloadedAt: Date,
+        quality: Int?,
+        accessedAt: Date? = nil
+    ) {
+        self.bvid = bvid
+        self.cid = cid
+        self.title = title
+        self.artist = artist
+        self.coverURL = coverURL
+        self.duration = duration
+        self.fileName = fileName
+        self.fileSize = fileSize
+        self.downloadedAt = downloadedAt
+        self.quality = quality
+        self.accessedAt = accessedAt ?? downloadedAt
     }
 }
 
@@ -40,9 +68,13 @@ struct CachedEntry: Codable, Identifiable, Equatable, Sendable {
 @MainActor
 final class CacheStore {
     static let shared = CacheStore()
+    /// 自动缓存开启后限制本地音频数量；超出后按访问时间淘汰最旧的。
+    static let maxEntryCount = 120
     /// Search 的本地缓存投影要覆盖“最近 6 条 + 缓存 6 条”的合并窗口,
     /// 所以比最终渲染出来的缓存行数更宽,避免 recent 排除后第 7-12 条缓存被漏掉。
     private static let searchLocalContentProjectionLimit = 12
+    private var playbackProtectedKey: TrackKey?
+    private var downloadProtectionCounts: [TrackKey: Int] = [:]
 
     private(set) var entries: [CachedEntry] = [] {
         didSet { rebuildIndex() }
@@ -175,26 +207,76 @@ final class CacheStore {
         let previousEntries = entries
         var updated = entries
         updated.removeAll { $0.key == entry.key }
-        updated.insert(entry, at: 0)
+        var stored = entry
+        if stored.accessedAt == nil {
+            stored.accessedAt = stored.downloadedAt
+        }
+        updated.insert(stored, at: 0)
+        let evicted = Self.evictOverflow(
+            &updated,
+            protecting: protectedKeys.union([stored.key]),
+            limit: Self.maxEntryCount)
         setEntries(updated)
         let revision = nextWriteRevision()
         do {
             try await write(updated, revision: revision)
             finishSave(revision: revision)
+            removeAudioFiles(for: evicted)
         } catch {
             mutationVersion += 1
-            var rollbackEntries = entries
-            rollbackEntries.removeAll { $0.key == entry.key }
-            if let previousIndex = previousEntries.firstIndex(where: { $0.key == entry.key }) {
-                rollbackEntries.insert(
-                    previousEntries[previousIndex],
-                    at: min(previousIndex, rollbackEntries.count))
-            }
-            setEntries(rollbackEntries)
+            setEntries(previousEntries)
             let rollbackRevision = nextWriteRevision()
-            try? await write(rollbackEntries, revision: rollbackRevision)
+            try? await write(previousEntries, revision: rollbackRevision)
             finishSave(revision: rollbackRevision)
             throw error
+        }
+    }
+
+    func touch(_ key: TrackKey) {
+        guard let index = entries.firstIndex(where: { $0.key == key }) else { return }
+        var updated = entries
+        var entry = updated.remove(at: index)
+        entry.accessedAt = Date()
+        updated.insert(entry, at: 0)
+        setEntries(updated)
+        guard isLoaded else { return }
+        save()
+    }
+
+    func setPlaybackProtectedKey(_ key: TrackKey?) {
+        playbackProtectedKey = key
+    }
+
+    func beginDownloadProtection(_ key: TrackKey) {
+        downloadProtectionCounts[key, default: 0] += 1
+    }
+
+    func endDownloadProtection(_ key: TrackKey) {
+        if let count = downloadProtectionCounts[key], count > 1 {
+            downloadProtectionCounts[key] = count - 1
+        } else {
+            downloadProtectionCounts[key] = nil
+        }
+    }
+
+    func enforceRetentionLimit() async {
+        await loadIfNeeded()
+        var updated = entries
+        let evicted = Self.evictOverflow(
+            &updated,
+            protecting: protectedKeys,
+            limit: Self.maxEntryCount)
+        guard !evicted.isEmpty else { return }
+        mutationVersion += 1
+        setEntries(updated)
+        saveTask?.cancel()
+        let revision = nextWriteRevision()
+        do {
+            try await write(updated, revision: revision)
+            finishSave(revision: revision)
+            removeAudioFiles(for: evicted)
+        } catch {
+            log.error("retention save failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -204,6 +286,10 @@ final class CacheStore {
         var updated = entries
         updated.removeAll { $0.key == entry.key }
         updated.insert(entry, at: 0)
+        _ = Self.evictOverflow(
+            &updated,
+            protecting: protectedKeys.union([entry.key]),
+            limit: Self.maxEntryCount)
         setEntries(updated)
     }
 #endif
@@ -337,5 +423,34 @@ final class CacheStore {
 
     private func searchVisibleTracks(from entries: [CachedEntry]) -> [Track] {
         Array(entries.prefix(Self.searchLocalContentProjectionLimit).map(\.track))
+    }
+
+    private var protectedKeys: Set<TrackKey> {
+        var keys = Set(downloadProtectionCounts.keys)
+        if let playbackProtectedKey {
+            keys.insert(playbackProtectedKey)
+        }
+        return keys
+    }
+
+    private func removeAudioFiles(for entries: [CachedEntry]) {
+        for entry in entries {
+            try? FileManager.default.removeItem(at: audioDir.appendingPathComponent(entry.fileName))
+        }
+    }
+
+    static func evictOverflow(
+        _ entries: inout [CachedEntry],
+        protecting: Set<TrackKey>,
+        limit: Int
+    ) -> [CachedEntry] {
+        var evicted: [CachedEntry] = []
+        while entries.count > limit {
+            guard let index = entries.indices.reversed().first(where: { !protecting.contains(entries[$0].key) }) else {
+                break
+            }
+            evicted.append(entries.remove(at: index))
+        }
+        return evicted
     }
 }

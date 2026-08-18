@@ -66,7 +66,7 @@ final class DownloadManager {
                 preferredQuality: UserDefaults.standard.integer(forKey: "downloadQuality"))
 
             var req = URLRequest(url: stream.url)
-            BiliClient.headers.forEach { req.setValue($1, forHTTPHeaderField: $0) }
+            BiliClient.playbackHeaders.forEach { req.setValue($1, forHTTPHeaderField: $0) }
             let key = track.key
             let watcher = ProgressWatcher { [weak self] fraction in
                 Task { @MainActor in
@@ -94,11 +94,14 @@ final class DownloadManager {
                 throw BiliClient.APIError(code: -1, message: "缓存文件为空")
             }
 
+            let now = Date()
             let entry = CachedEntry(
                 bvid: track.bvid, cid: cid, title: track.title, artist: track.artist,
                 coverURL: track.coverURL?.absoluteString, duration: track.duration,
-                fileName: fileName, fileSize: size, downloadedAt: Date(),
-                quality: stream.quality)
+                fileName: fileName, fileSize: size, downloadedAt: now,
+                quality: stream.quality, accessedAt: now)
+            CacheStore.shared.beginDownloadProtection(track.key)
+            defer { CacheStore.shared.endDownloadProtection(track.key) }
             do {
                 try await CacheStore.shared.addPersisting(entry)
             } catch {

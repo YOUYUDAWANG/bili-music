@@ -11,7 +11,7 @@ struct SettingsView: View {
     @State private var loggedIn = CookieStore.isLoggedIn
     @State private var username: String?
     @State private var showLogin = false
-    @AppStorage(PlaybackPreferences.autoCacheKey) private var autoCache = false
+    @AppStorage(PlaybackPreferences.autoCacheKey) private var autoCache = true
     @AppStorage(PlaybackPreferences.playbackQualityKey) private var playbackQuality = 30280
     @AppStorage(PlaybackPreferences.downloadQualityKey) private var downloadQuality = 0
     @AppStorage(PlaybackPreferences.preferMVOnWiFiKey) private var preferMVOnWiFi = true

@@ -2,13 +2,13 @@
 
 ## 模块职责
 
-全屏正在播放页的 UI 实现。内容视觉采用“横版影像唱片机”：16:9 封面、电影字幕式信息与封面派生双色光场。首页封面入口使用 Home 局部 matched geometry 动画层，mini player 入口使用 LNPopupController。
+全屏正在播放页的 UI 实现。内容视觉采用“横版影像唱片机”：16:9 封面、电影字幕式信息与封面派生双色光场。首页封面入口与 mini player 入口统一使用 LNPopupController。
 
 ## 入口与启动
 
 - **文件**: `NowPlayingView.swift`（主入口）、`PlayerControlViews.swift`（控制子视图）、`PlayerSheetViews.swift`（歌词/合集/收藏等 sheet）
 - 由 `RootView` 的 LNPopupUI `.floatingCompact + .automatic` 容器承载。
-- 首页被点封面通过 Home 局部 matched geometry 动画层原位展开并反向缩回；关闭第一帧动画层停止命中测试，让底层 ScrollView 同时保持可滚动。
+- 首页点击封面后由 RootView 直接打开同一个 LNPopup 内容控制器；播放页不区分“首页直开”和“mini player 打开”两套生命周期。
 - 迷你播放器、主播放器开合、跟手下滑和安全区停靠由 vendored LNPopupController 统一管理；播放页自身不维护全屏级纵向关闭手势。
 
 ## 对外接口
@@ -27,7 +27,7 @@
 | 控制按钮 | 上一曲、播放/暂停、下一曲 |
 | 操作栏 | 收藏（短按/长按）、下载、音乐/MV 切换、更多 |
 | 接下来播放页 | 与主播放器同屏切换；显示完整当前队列和 AutoPlay 相关推荐 |
-| 歌词页 | LyricSheetView（滚动高亮、自动居中） |
+| 歌词页 | `LyricsSheetView`（逐行/逐字高亮、翻译、自动居中、点击跳转、±0.5s 偏移与手动平台候选） |
 | MV 全屏 | MVFullscreenView（全屏视频播放） |
 
 ### 视觉边界
@@ -62,6 +62,8 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-08-19 | 歌词页升级为逐字/翻译沉浸视图，加入手动来源、候选选择、点击跳转与偏移校准。 |
+| 2026-08-19 | 首页直开与 mini/full 开合统一回归 LNPopup，移除 Home 自制播放器转场。 |
 | 2026-08-14 | 首页封面原位放大与反向缩回改为非阻塞局部动画层；缩回期间瀑布流仍可操作。 |
 | 2026-08-14 | 建立横版影像唱片机视觉：封面贴近边缘、电影字幕式左对齐、封面双色光场；系统玻璃只保留在外壳。 |
 | 2026-08-14 | 按 Apple 官方正在播放与队列行为重构：LNPopup 原生 grabber、系统音量/AirPlay、同屏 Queue + AutoPlay，移除主页面常驻抽屉。 |
