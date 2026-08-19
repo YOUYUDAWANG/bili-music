@@ -2,6 +2,471 @@
 
 本文件按反向时间顺序记录实质进展——最新记录放在本行下方最顶部。每条记录保持简短，只写摘要与指针；稳定结论沉淀到 `cairn/<topic>.md`。
 
+## 2026-08-20 · 写下整机接手手册
+
+- 新增 `cairn/handoff.md`：当前默认路径、禁止事项、密钥只记名字、Worker/LDDC/高精度主机操作、歌词舞台版本对照、验证与回滚、下一步验收。
+- `CLAUDE.md` 阅读顺序与 `AGENTS.md` 入口已加指针。不复制完整架构，不写入任何 Token。
+
+## 2026-08-20 · V2 真机超时：并行生成并放宽客户端时限
+
+- 用户提交真实 `/v2` 后显示超时。根因是 App 在 45s 无首包就断开，而 Worker 先跑 25s bible 再跑 30s 场景；8 行样本都要 45–51s，真曲必超时。
+- 现已部署 `c593e5b3-eb9e-4360-9a1e-8dd1a58ad723`：bible 与最多 4 段 scene 并行，成功结果先写入 KV 再返回。24 行线上样本 19.2s 非降级，复打 354ms `hit`。现有真机包可以立刻重试。
+- App `LyricStageClientV2` 改为空闲 90s / 总超时 120s，URL 超时映射为「Luna 编排超时」；需下次签名安装才生效。Worker 26/26。当前真相见 `cairn/lyric-performance-director.md`。
+
+## 2026-08-20 · V5.3 用单曲基准推进通用全曲编舞
+
+- 保留「You＆合図」V5.2 专曲舞台作 A/B，新 V5.3 不读取 BVID、标题、固定秒数或固定歌词行号；任何同步歌词都可从 Debug「歌词舞台」进入并从头播放。
+- 本地规划器按歌词间隙、重复 Hook 簇、短句、并行声部与相邻关系生成通用构图。连续重复 Hook 自动经历 call → echo → converge → lock；普通段落在 stillness / leading / trailing / dialogue / stack / arc / hero 间形成对比。真实逐字轴继续独占 reveal。
+- 视觉复核修掉了前奏空白和“全曲重复次数导致第一段副歌不收束”：前奏用真实标题/作者，Hook 递进改按连续重复簇计算，后段孤立再现仍可独立收束。
+- iOS 27 / iPhone 17 Pro 模拟器规则测试 19/19，10 个跨全曲关键帧 UI 1/1；物理设备签名包已安装并启动，进程 PID 2370。当前仍是歌词结构/时间驱动，不等于通用音频分析或 Luna 整曲分镜已经接入。当前真相见 `cairn/lyric-performance-director.md`。
+
+## 2026-08-20 · 生产 V2 导演端点复核：无需重发
+
+- 用户要求启用 V2 服务端。线上 `bilimusic-metadata` 当前仍是 `153857a6-dc21-4e5b-8710-3b153f24f131`；本地 Worker 源文件时间不晚于该版本，未重新 `wrangler deploy`。
+- `/health` 列出 normalize、`/v1/lyrics/direct`、`/v2/lyrics/direct`；无 Bearer 的 V2 POST 为 401。旧 normalize 日文翻唱样本非降级：`夏夜のマジック` / indigo la End / 花譜。
+- 8 行逐字/二重唱/和声样本：V1 非降级 `lyric-performance-v4`（5 scene / 5 directive）；V2 非降级 `lyric-stage-v2-events`（4 section / 3 scene / 11 event）。相同 V2 请求约 8 秒后再打为 KV `hit`（375ms）。
+- Worker 本地 25/25。未改 App 默认舞台，未打开 Release 自动生成。当前真相见 `cairn/lyric-performance-director.md`。
+
+## 2026-08-20 · 「You＆合図」V5.2 扩为全曲且取消逐字延后
+
+- 从真机重新读取完整 176.518 秒 AAC 与 40 行逐字歌词；全曲图包含 178.206 BPM、524 拍、131 重拍、341 个高置信 onset 和约 21.53Hz 能量包络。
+- 0–176.5 秒现覆盖前奏、开篇、调音、原黄金段、推进、指挥断句、Sunday 弧线、主题再现、终章和尾奏；入口改为「全曲音频舞台」并从 0 秒播放。
+- 用户感到的微妙延迟来自歌词锚点后最多 200ms 等待音频。现有逐字轴恢复 reveal 绝对所有权，字严格从原时间出现；±90ms 最近 onset/beat 只驱动其后的回弹、冲击和场景物理。缺逐字轴的未来路径才允许吸附。
+- 时间线/音频窄测 2/2，iPhone 17 Pro 尺寸 14 个跨全曲关键帧 UI 1/1；当前仍是「You＆合図」专曲离线图，不表示通用 iPhone 分析器或 Luna 音频导演完成。当前真相见 `cairn/lyric-performance-director.md`。
+
+## 2026-08-20 · 完整歌词改为连续逐字扫亮
+
+- 根因是 `LyricHighlightModel` 已经计算 `.current(progress)`，但 `PlayerLyricsPage` 把 current 和 sung 绘制为同一全亮文本，字与字之间只会硬切。
+- 当前字/词现用 30fps progress 驱动左到右 mask，带轻微羽化与 glow；已唱/未唱作为底色与前景。wrap layout 保留长句换行，可访问替代仍是完整句。
+- `LyricHighlightModelTests` 7/7、逐字歌词 UI 1/1，fresh `build-for-testing` 通过。固定在首个英文词 50% 时刻的截图已检查：左半亮、右半暗，完整长句与换行正常。
+
+## 2026-08-20 · LDDC 逐字候选点击失败已修复
+
+- 真机截图确认蓝色「逐字」已经进入列表，但点击后保留候选并显示「没有找到可用歌词」；这证明失败发生在选择阶段，而非搜索或显示阶段。
+- 根因是面板自动搜索与用户搜索可重叠：两次请求共用并清空临时逐字文档，旧结果仍可被点击并退回普通网易云取词。现用 request generation 拒绝陈旧搜索，已验证文档按稳定 ID 有界保留；缺失时再向 LDDC 精确恢复一次。
+- LDDC 客户端整组加排序测试 5/5，物理设备签名 build 通过；最终包再次核对 Mac mini URL 与 64 位签名资源 Token，已覆盖安装并启动。当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-20 · V5.2 文字落点改由真实音频触发
+
+- 用户真机判断上一版仍像“文字轴动画”：虽然 beat/onset/energy 已调节尺度与背景，文字进入、落定和切镜仍主要服从歌词轴，音频参与不够可感知。
+- 「You＆合図」黄金样片改为双时钟：逐字轴只给出最早允许出现的时刻，之后 200ms 内最近的真实强 onset 优先、beat 次之，决定 glyph 的实际 reveal/landing；副歌标题 Hook 的开场、重击和回声也复用同一音频触发器。seek 仍由绝对时间确定性还原。
+- onset/beat/landing 窄测 1/1、iPhone 17 Pro 八关键帧 UI 1/1；当前仍是专曲离线 AudioPerformanceMap，不代表通用 iPhone 分析器或 Luna 音频导演已经完成。
+
+## 2026-08-20 · LDDC 手动搜索修复时长门禁与 Token 注入
+
+- 真机请求已证实到达 Mac mini 且认证为 200，但 616 秒《Melt -10th ANNIVERSARY MIX-》被服务端返回 0；同标题曲库实际有 3 条 305 秒候选（2 条逐字），根因是手动搜索误用了自动采用的 ±4 秒硬门禁。
+- 手动搜索现允许时长不符候选进入列表；只有时长兼容的逐字轴获得可靠排序加成，已知不符显示「逐字／时长不符」。自动采用的严格标题、歌手、时长门禁不变。
+- 增量构建又复现最终 `Info.plist` 丢失 LDDC Bearer；现与高精度主机一致写入独立签名 plist，最终包验证 URL 正确、资源 Token 存在且 64 位。聚焦测试 2/2，签名 Debug 已覆盖安装并启动；同曲列表实机复看待用户确认。当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-20 · 更正：《メルト》v3 排除同窗双模型假共识
+
+- v1 的 `-3.000s / MAD 0` 来自 23 条 onset 撞到 `source_start - 3s` 左边界；v2 又错误地把受同一局部窗口约束的 Qwen/WhisperX 当作独立证据，主歌被提前 5–7 秒，用户复听确认仍严重不同步。
+- 新增整曲精确歌词对齐与 1.7B ASR 诊断：真实前段约为 2.96、12.72、57.52、59.60、68.88 秒。v3 丢弃窗口边界样本，以 8/10 内部样本得到 +0.560s / MAD 0.96s；局部双模型偏离全局锚点超过 1.25s 时只保留逐字节奏，不再改行首。
+- v3 完整重跑 76.995s：41/41 行、466 字、13 行受约束模型共识、28 行全局锚点、41 行 WhisperX 字符复核；前段为 2.992、12.090、57.732、58.075、67.510 秒。pipeline v3 job 已缓存。
+- 真机旧 `-10000ms / userSet=true` 并非用户手调：自动值在校准 sheet 未拖动时被 Slider 的结束回调重新标成用户值。现只有实际收到开始编辑后才允许结束回调持久化；`precisionHost` 仍强制 offset=0 且不做 RMS 自动校准。
+- v3 写入后又出现“行数不一致”假拒绝：旧门禁把服务端原始行数与 App 拆分和声后的显示行数直接比较。现原始 LRC/QRC/主机计数互比、排版后源/结果计数互比；同一 `overlapGroup` 的同时行合法。主机门禁 9/9、签名构建、安装和真机启动通过。
+
+## 2026-08-19 · 更正：LDDC 后端迁移到 Mac mini 常驻服务器
+
+- 前一条阶段记录把并非常驻的 Windows 主机误当成部署目标；现已停用其计划任务和 8788 监听，旧目录改名保留为可恢复备份，不影响独立的 Windows GPU 高精度对齐服务。
+- 常驻根为 Mac mini `~/Library/Application Support/BiliMusic/LDDCLyricsBackend`，Python 3.12 虚拟环境、权限 600 的 Token 文件和用户级 LaunchAgent 已生效；只绑定 Tailscale `100.108.23.60:8788`，未改防火墙或开放公网端口。
+- Mac 远程验证 health=200、无认证=401；真实「心拍数#0822」返回酷狗+QQ 两份 `timing=word` 候选、各 50 行。64 位 Bearer 从钥匙串注入签名包，Debug 已覆盖安装并启动于 iPhone 17 Pro；仍需 App 内实际搜索验收。
+
+## 2026-08-19 · 「You＆合図」V5.2 黄金样片装入真机
+
+- 读取真机现有 40 行逐字轴，选取 37.781–67.441 秒约 30 秒片段；不复用 V5.1 通用 verb，也不请求 Luna。
+- 手工 Canvas 编排推进/呼吸、双眨眼、约定波浪、双主体汇合，以及四次逐级变化的标题 Hook；入口会 seek 到样片起点并播放。
+- 同一片段从真机缓存 AAC 提取 178.2 BPM、88 拍、22 重拍、72 强 onset 与 638 字节能量包络；拍点驱动呼吸，onset 驱动落定，能量驱动背景物理场。分析脚本见 `scripts/analyze_audio_performance.py`。
+- 时间线/音频映射窄测 2/2、iPhone 17 Pro 八关键帧 UI 1/1、物理设备 Debug build 通过；音频驱动版已覆盖安装并启动，原 Documents 保留。
+- 当前真相见 `cairn/lyric-performance-director.md`。
+
+## 2026-08-19 · 歌词页滚动与高亮统一
+
+- 自动滚动在时间戳空档会回退到最近已开始行，但亮度原先只认严格 `from..<to`，导致滚到当前句后仍以 35% 非当前亮度显示。
+- `LyricHighlightModel.highlightedLineIndices` 现与滚动共用回退；真实重叠声部仍保留多行 active。聚焦单测 6/6，fresh `build-for-testing` 通过。当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · 高精度主机不再无限等待，第三首真实任务通过
+
+- 真机 Documents 证明《モドキステップ！》已有本地音频与 49 行逐行词，但 Windows 队列为 0；根因是 iPhone 到 Tailscale 地址不可达时 `waitsForConnectivity` 最长等待 20 分钟。现每个地址 5 秒探测，Tailscale 失败自动走 `192.168.10.129`，全部失败明确提示，阶段状态持续显示。
+- 首次真实提交又暴露第 21 行模型 onset 倒退会整曲失败；Windows 改为仅将冲突行回退到全局 LRC 锚点的确定性节奏，旧脚本有时间戳备份，远端编译与哈希已核对。
+- 重跑 66.313s 完成：49/49 行全文一致、544 字、行首严格单调、29 行 WhisperX 字符复核、10 行节奏回退、MAD 0。App 门禁改为低于 50% 拒绝、50–79% 写入但标记需确认、80% 以上确认。
+- 后续《雑魚》又暴露重复歌词联合对齐的 token 跨行；现自动退回逐行窗口，不再整曲失败。服务端错误只保留异常摘要，App 再截为 180 字，禁止把 4000 字 traceback 铺进界面。重跑 66.387s 完成，48/48 行全文一致、626 字、48 行 WhisperX 字符复核、4 行节奏回退。
+- 主机客户端 8/8、Python 编译、签名、双地址与 64 字符令牌、真机安装/启动均通过。当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · V5.1 选择后无动画已修复并装入真机
+
+- 真机 Documents 证明当前歌曲没有 `lyric-stage-v2.json`；旧入口只切渲染器，不会触发已上线的 Luna V2，且 Section 预算会删掉本地 hold 动作。
+- 首次选择 V5.1 现自动请求线上导演并立即显示编排反馈；低强度 hold pulse 被定义为基线呼吸，不占高潮/强调预算。
+- 首次真机复测进一步确认：已有 10 Scene / 41 Event 稿时仍只偶发刷新。Canvas 现显式消费 Timeline tick，歌词时钟不再被 Reduce Motion 或 motion gate 冻结；播放时展开 60fps、保底 30fps。
+- V5.1 compiler/timeline 21/21、物理设备 Debug build 通过；修正版再次覆盖安装并启动，V2 缓存和原 Documents 保留。
+- 当前真相见 `cairn/lyric-performance-director.md`。
+
+## 2026-08-19 · Luna V5.1 `/v2` 上线并修正假成功
+
+- 经用户明确授权部署 Cloudflare Worker `153857a6-dc21-4e5b-8710-3b153f24f131`；健康端点现列出 normalize、V1 和 V2。
+- 首次线上调用发现模型场景全被校验丢弃却标记成功；现补全精确 Actor/Event JSON 合同，空场景会如实 degraded 且不缓存。
+- 修正版 8 行逐字/二重唱/和声样本非降级返回 4 Section、2 Scene、2 Actor、7 Event；旧 V1 非降级回归。Worker 25/25。本轮未安装真机包。
+- 当前真相见 `cairn/lyric-performance-director.md`。
+
+## 2026-08-19 · 停用真机 MLX 生成并修复主机按钮
+
+- 真机当前《青い珊瑚礁》有 26 条非空逐行歌词、无并行声部，电脑按钮本应可用；灰态来自 App 后来被另一包覆盖，内置主机配置丢失。
+- 两份真机 `bug_type 309` 报告均为 `SIGABRT`，故障队列 `com.Metal.CompletionQueueDispatch`，栈落在 `mlx::core::gpu::check_error`；一次 Forced Aligner、一次 ASR。这不是普通 Swift 主线程卡顿，异常不可捕获。
+- 播放器移除本机生成入口，设置只保留模型占用与删除；高精度主机按钮不再因配置缺失静默置灰。UI 回归 1/1、来源门禁 3/3。
+- 修正 Xcode 脚本先于 `ProcessInfoPlistFile` 执行导致令牌被覆盖的问题：钥匙串令牌现写入独立签名资源，普通无额外参数的真机构建也能读取；资源存在、64 字符令牌、签名、安装、启动和主机健康均已检查。
+- 主机同时修复纯逐行 LRC 没有旧逐字轴时的空 A/B 统计，并允许失败任务复用音频重试。《青い珊瑚礁》真实任务 65.1s，26/26 行全文一致且通过 App 门禁。签名包已覆盖安装并启动。当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · V5.1 修掉 echo 残留与中日文整句不换行
+
+- 超预算时删除 `.echo` Event，采样不再把残影加回。
+- 排版按 token 边界换行，连续中日文不会并成一整句超出 340pt。
+- Actor 中心改为 `(sceneID, actorID)`；partial 二重唱补缺只留下未覆盖声部。
+- 指针：`LyricStageBudget.trimConcurrent`、`LyricStageCompilerV2.measureLine`、`LyricStageDirectorV2.fillMissingScenes`。当前真相见 `cairn/lyric-performance-director.md`。
+
+## 2026-08-19 · LDDC 私有逐字歌词后端正式实现
+
+- `services/lddc-lyrics-backend/` 以独立 GPL FastAPI 进程聚合酷狗/QQ/网易云逐字词；Bearer、18s 总超时、成功缓存和无正文日志边界已落地。
+- App 新增 `LDDCLyricsBackendClient`；自动采用与手动搜索都先查聚合服务。双重门禁通过的逐字候选在同版本内置顶并标记「逐字」；其余继续现有曲库直连。
+- 翻唱的原唱候选强制为 `canonicalOriginal`，不得因时长接近被当成同录音。Python 窄测 6/6；LDDC 解析器与身份安全回归先后 3/3、5/5；最新逐字标识/排序/去重聚焦回归 7/7，fresh DerivedData `build-for-testing` 通过。
+- 本机真实请求「心拍数#0822」返回酷狗+QQ 两个逐字候选，各50 行/481 字。尚未选定常驻主机、写入生产 token 或改网络边界。当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · V5.1 执行层补上 Actor 构图与编译期预算
+
+- 缓存指纹覆盖 Score / 旧 PerformanceScore / 真实封面色；同 Scene 数重新生成会刷新。
+- Actor 按自身 typeRole 布局，hero 字号独立；英文按词换行；stacked 用整块高度避免压行。
+- phase/verb 非法组合在校验时丢弃；120 字限制改为编译期去掉 backdrop/echo，绘制不再切正文。
+- 预算开始消费 density、heroBudget、accentBudget、motifRef。`/v2` 仍未部署。
+- 指针：`LyricStageFingerprint`、`LyricStageCompilerV2`、`LyricStageBudget`。当前真相见 `cairn/lyric-performance-director.md`。
+
+## 2026-08-19 · Windows 高精度对齐成为 App 歌词来源
+
+- App 新增显式「高精度主机生成/重新生成」入口：只上传本地缓存音频，不进入起播路径；结果以独立 `高精度主机` 来源写入 `LyricsStore`。
+- Windows `D:\BiliMusicAligner` 新增认证、串行 GPU 队列、确定性任务缓存与登录自启服务；Tailscale `:8765` 实测可达，令牌只留在 Windows 文件与 Mac 钥匙串。
+- App 写回前强制检查全文/行数、单调逐字轴、WhisperX 覆盖、全局位移共识与回退比例；并行声部暂不允许覆盖。失败保留原词。
+- 「You＆合図」真实 API 闭环 62.7s：40/40 行全文一致、364 字、40 行字符复核，+6.320s / MAD 0.040s；重复任务 13ms 返回缓存。窄测 3/3，签名包已覆盖安装并启动于 iPhone 17 Pro。当前真相见 `cairn/lyrics-architecture.md` 与 `scripts/windows_lyrics_aligner/`。
+
+## 2026-08-19 · 网上歌词因歌手对不上而不跟播
+
+- 文本候选一律 `followsPlayback=false` 过严：B 站 UP 名对不上曲库艺人时，有 LRC 也被标成「不跟随播放」。
+- 现改为歌名已过门且时长差 ≤25s 时跟播；只在时长明显不对时停跟随。读缓存会按新策略写回。当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · Windows 高精度歌词对齐离线 A/B
+
+- RTX 5070 Ti Windows 主机的独立 `D:\BiliMusicAligner` 已部署：BS-RoFormer 分人声，Qwen3-ASR-1.7B/BF16 Forced Aligner 做整曲诊断与两遍局部对齐，WhisperX 日语 CTC 独立复核并提供逐字符节奏。
+- 「You＆合図」从统一 PowerShell 入口完整跑通：稳定位移 +6.320s（8/20 共识、MAD 0.040s）；26/40 行采用双模型共识，14 行冲突回到全局锚点，8 行 Qwen 节奏回退均显式标记。
+- 最终 QRC 40 行、全文一致、单调且不重叠；364 字最短 50ms、中位 180ms、无 ≤40ms。远端与本地 SHA-256 一致。仅作为离线对比，未覆盖 iPhone 缓存。当前真相见 `cairn/lyrics-architecture.md` 与 `scripts/windows_lyrics_aligner/`。
+
+## 2026-08-19 · 歌词舞台升级为 V5.1 Event 引擎
+
+- 中央舞台新增 StyleSheet / Section / Scene / Actor / Event 合同与 Canvas `sample(at:)` 渲染；默认仍是本地规则，V5 行级舞台保留。
+- 无逐字轴不再伪卡拉 OK；旧 v4/v5 缓存可适配。Worker 本地 `/v2/lyrics/direct` 未部署。
+- 指针：`LyricStageCompilerV2`、`LyricStageCanvasView`、`services/metadata-worker/src/director-v2.js`。当前真相见 `cairn/lyric-performance-director.md`。
+
+## 2026-08-19 · 点封面不再被首页发现堵住起播
+
+- playurl / 补 cid 改走独立 URLSession；发现搜索最多 2 路，点歌立即取消。
+- 首页发现推迟到封面墙出现 2 秒后。避免只出封面、干等近一分钟。
+- 指针：`BiliClient.playbackSession`、`HomeView.cancelDiscovery`。当前真相见 `cairn/playback-startup.md`。
+
+## 2026-08-19 · 更正：逐字生成先做整曲位移共识
+
+- 上一轮只固定可靠 LRC 行首，修掉局部 250–950ms 漂移，却把来源 LRC 自身当成绝对真相；用户用「You＆合図」实听确认仍有约 7–8 秒整曲错位，单曲 `+7.5s` 尝试已清除。
+- 通用链路现先用整曲 ASR 建立多行位移样本，以 60% 稠密簇、覆盖率和离散度门禁估计全局平移；重复副歌伪匹配、非线性漂移和低置信结果不会写入。校准后再用 ±2.5 秒窗口生成逐字节奏。
+- 真机样本得到 -6.241 秒共识并写入实际 QRC，未保存用户 offset；25/25 窄测、设备构建安装与普通启动通过。当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · Luna v5 两阶段导演上线并安装真机包
+
+- Cloudflare Worker `ac89c921-a471-4f65-bde8-1fd8141ba2a1` 已部署，生产 `/v1/lyrics/direct` 直接生成全曲 Stage Bible 与受限 stageDirectives；兼容 v4 envelope 与本地回退保持不变。
+- 线上 8 行逐字/二重唱样本非降级返回 Stage Bible、5 条 directive、3 种 behavior；健康、401 鉴权与旧 normalize 回归正常。本地 Worker 20/20。
+- 签名 Debug 包已覆盖安装并启动于 iPhone 17 Pro，V5 URL 与 Bearer 注入存在；真实歌曲体感与 Release 60fps 仍待确认。当前真相见 `cairn/lyric-performance-director.md`。
+
+## 2026-08-19 · 可靠 LRC 行首不再被逐字模型漂移
+
+- 真机「You＆合図」确认来源逐行 LRC 与同版本音频时长一致，但 Forced Aligner 曾把 6/40 行推迟超过 250ms、最大 950ms；问题是行首 ownership，而非歌词版本或 4bit 模型规模。
+- 可靠逐行轴现在固定拥有行首，模型只编排行内逐字节奏；纯文本/ASR 重建的粗轴仍允许模型细化 onset。低置信 +1.05s 音频相关候选未写入偏移。
+- 同曲真机重生成后 40/40 行首偏差为 0ms，推理 5.172s、峰值 1.421GB；窄测 22/22，设备构建、安装和普通启动通过。当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · v5 真实歌词动态文字舞台第一版
+
+- 新增 StageScore/Compiler/View：真实逐字时间展开为 glyph 轨道，逐行轴只做视觉 stagger；主唱、和声、A/B 二重唱按 overlap group 同台，完整文本自动换行。
+- 现有线上 Luna v4 score 可立即映射为八种 stage behavior；兼容 envelope 新增可选 Stage Bible + stageDirectives，App 校验并缓存。Worker 两阶段实现仅在本地，未部署。
+- iOS 窄测 23/23、v5 真实歌词 UI 1/1、Worker 20/20、generic iOS Debug build 通过；模拟器实图已检查。真机安装、Release 60fps 与 TextRenderer 后端仍待后续。当前真相见 `cairn/lyric-performance-director.md`。
+
+## 2026-08-19 · 日语逐字对齐改为模型边界＋节拍稳定
+
+- 真机「千鳥」确认旧轴 46.2% 字被压成 40ms、最长 19.29s；日语系统分词只能把异常行从 40 降到 32，8bit A/B 更差，确认问题不是单纯模型量化。
+- 日语改为词法分段后映射回完整字符；超长 LRC 空档收紧。模型行发生短时间坍缩或节拍差十倍时，以可信行首和汉字/假名节拍重建该行，并标记待确认；仍异常才拒绝保存。
+- 「千鳥」最终降为 0.5% ≤40ms、0 个 >1.5s、最长 1.021s；当前「すきなことだけでいいです」为 2.0% ≤40ms、最长 1.113s。两首真机保存，峰值约 1.434–1.436GB；21/21，设备构建、安装与普通启动通过。当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · 本地 v5 动态文字舞台样片
+
+- Debug 播放器增加 18 秒四幕硬编码 motion study：逐字画外聚合、重力坠落、左右双声部交汇、字符环绕后重组；只替换 metadata 与控制簇之间的歌词画布。
+- 样片不调用 Luna、不改 v4 合同或缓存；用于先判断 AE 式 kinetic typography 的视觉方向，正式引擎仍待 StageScore + TextRenderer。
+- iPhone 17 Pro 模拟器关键帧实图与完整录屏已检查；定时/easing 10/10、局部替换 UI 1/1、generic iOS Debug build 通过。当前真相见 `cairn/lyric-performance-director.md`。
+
+## 2026-08-19 · 歌词支持同时演唱与二重唱声部
+
+- 歌词增加 lead/backing/duetA/duetB/together 与 overlap group；解析显式角色、行尾括号和声和相同时间戳多行，舞台说明与普通尾部重叠不误判。
+- ASR 粗定位为同组声部共享搜索窗口，Forced Aligner 对各声部独立生成并允许重叠；结构化 vocal lines 随歌词缓存持久化。
+- 完整歌词与中央演出可同时显示 active 声部，真实重叠优先于 Luna composition。窄单测 16/16、generic iOS Debug build 通过；真实二重唱真机精度与视觉仍待验证。当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · Luna 长歌词改为保留全曲轮廓的并行分段编排
+
+- 真机当前「千鳥」42 行 / 407 word 的原请求复现旧 Worker 25 秒超时；App 过去只显示通用 degraded，掩盖了 `upstream_error`。
+- Worker 将详细逐字输入压成时间元组，保留全曲文本 outline，约 12 行并行分段生成并全局合并校验；失败段由本地导演补齐，全部超时明确返回 `upstream_timeout`。
+- 部署 `0e12423f-b54f-45fd-a1ab-cbcec5ae0014` 后，同一真实请求 23 秒非降级，生成 42 composition / 29 scene / 13 word cue；Worker 18/18，Debug 包完成设备构建、覆盖安装和启动。当前真相见 `cairn/lyric-performance-director.md`。
+
+## 2026-08-19 · 找歌改为翻页 + 歌名，不再用 feed 掺水
+
+- 检索同时用常听歌手和清洗后的歌名，页码在 1–3 间错开，刷新不会总拿到同一页热门。
+- 品味候选够 8 首时不再拉首页流/related；UP 名不再进歌手档案。
+- 指针：`ListeningTaste.searchPlan`。当前真相见 `cairn/home-discovery.md`。
+
+## 2026-08-19 · Luna v4 接入真实逐字歌词演出
+
+- 中央歌词加入局部 30fps 逐字舞台：所有真实 word timing 默认 Sweep，Luna 可为每行一个不超过 12 字的范围追加 Impact / Stretch / Echo Trail；日文标点、英文空格和长句换行均保留，映射失败显示完整原句。
+- App/Worker 双端升级 `lyric-performance-v4`，把真实 word index/from/to/text 交给 Luna；歌词指纹纳入逐字时间，旧 v3 缓存不会误用。Worker 16/16、iOS 20/20、逐字长句 UI 1/1。
+- 经既有部署授权上线 Worker `136feabc-d475-4f05-8050-63324d70e0dd`。线上 6 行样本非降级，返回 3 个 scene 和 line 1 / word 0–3 的 Echo Trail，第二次 KV 命中。
+- Debug 真机包已覆盖安装并启动；真实收藏歌曲的 Luna v4 点击生成、缓存 A/B 和 Release 长时间帧率仍待用户体感确认。当前真相见 `cairn/lyric-performance-director.md`。
+
+## 2026-08-19 · 本机逐字对齐改为精度优先
+
+- 修复模型调用硬编码 `English`：优先识别实际歌词强脚本，纯汉字等歧义才使用首次元数据清洗已缓存的歌曲语言。
+- 多行短段改为逐行独立窄窗口；生成后修复字级回摆/越界，并让当前字连续保持到下一字开始。按用户要求不改变既有全局 offset 机制。
+- 纯文本或显式忽略旧轴时，新增本机 Qwen3-ASR 20 秒分块粗定位；LCS 覆盖门禁通过后释放 ASR，再逐行 Forced Aligner 精修。两模型不同时驻留，低置信结果不保存。
+- `OnDeviceLyricsAlignerTests` 9/9，generic iOS Debug build 通过；真实纯文本歌曲的精度、耗时和峰值内存仍需新 Debug 包真机复测。当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · 同版本优先有时间轴的歌词
+
+- 自动匹配仍先对身份，同一档里才选逐字 / 逐行 LRC，不会拿错版本的轴去抢对上的纯文本。
+- 文本候选不再抹掉 LRC，只是默认不跟随播放。当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · 修复本机逐字对齐整曲 Jetsam
+
+- 初版短样本底层推理通过，但真实播放器点击把整首音频一次送入模型；手机日志确认 BiliMusic 以 `per-process-limit` 被 Jetsam，常驻页约 3.46 GB。该短样本验收不代表真实功能通过。
+- 改为利用现有逐行时间轴切成不超过 12 秒/48 单元的短段，逐段推理、逐段清理 MLX cache，全部分段数量与时间轴校验后才写回；只接受真正的逐行歌词。
+- iPhone 17 Pro / iOS 27 用 189.177 秒、45 行、585 字长音频复测：23 段、585/585 一致，累计推理 6.234 秒、峰值内存 1.430 GB，无新 Jetsam。真实「サマータイムレコード」281 秒、64 行、573 字也通过同一核心路径并写回 `word`，推理 5.807 秒、峰值 1.552 GB。
+- 歌曲会出现零长度 timestamp span；现在先允许再补成至少 40ms，保留负时间、越界与大幅倒退门禁。分词/QRC/分段/交界重叠/零长度单测 6/6。
+- 修复版已覆盖安装并正常启动；当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · 首页找歌改走常听歌手
+
+- `ListeningTaste` 从我喜欢、音乐收藏夹和历史里抽出清洗后的歌手，按权重抽 4 个去音乐区搜索。
+- 推荐流降为补量；related 只用这些常听种子。UP 名和「高音质/合集」不会进检索词。
+- 指针：`ListeningTaste`、`RecommendationEngine.tasteArtistSearchCandidates`。当前真相见 `cairn/home-discovery.md`。
+
+## 2026-08-19 · 手动歌词搜索改为五源聚合
+
+- 一次查询网易云、QQ、酷狗、LRCLIB、VocaDB；列表去重后按标题/歌手/时长排序，每条标明来源。
+- 当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · You＆合図 这类无假名日文歌会漏掉 LRCLIB
+
+- 「日语」不再只认假名；拉丁字母+汉字也会走国际源。LRCLIB 只用歌名搜，避免把翻唱者当成原唱歌手导致 0 条。
+- 手动搜索在日语语境默认 LRCLIB。VocaDB 没有这首；LRCLIB 有音乃瀬奏的 *You & 合図*。
+- 当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · 歌词先选对的源，不再一匹配就平移
+
+- 日语/虚拟歌手同时查 LRCLIB 与 VocaDB；网易云/QQ/酷狗结果合并后再按标题+歌手+时长挑，不再谁先返回谁采用。不用 LRCLIB 评分。
+- 首次写入偏移为 0；后台只在本地音频互相关明显好过 0 轴时才改。已对上的官方词不会被结构打分拧歪。
+- 手动搜索可选 LRCLIB / VocaDB。`LyricsIdentityTests` 26/26。当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · Luna v3 扩展为九种歌词演出
+
+- 在 Rise / Impact / Drift / Breathe / Echo 之外新增 Focus（模糊收焦）、Drop（上方落定）、Stretch（横向展开）与 Cascade（多行逐级入场）；动画约 0.62–0.82 秒落稳，Reduce Motion 继续降级。
+- Worker 与 App 双重要求 Cascade 只能用于两行或三行 composition；不改变真实逐行时间轴、不恢复逐字伪同步或文本省略。
+- Worker 15/15、iOS 14/14、长歌词 UI 1/1。部署 `a2beda16-00ab-4109-a861-2e27bedb7b1e` 后，线上 16 行样本的 9 个 scene 使用 8 种效果，四种新增效果全部命中；KV、旧 normalize 与 401 鉴权正常。
+- 未安装新真机包；真实收藏歌曲的 App 内演出体感与 Release 帧率仍待验证。当前真相见 `cairn/lyric-performance-director.md`。
+
+## 2026-08-19 · Luna v2 接管歌词文本构图并禁止省略
+
+- `lyric-performance-v2` 为每个时间点提供 composition，明确选择 1–3 个相邻真实歌词索引；不再把导演限制为固定当前句＋下一句，动效 scenes 仍保持稀疏。
+- 中央歌词和 Echo 残影删除单行截断；长句完整换行。iPhone 17 Pro / iOS 27 长歌词 UI 1/1，实图确认四行全文可见且未压住控制区；iOS 合同 5/5、Worker 14/14。
+- 经既有明确授权部署 Worker `2560706e-5d8a-476d-861f-0349b80aa127`。线上 12/12 composition 合法（5 次单行、7 次双行）、6 个 scene、非降级且第二次 KV 命中；旧 normalize 与 401 鉴权回归正常。
+- 仍未安装新的真机包；真实收藏歌曲的 App 内 A/B、重启缓存和 Release 帧率待验证。当前真相见 `cairn/lyric-performance-director.md`。
+
+## 2026-08-19 · 自动对齐不再被歌词跨度门槛挡住
+
+- 音频互相关先于「歌词必须覆盖曲库 40%」；本地缓存开头的 onset 就能对轴。
+- 落点打分忽略 2 秒以内的时长噪声；整数秒差不再直接当成偏移。
+- `LyricsIdentityTests` 23/23。当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · Luna 歌词导演 Worker 已部署并完成线上验收
+
+- 经用户明确授权部署 `bilimusic-metadata`，当前版本 `6e7fbc6d-472c-450e-8757-a5d3f19ce652`；`/health` 已公布 normalize 与 director 两个端点。
+- 12 行有界验收曲首次请求非降级，Luna 通过 `chat-json-object` 返回 7 个合法 scene（58.3%）；同请求第二次 KV 命中。旧 normalize 端点非降级，director 未授权请求仍为 401。
+- Worker 本地 14/14；未安装真机 Debug/Release 包，真实收藏歌曲的 App 内 A/B、重启缓存和 iPhone 17 Pro 帧率仍待验证。
+- 当前真相与边界见 `cairn/lyric-performance-director.md`。
+
+## 2026-08-19 · Luna 开发期歌词导演已接入本地，Worker 待部署
+
+- 新增 `lyric-performance-v1`、双层校验、歌词哈希缓存和 `LyricPerformanceClient`；有效脚本覆盖本地 cue，缺行/失败/非法结果回退 `LyricMotionDirector`。
+- Debug 播放器菜单提供显式“用 Luna 编排演出 / 重新生成 / 恢复本地歌词导演”，不在播放、换歌、自动歌词或 Release 路径调用。
+- Worker 源码新增 `POST /v1/lyrics/direct` 与独立 prompt，Luna 只能编排五种已验证效果，不能改词或生成代码。复用现有 Bearer/上游 Secret，未写入任何密钥。
+- Worker 14/14；iOS `LyricMotionDirectorTests + LyricPerformanceScoreTests` 11/11；iPhone 17 Pro / iOS 27 的开发入口 1/1，既有歌词入口与密集布局 2/2。
+- **未部署 Worker，未做真实 Luna 请求，也未安装新的 Release 真机包。** 当前真相与部署边界见 `cairn/lyric-performance-director.md`。
+
+## 2026-08-19 · 首页新旧混排并打破 related 重复
+
+- 封面墙先出收藏夹，再把首页推荐流新歌按 3:2 混进去；缓存/历史只作空库兜底。
+- 推荐流用递增 `fresh_idx`；related 只在新歌不够时补。已展示 BV 记 6 小时。
+- 电台不再死拿 related 第一条；多源重复的热门节点降权。
+- 指针：`HomeCoverMixer`、`RecommendationMemory`、`BiliClient.homeFeed`。当前真相见 `cairn/home-discovery.md`。
+
+## 2026-08-19 · 歌词自动对齐改成落点 + 音频互相关
+
+- 不再把曲库和视频的整数秒差直接当成偏移。先看第一句/最后一句落在视频的哪里，分辨片头垫还是片尾多。
+- 自动缓存落盘后读取本地 m4a 能量，和歌词 onset 互相关；不额外拉流，也不覆盖用户滑过的偏移。
+- 指针：`LyricsOffsetEstimator`。当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · 中央歌词升级为自适应逐行动效画布
+
+- 新增纯逻辑 `LyricMotionDirector`，按句长、标点、时值、重复结构和稳定歌曲/行标识，确定性选择 Rise / Impact / Drift / Breathe / Echo；同一句跨启动不随机变化。
+- 当前句使用 24–32pt 与不同字重/对齐/字距；换句负责入退场，句中只启动一次漂移、呼吸或残影动画。逐行时间轴是完整主路径，不伪造字符时间。
+- 动画仅在 full player 展开、播放中且 App active 时运行；中途打开只跑当前句剩余时间，Reduce Motion 降级为淡入淡出。
+- 唯一视觉与性能目标为用户自用的 iPhone 17 Pro / iOS 27，不再以 SE 兼容限制设计。`LyricMotionDirectorTests` 7/7；iPhone 17 Pro / iOS 27 歌词入口与密集布局 2/2。逐字中央画布增强与 Release 真机帧率留待后续。
+- 当前真相见 `LyricMotionDirector.swift`、`PlayerInlineLyricsPreview` 与 `cairn/visual-language.md`。
+
+## 2026-08-19 · 歌词延迟可自动整段对齐
+
+- 首次匹配且还没有手动偏移时，若曲库时长与视频相差 2–10 秒，按差值把歌词整体提前或延后。
+- 只修片头多/少几秒；变速翻唱仍对不上。校准页增加「自动对齐」，已有偏移不覆盖。
+- 指针：`LyricsOffsetEstimator`。当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · 歌词搜索改用日文原名
+
+- 日文歌不再拿中文译名去搜网易云 / QQ / 酷狗。查询只用清洗后的假名原名，加上原唱或翻唱者。
+- 译名仍留在 `aliases`，只用来判断候选是不是同一首歌。旧 Worker 缓存里带译名的 `lyricSearchQueries` 会被客户端丢掉。
+- Worker `buildSearchQueries` 同步去掉译名查询。`LyricsIdentityTests` 20/20，Worker 12/12。当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · 歌词校准改为滑块
+
+- `⋯` 里的 ±0.5 秒按钮换成系统 sheet：±10 秒滑块、拖动即时对轴、接近 0 吸附、松手后写入 `lyrics-library.json`。
+- 指针：`LyricsOffsetSheet`、`PlayerEngine.setLyricOffset`。当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · 播放器中部改为两行同步歌词
+
+- 删除封面页与队列页的系统音量条；音量继续交给实体键，AirPlay 系统路由入口保留。
+- metadata 与控制簇之间的唯一弹性区显示当前句和下一句；换句时轻量向上滚动，最后一句退化为单行，点击进入同层完整歌词。无同步歌词或 MV 模式保持留白，不生成假歌词。
+- 模拟器实图确认初稿 17/14pt 在整屏比例中过小；收口为当前句 24pt bold、下一句 18pt semibold，并取消长句自动缩小。
+- UI target build-for-testing 通过；iPhone 17 / iOS 27 的歌词预览入口与密集布局 2/2、iPhone SE (3rd generation) / iOS 26.3.1 的密集布局 1/1 通过。当前真相见 `PlayerInlineLyricsPreview` 与 `cairn/visual-language.md`。
+
+## 2026-08-19 · 竖屏播放器改为单一弹性空间
+
+- 不改封面、控件造型、系统音量或底部功能栏，只重分配 portrait layout 的纵向空间所有权。
+- 封面与 metadata 使用 12/16pt 固定间距；progress / transport / volume 组成 compact/regular 固定节奏控制簇；主要剩余高度仅由 metadata 与控制簇之间的一处 `Spacer` 吸收，volume 到 utility 使用 12/18pt 有界间距。
+- `PlayerChromeUITests` 改为直接测封面、音量和各段 frame；iPhone SE (3rd generation) / iOS 26.3.1 与 iPhone 17 / iOS 27 的密集布局回归各 1/1 通过。当前真相见 `NowPlayingView.swift` 与 `cairn/visual-language.md`。
+
+## 2026-08-19 · 自动歌词改优先原唱
+
+- 自动匹配默认采用原唱歌词。翻唱词只有歌名、翻唱者、时长差 ≤3s 同时成立才抢先采用。
+- 菜单「搜索翻唱者版本」仍按翻唱检索，不受该门槛限制。`LyricsIdentityTests` 18/18。
+- 当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · 删除 B 站字幕歌词来源
+
+- 去掉 `BiliSubtitleLyricsProvider` 和 `BiliClient` 字幕接口；歌词只走网易云 / QQ / 酷狗、AMLL、VocaDB 与本地导入。
+- 加载歌词库时丢弃已缓存的 B 站字幕，避免口白挡住正确匹配。`LyricsIdentityTests` 16/16。
+- 当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · mini player 与 Tab Bar 回归 iOS 27 Apple Music 原生节奏
+
+- 用户明确要求首页 mini player 和底部 Tab 使用 iOS 27 Apple Music 的原生滚动逻辑，而不是永久展开。
+- 有当前歌曲时恢复 `.tabBarMinimizeBehavior(.onScrollDown)`；LNPopup `.floatingCompact` 继续继承 bottom-bar metrics，随系统 Tab 一起进入 inline。无歌曲时仍为 `.never`，防止空 accessory 槽位。
+- 将旧的“始终可见”UI 回归改为验证滚动后 Tab 或 mini 的原生紧凑几何变化，并要求 compact 状态下 mini 仍存在。
+- 当前工程与 UI 测试 target 的 build-for-testing 通过；在干净的 iPhone 17 / iOS 27 模拟器上，原生 Tab/mini 滚动紧凑态 UI 回归 1/1 通过。当前真相见 `RootView.swift` 与 `cairn/player-gesture-performance.md`。
+
+## 2026-08-19 · 歌词封面缩放改成单视图 frame 动画
+
+- 去掉封面 `matchedGeometry`：缩放时不再同时合成两棵播放页、大图解码和 16pt 阴影。
+- 同一张已解码封面只改 frame；阴影在动画期间关掉。
+- 指针：`NowPlayingView.portraitCover`。
+
+## 2026-08-19 · 歌词改回同一层正在播放，而不是新页
+
+- 纠正前一条：原版歌词没有进度/播放键/音量，也不是先显示再自动隐藏。
+- 底部 `歌词 | AirPlay | 队列` 留在 `NowPlayingView`，不随内容翻页；封面在同一视图里收到顶栏，不用 matchedGeometry。
+- 指针：`NowPlayingView.swift`、`PlayerLyricsPage.swift`。
+
+## 2026-08-19 · 歌词页播放控件按 Apple Music 自动隐藏
+
+- 进入歌词后进度、播放键和音量先出现，约 5 秒无操作后淡出，歌词铺满到 utility bar。
+- 点歌词、滑动或拖动进度会再显示；底部 `歌词 | AirPlay | 队列` 与顶栏始终保留。
+- UI 测试覆盖显隐往返。指针：`PlayerLyricsPage.swift`。
+
+## 2026-08-19 · 手动选词不再冻成待确认
+
+- 点选候选、按翻唱/原唱搜索会保留 LRC/逐字时间轴；「适用于当前翻唱」会从歌词正文恢复时间轴。
+- 自动匹配仍对原唱套翻唱保守处理。`LyricsIdentityTests` 16/16。
+- 当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · 歌词开关对齐 Apple Music
+
+- 歌词页补回底部 `歌词 | AirPlay | 队列`；同一按钮再点关回封面，也可从歌词页直接切队列。
+- 图标固定 `quote.bubble`，选中只用白底圆，不再用 fill 表示「已有歌词」。
+- UI 测试覆盖开关往返。指针：`PlayerLyricsPage.swift`、`NowPlayingView.appleMusicUtilityBar`。
+
+## 2026-08-19 · 自动歌词必须标题对上才采用
+
+- 自动匹配不再「有词就用」：候选歌名必须对上干净标题或别名，同翻唱者的另一首歌会被跳过。
+- B 站字幕退出自动链路，避免口白/错歌被缓存成歌词；手动搜索三平台不受影响。
+- 已缓存的错词需在歌词页「重新搜索」。`LyricsIdentityTests` 14/14。
+- 当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · 去掉 B 站字幕翻译轨
+
+- `BiliSubtitleLyricsProvider` 不再拉取或对齐中文字幕；B 站来源只保留日文或主轨歌词。
+- 网易云 / QQ / AMLL 翻译不受影响。已缓存的旧字幕需「重新搜索」才会去掉串台翻译。
+- 当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · 执行 Phase 05 原生风格与歌词页
+
+- 05-01…05-05 已落地：删底部抽屉死代码；拆出 `PlayerQueuePage` / `PlayerContextStore` / `PlayerSurface` token；歌词改为播放器内三页之一；逐字辉光与跟随；首页渐变、队列中文、封面淡入、长按预览、收藏错误胶囊。
+- 编译通过；`BiliMusicTests` 203/203。歌词页/队列页/密集布局 UI 断言通过。搜索框与 mini 浅拖仍偶发失败，与本期无关。
+- 真机待确认：歌词/队列往返、LNPopup 转场、浅色首页顶部无黑带。
+- 指针：`PlayerLyricsPage.swift`、`LyricHighlightModel.swift`、`.planning/phases/05-native-feel-and-lyrics/05-00-DESIGN.md`。
+
+## 2026-08-19 · 歌词匹配与时间轴误用修复
+
+- 官方歌在没有清洗结果时不再因为「歌手对不上」被全部跳过；标题重合即可采用。
+- B 站字幕必须像歌词才自动采用，避免短 CC 永久挡住三平台结果。
+- 原唱无时长或时长差大时不再假装可同步；AMLL 翻译/罗马音不再并进主歌词。
+- 重新匹配保留用户偏移；纯文本歌词不再滚动到最后一行。
+- `BiliMusicTests` 198/198。当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · 原生感收敛与歌词重构设计稿
+
+- 全量 UI review 结论：不推倒重构，做结构性收敛；差距集中在歌词容器、播放器死代码与抛光细节。
+- 核查更正：底部三段抽屉（`bottomContextDrawer` 子树约 700–900 行）是无调用点的死代码，活跃队列只有整页队列一套，与 STATE.md「dormant drawer」记录一致。
+- 用户要求全 App 对齐「iOS 27 原生风格」（Liquid Glass 2.0）且方案需移交给其他模型执行；设计稿已扩为实施规格：基准定义、全局 token 表（间距/字级/颜色/圆角/图标/触感唯一合法值）、逐页面规格、死代码删除清单、文件拆分映射、05-01…05-05 切片与逐片验证命令。iOS 27 关键含义：系统外壳已自动达标；材质只许系统 API；封面色塑形整页与横屏 Now Playing 与 iOS 27 Apple Music 同向。
+- 审美决策已全部拍死（歌词页 16:9 小封面、合集留更多菜单、不做拖拽排序并删假图标、mini bar 保持 16:9、歌词控制收进 ⋯ 菜单、首页顶部渐变改动态背景色）；执行者守则禁止自由发挥。
+- 指针：`.planning/phases/05-native-feel-and-lyrics/05-00-DESIGN.md`。
+
+## 2026-08-19 · 分层身份 + 翻唱优先歌词
+
+- Worker 升到 `music-metadata-v7-layered-identity` 并已部署，未回滚 v6；输出原唱/翻唱/isCover/检索词，低置信度不填原唱。
+- App 显示翻唱为「翻唱者（翻唱） · 原唱：…」；清洗写入 `track-metadata.json`，降级结果不落盘。
+- `LyricsResolver` 改为翻唱版优先、原唱回退，带版本范围与时间轴安全；本地命中和第二遍播放不发歌词请求，未命中缓存 7 天。
+- 接入 B 站字幕、AMLL TTML、VocaDB；歌词页可重新识别、分版本搜索、导入和手动修正。
+- 窄测：Worker 12/12，`BiliMusicTests` 189/189。真机尚未重装。
+- 当前真相见 `cairn/lyrics-architecture.md`。
+
+## 2026-08-19 · 已登录收藏写入音乐收藏夹
+
+- 播放器点收藏改为 `FavoriteFolderSelector`：设置里的音乐收藏夹优先，其次标题含音乐/歌曲/music 的夹，没有才退回 B 站「默认收藏夹」。
+- 首页封面源用同一套选择，避免 lastFolderId 把音乐夹挤掉。
+- 本环境仍无法写 `~/Library/Caches/org.swift.swiftpm`，`xcodebuild test` 未跑成。
+- 指针：`FavoriteFolderSelector.swift`、`FavoriteManager.targetFolderId()`。
+
+## 2026-08-19 · 补齐会话、本地库和音乐身份
+
+- 对照 AprDeci 落地三刀：`MusicMetadata` 从播放器拆出，`BiliSession` 承接 Cookie，收藏增加本地「我喜欢」和远程夹离线缓存。
+- 歌词自动匹配/手动候选改由 `MusicMetadataController` 编排，`PlayerEngine` 仍只在出声后调用。
+- 401/-101 进入共享过期态；设置页和收藏页提示重新扫码，本地库可继续播。
+- 新增单测：`BiliSessionTests`、`LibraryStoreTests`、`MusicMetadataTests`。本环境 SwiftPM 沙箱无法跑 `xcodebuild`。
+- 当前真相见 `cairn/session-library-metadata.md`。
+
 ## 2026-08-19 · 队列恢复、cid、缓存限额与搜索首屏
 
 - 冷启动从 `playback-queue.json` 恢复队列、下标、模式和进度，暂停待命并显示 mini player；电台恢复为顺序播放。

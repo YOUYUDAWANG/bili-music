@@ -20,6 +20,7 @@ authoring_mode: ai_generated
 - 本地音频上限 120 首，按访问 LRU 淘汰，不删正在播放或正在下载的文件。
 - 慢启动 CDN 回退改为先探测、满 1.2s 仍未出声再切线，避免「先空等再探路」。
 - 自动缓存仍只在首帧之后调度，不回到点歌关键路径。
+- 起播（playurl / pageList / videoInfo）走独立 `playbackSession`。首页发现搜索最多 2 路并发，点封面会取消发现任务，避免和出声抢 `api.bilibili.com` 连接。发现在封面墙出来 2 秒后再发。
 
 ## 决策记录
 

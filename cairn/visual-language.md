@@ -8,7 +8,7 @@ BiliMusic 不再把 Apple Music 当作完整视觉模板。Apple Music 只提供
 
 | 层级 | 当前语言 |
 |---|---|
-| 系统外壳 | 原生 `TabView` + LNPopup mini/full 开合，兼容系统 Liquid Glass，不自绘底栏 |
+| 系统外壳 | 原生 `TabView` + LNPopup mini/full 开合；有歌曲时按 `.onScrollDown` 共同进入 iOS 27 inline 紧凑态，不自绘底栏 |
 | 首页 | 纯粹的纵向海报瀑布流；1 张全宽 + 4 张双列连续重复 |
 | 播放器 | 16:9 封面接近屏幕边缘；标题/歌手沿封面左缘排版；封面派生双色光场 |
 | 工具页 | 搜索、缓存、设置与普通列表保持高效率和克制蓝青强调色 |
@@ -38,7 +38,11 @@ BiliMusic 不再把 Apple Music 当作完整视觉模板。Apple Music 只提供
 
 - 播放器封面是唯一 LNPopup transition target；大图使用 8pt continuous 圆角（与首页 4pt 形成自然的宽幅阶梯）。
 - 背景取 `PlayerArtworkPalette.top` 与 `bottom`，只加轻微暗化；不用封面模糊、径向 glow、持续 glitch 或扫描线。
-- 标题与歌手像电影字幕一样左对齐并贴齐封面边缘；控制区仍使用熟悉的音乐操作模型。
+- 竖屏纵向层级固定为 `Artwork + Metadata`、`Inline Lyrics`、`Playback Cluster`、`Utility`：封面到信息为 12/16pt；中间唯一弹性区由歌词导演决定每个时间点显示 1–3 行真实时间轴文本，不固定两句；进度到主控为 12/18pt；主控到底部功能栏只留 12/18pt 有界间距。播放器与队列不显示软件音量条，音量交给实体键，AirPlay 系统入口保留。
+- 中央歌词只使用真实同步时间：`LyricMotionDirector` 与 Luna v3 可在 Rise / Impact / Drift / Breathe / Echo / Focus / Drop / Stretch / Cascade 九种效果中选型。Focus 是模糊与字距收焦，Drop 从上方落定，Stretch 从横向压缩展开，Cascade 逐级带入多行且禁止用于单行；新增效果在 0.62–0.82 秒内落稳，不做持续 glitch。compositions 仍只选择当前附近真实歌词；长句保持 24–32pt 主视觉并完整换行，所有正文和 Echo 残影都禁止省略号。
+- 稳定歌曲/行哈希只用于中性句的变体与方向，同一句跨启动必须一致；无逐字时间轴时绝不平均分配字符时间。动画只在 full player 展开、播放中且 App active 时运行，Reduce Motion 降级为淡入淡出；无歌词或 MV 模式保持留白，点击画布进入完整歌词。
+- 播放器视觉与性能只针对用户自用的 iPhone 17 Pro / iOS 27 验收；不再用 SE 的高度和密度约束字体、位移或留白。仍保留基本自适应，避免其他尺寸直接崩坏。
+- 控制区仍使用熟悉的音乐操作模型；歌词是同一层正在播放的模式切换（不是新页、不是 sheet），底部歌词按钮保持可见并再点关闭；进度/播放键/音量在歌词模式直接不出现；校准/翻译/搜索收进 `⋯` 菜单。
 - MV 可保留必要系统材质浮层，普通内容和队列不新增玻璃卡。
 
 ## 已否决方向
@@ -47,7 +51,7 @@ BiliMusic 不再把 Apple Music 当作完整视觉模板。Apple Music 只提供
 
 ## 验证边界
 
-- generic iOS Simulator 构建必须通过。
+- iPhone 17 Pro / iOS 27 Simulator 构建与窄 UI 回归必须通过；最终动效性能只以同型号 Release 真机为准。
 - 用真实极端封面检查纯瀑布流和播放器长标题；缺图/加载仍保持现有中性状态。
 - 检查 4pt 组内 / 8pt 组间节奏在真实封面上仍保持连续，首页播放进度订阅只局限在当前封面的细线子视图。
 - LNPopup 连续开合、慢拖取消、进度 scrub、独立队列与空 mini 槽位继续由现有交互边界保护。

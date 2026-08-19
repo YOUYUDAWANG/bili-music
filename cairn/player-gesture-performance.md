@@ -5,7 +5,7 @@ summary: "记录播放器翻页与收起动画的性能约束，以及进度条�
 tags: [player, gesture, performance, swiftui]
 contains: [decision, lesson]
 created: "2026-08-12"
-updated: "2026-08-14"
+updated: "2026-08-19"
 related: ["BiliMusic/Features/Player/NowPlayingView.swift", "BiliMusic/Features/Player/PlayerControlViews.swift", "BiliMusic/Features/RootView.swift"]
 authoring_mode: ai_generated
 ---
@@ -25,7 +25,7 @@ authoring_mode: ai_generated
 - 主播放页只承担封面、元数据、进度和播放操作；队列明细只在独立队列页出现，避免重复信息和重复列表渲染。
 - 播放页自身不再挂中心区/顶部纵向 dismiss 手势，避免和 popup controller 的惯性、取消及横向分页竞争；顶部向下箭头已移除，整页下滑只由同一个 popup controller 接管。
 - mini player 使用 LNPopupUI 标准 bar 而不是 custom bar，以保留上游多年打磨的 docking、安全区、惯性、玻璃样式和收回细节。
-- Tab Bar 固定使用 `.never`：用户要求有 mini player 时底部四个系统 Tab 仍持续可见、可点，不随首页滚动收起。iOS 27 模拟器已验证该策略下 LNPopup 仍可从 mini 拖开并从全屏下拉收回。
+- Tab Bar 回归 iOS 27 Apple Music 同类的原生滚动逻辑：有当前歌曲时使用 `.onScrollDown`，让系统 Tab 与继承 bottom-bar metrics 的 LNPopup mini 一起压缩为 inline；无歌曲时保持 `.never`，避免系统为不存在的 accessory 留出空槽位。
 - popup bar 使用固定 48pt 的 `.floatingCompact` 并继承 bottom bar metrics；inline 状态只保留播放/暂停按钮并隐藏下一首，使播放控件与两侧折叠底栏按钮等高。普通 `.floating` 固定为 58pt，不能用于该布局。
 - iOS 27 开启 popup content transition，使展开与收回末帧由 snapshot 连续交接到 live view，避免收进底栏时的闪切；列表重内容留在独立队列页中。
 - popup item 不暴露进度值；播放进度只由全屏页的局部 `PlayerProgressBar` 订阅，避免 0.5 秒一次的 `currentTime` 更新使 RootView、TabView 和首页滚动树同步刷新。
@@ -48,6 +48,7 @@ authoring_mode: ai_generated
 - 手势误触不能只靠外层识别区域规避；子手势若以零距离和最高优先级启动，会在外层判断之前取得所有权。
 - SwiftUI 中对连续手势状态添加隐式动画会制造拖尾和掉帧感，即使最终动画参数本身看似平滑。
 - 同一拖动手势重复挂在父子视图上，会增加状态写入与竞争；优先保留单一所有者，再为真正独立的控件设置窄范围高优先级手势。
+- 歌词与封面之间不要用 `matchedGeometryEffect` 插值带阴影的 `CachedAsyncImage`；应保持同一封面视图身份，只动画 frame，阴影在动画期间关掉。
 - 长列表即使视觉上只显示少数行，也可能提前构建大量行；collapsed/split 应使用当前项附近的窗口，完整数据仅在 fullQueue 中展开。
 - 当需求是 Apple Music 的连续几何转场、速度继承和 dock 收回时，继续堆叠 SwiftUI offset/scale/matched geometry 只会复制表象；应使用统一拥有 bar 与 content 生命周期的容器。
 - Xcode 27 Beta 会错误截断 LNPopupController 4.5.5 中由清单递归生成、且首段重复 target 名称的头文件路径；显式 `./` 前缀可稳定消除该截断。

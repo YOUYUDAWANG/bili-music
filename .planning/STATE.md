@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 4
-current_phase_name: Interface Cohesion and Search Polish
-status: complete
-stopped_at: Completed 04-01-PLAN.md
+current_phase: 5
+current_phase_name: Native Feel and Lyrics
+status: in_progress
+stopped_at: Executed 05-00-DESIGN.md slices 05-01 through 05-05
 last_updated: "2026-08-19T00:00:00Z"
-last_activity: 2026-08-19
-last_activity_desc: Migrated the metadata Worker from Workers AI to private gpt-5.6-luna and verified live latency and accuracy; iOS integration remains pending
+last_activity: 2026-08-20
+last_activity_desc: LDDC manual selection now survives overlapping searches and can refetch a missing verified document by provider ID; signed app installed
 progress:
   total_phases: 4
   completed_phases: 4
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-27)
 
 **Core value:** 让音乐尽快、稳定地响起来；当功能冲突时，播放启动速度和不中断播放优先于推荐、歌词、MV、UI 动效和其他增强体验。
-**Current focus:** Replace the iOS BM resolver with the deployed private metadata Worker, then validate lyrics and the finalized player flow on device
+**Current focus:** Confirm the installed LDDC candidate-selection fix on device, then validate exact-cover, original-reference, and fallback paths; continue Windows GPU precision and Phase 05 feel checks
 
 ## Current Position
 
 Phase: 4 — Interface Cohesion and Search Polish
 Plan: 1 of 1 — 04-01
 Status: Complete
-Last activity: 2026-08-19 — Migrated the Japanese-safe metadata Worker to private gpt-5.6-luna via chat-json-object, removed Workers AI usage, and verified live samples and KV latency; the iOS app has not switched endpoints yet
+Last activity: 2026-08-19 — Split music identity, session, and local library out of the Bilibili API shapes; device confirmation and remaining xcodebuild verification are pending
 
 Progress: [##########] 100%
 
@@ -130,8 +130,8 @@ Recent decisions affecting current work:
 - [Phase 03-01]: The UI fixture uses mini-player-relative drag coordinates to avoid simulator-global coordinate drift while preserving deliberate-open and shallow-cancel coverage.
 - [Current player model]: Portrait queue and AutoPlay recommendations use the active dedicated queue page opened from the utility bar; the dormant historical three-state drawer is not part of the current route.
 - [Current player model]: MV/music switching remains in the persistent toolbar and does not block initial audio playback.
-- [Current Home model]: Home no longer runs discovery recommendations; it renders a persisted favorite-cover snapshot first, then merges cache/history and refreshes the selected Bilibili folder in the background.
-- [Current Home model]: Recommendation remains a secondary player/radio capability and is intentionally absent from the app-launch surface.
+- [Current Home model]: Home paints the favorite-cover snapshot first, then mixes in discovery from the paginated Bilibili home feed; cache/history are only an empty-library fallback.
+- [Current Home model]: Recommendation memory excludes recently shown BVs for six hours so related hubs and the home feed do not keep repeating the same songs.
 - [Phase 03-player-interaction-and-regression-coverage]: Recommendation tap stability is protected by a regression assertion that suppression is assigned before related playback starts.
 - [Current player model]: LNPopup owns mini/full vertical presentation; Home cover taps use a Home-local system zoom and temporarily hide the popup bar, while the active queue page owns its own list scrolling.
 - [Phase 03-03]: Progress scrub owns the full progress block, including label hit targets, so page swipes cannot steal scrub gestures.

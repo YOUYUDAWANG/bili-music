@@ -91,7 +91,7 @@ Deferred items are important, but they should not block v1 stabilization.
 |---------|--------|
 | App Store release | This is a personal sideload app; public distribution is not part of the current project. |
 | Full Bilibili client | Comments, danmaku, social feed, profiles, uploads, live, and community features are outside the music-first product. |
-| Backend service | Current product should remain a local iOS app without operational backend cost. |
+| Public multi-user backend | Private metadata, LDDC lyrics, and precision-host services are bounded personal infrastructure; a public account/data backend remains outside scope. |
 | Cross-platform clients | Android, macOS, Web, and CarPlay are not part of the current roadmap. |
 | Social playlist sharing | Reuse Bilibili folders/collections and local queue/cache before adding any social model. |
 | Bypassing Bilibili access limits | The app may use what the user's account can access, but will not promise to bypass membership, region, or rights restrictions. |
