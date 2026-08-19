@@ -12,8 +12,31 @@ final class PlayerChromeUITests: XCTestCase {
             "-cleanListTitles", "false"
         ]
         app.launchEnvironment["BILIMUSIC_UITEST_FIXTURE"] = "1"
-        if name.contains("Lyrics") {
+        if name.contains("Lyrics") || name.contains("StageV5") {
             app.launchEnvironment["BILIMUSIC_UITEST_LYRICS"] = "1"
+        }
+        if name.contains("KaraokeSweep") {
+            app.launchEnvironment["BILIMUSIC_UITEST_PLAYBACK_TIME"] = "0.175"
+        }
+        if name.contains("StagePrototype") {
+            app.launchEnvironment["BILIMUSIC_LYRIC_STAGE_PROTOTYPE"] = "1"
+        }
+        if name.contains("StageV5") {
+            app.launchEnvironment["BILIMUSIC_LYRIC_STAGE_V5"] = "1"
+        }
+        if name.contains("StageV51") {
+            app.launchEnvironment["BILIMUSIC_UITEST_LYRICS"] = "1"
+            app.launchEnvironment["BILIMUSIC_LYRIC_STAGE_V51"] = "1"
+        }
+        if name.contains("StageV52") {
+            app.launchEnvironment["BILIMUSIC_UITEST_LYRICS"] = "1"
+            app.launchEnvironment["BILIMUSIC_UITEST_YOU_AIZU"] = "1"
+            app.launchEnvironment["BILIMUSIC_LYRIC_STAGE_V52"] = "1"
+        }
+        if name.contains("StageV53") {
+            app.launchEnvironment["BILIMUSIC_UITEST_LYRICS"] = "1"
+            app.launchEnvironment["BILIMUSIC_UITEST_YOU_AIZU"] = "1"
+            app.launchEnvironment["BILIMUSIC_LYRIC_STAGE_V53"] = "1"
         }
         app.launch()
     }
@@ -94,7 +117,132 @@ final class PlayerChromeUITests: XCTestCase {
         XCTAssertTrue(element("nowPlayingArtwork").exists, "Artwork may participate in the mini-to-full transition.")
         XCTAssertTrue(element("nowPlayingMetadata").waitForExistence(timeout: 0.8), "Metadata should appear promptly after opening.")
         XCTAssertTrue(element("nowPlayingProgress").waitForExistence(timeout: 0.8), "Progress should appear promptly after opening.")
-        XCTAssertTrue(element("playerToolbar").waitForExistence(timeout: 0.8), "Player actions should appear promptly after opening.")
+        XCTAssertTrue(element("playerUtilityBar").waitForExistence(timeout: 0.8), "Player actions should appear promptly after opening.")
+    }
+
+    @MainActor
+    func testStagePrototypeRendersInsideArtworkPlayerCanvas() throws {
+        try openFullPlayerFromMini()
+
+        let prototype = element("lyricStagePrototype")
+        XCTAssertTrue(prototype.waitForExistence(timeout: 3), "The local v5 motion study should replace only the inline lyric canvas.")
+        XCTAssertTrue(element("nowPlayingArtwork").exists, "The prototype must preserve the existing artwork layout.")
+        XCTAssertTrue(element("nowPlayingProgress").exists, "The prototype must not replace playback controls.")
+        XCTAssertTrue(element("playerUtilityBar").exists, "The prototype must keep the Apple Music utility bar.")
+
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Lyric Stage Prototype"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
+    func testStageV5RendersRealTimedLyricsInsideArtworkCanvas() throws {
+        try openFullPlayerFromMini()
+
+        let stage = element("lyricStageView")
+        XCTAssertTrue(stage.waitForExistence(timeout: 3), "The v5 stage should compile the fixture's real timed lyrics locally.")
+        XCTAssertTrue(element("nowPlayingArtwork").exists)
+        XCTAssertTrue(element("nowPlayingProgress").exists)
+        XCTAssertTrue(element("playerUtilityBar").exists)
+        XCTAssertFalse(element("lyricStagePrototype").exists, "The real lyric stage and hard-coded study must be mutually exclusive.")
+
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Lyric Stage V5 Real Lyrics"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
+    func testStageV51RendersEventCanvasInsideArtworkCanvas() throws {
+        try openFullPlayerFromMini()
+
+        let stage = element("lyricStageCanvasView")
+        XCTAssertTrue(stage.waitForExistence(timeout: 3), "The V5.1 canvas should replace only the inline lyric canvas.")
+        XCTAssertTrue(element("nowPlayingArtwork").exists)
+        XCTAssertTrue(element("nowPlayingProgress").exists)
+        XCTAssertTrue(element("playerUtilityBar").exists)
+        XCTAssertFalse(element("lyricStagePrototype").exists)
+        XCTAssertFalse(element("lyricStageView").exists)
+
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Lyric Stage V5.1 Events"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
+    func testStageV52RendersYouAizuGoldenStudyInsideArtworkCanvas() throws {
+        let samples: [(String, Double)] = [
+            ("00-intro", 8.0),
+            ("01-wake", 19.5),
+            ("02-tuning", 31.8),
+            ("01-step", 39.2),
+            ("02-blink", 45.9),
+            ("03-promise", 51.6),
+            ("04-converge", 56.4),
+            ("08-hook-final", 66.5),
+            ("09-drive", 75.4),
+            ("10-conduct", 84.9),
+            ("11-sunday", 100.2),
+            ("12-reprise", 126.7),
+            ("13-final", 156.2),
+            ("14-outro", 170.0),
+        ]
+        for sample in samples {
+            app.terminate()
+            app.launchEnvironment["BILIMUSIC_UITEST_PLAYBACK_TIME"] = String(sample.1)
+            app.launch()
+            try openFullPlayerFromMini()
+
+            let stage = element("youAizuGoldenStage")
+            XCTAssertTrue(stage.waitForExistence(timeout: 3))
+            XCTAssertTrue(element("nowPlayingArtwork").exists)
+            XCTAssertTrue(element("nowPlayingProgress").exists)
+            XCTAssertTrue(element("playerUtilityBar").exists)
+            XCTAssertFalse(element("lyricStageCanvasView").exists)
+            XCTAssertFalse(element("lyricStagePrototype").exists)
+
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = "You and Aizu V5.2 \(sample.0)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+
+    @MainActor
+    func testStageV53RendersGenericFullSongChoreographyAcrossYouAizu() throws {
+        let samples: [(String, Double)] = [
+            ("00-intro", 8.0),
+            ("01-verse", 19.5),
+            ("02-dialogue", 45.9),
+            ("03-hook-call", 58.4),
+            ("04-hook-echo", 61.0),
+            ("05-hook-converge", 63.7),
+            ("06-hook-lock", 66.3),
+            ("07-middle", 100.2),
+            ("08-reprise", 126.7),
+            ("09-final", 156.2),
+        ]
+        for sample in samples {
+            app.terminate()
+            app.launchEnvironment["BILIMUSIC_UITEST_PLAYBACK_TIME"] = String(sample.1)
+            app.launch()
+            try openFullPlayerFromMini()
+
+            let stage = element("lyricStageV53")
+            XCTAssertTrue(stage.waitForExistence(timeout: 3))
+            XCTAssertTrue(element("nowPlayingArtwork").exists)
+            XCTAssertTrue(element("nowPlayingProgress").exists)
+            XCTAssertTrue(element("playerUtilityBar").exists)
+            XCTAssertFalse(element("youAizuGoldenStage").exists)
+            XCTAssertFalse(element("lyricStageCanvasView").exists)
+
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = "Generic V5.3 You and Aizu \(sample.0)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
     }
 
     @MainActor
@@ -105,7 +253,7 @@ final class PlayerChromeUITests: XCTestCase {
         let queuePage = element("playerAppleMusicQueue")
         XCTAssertTrue(queuePage.waitForExistence(timeout: 2), "The current queue should use the dedicated queue page.")
         XCTAssertTrue(staticText(containing: "Fixture Song Two").waitForExistence(timeout: 2), "The queue page should expose the next queue item.")
-        XCTAssertTrue(staticText(containing: "AutoPlay").waitForExistence(timeout: 2), "The queue page should keep AutoPlay recommendations in the same scroll surface.")
+        XCTAssertTrue(staticText(containing: "自动播放").waitForExistence(timeout: 2), "The queue page should keep AutoPlay recommendations in the same scroll surface.")
         XCTAssertFalse(element("playerBottomContextDrawer").exists, "The retired three-state drawer should not be part of the active player route.")
         XCTAssertTrue(element("nowPlayingView").waitForExistence(timeout: 1), "Opening the queue page should keep the player presented.")
     }
@@ -118,19 +266,142 @@ final class PlayerChromeUITests: XCTestCase {
         XCTAssertTrue(lyricsButton.waitForExistence(timeout: 3), "Loaded lyrics should expose the lyrics action.")
         lyricsButton.tap()
 
-        let lyricsSheet = app.navigationBars["Fixture Song One"]
-        XCTAssertTrue(lyricsSheet.waitForExistence(timeout: 3), "Lyrics action should open the native lyrics sheet.")
-        XCTAssertTrue(staticText(containing: "Electric night begins").waitForExistence(timeout: 2), "The sheet should render synchronized lyrics.")
-        XCTAssertTrue(staticText(containing: "电光之夜开始").waitForExistence(timeout: 2), "The sheet should render the aligned translation.")
+        let nowPlaying = element("nowPlayingView")
+        XCTAssertTrue(nowPlaying.waitForExistence(timeout: 2), "Lyrics should stay inside the now-playing surface.")
+        let lyricsPage = element("playerLyricsPage")
+        XCTAssertTrue(lyricsPage.waitForExistence(timeout: 3), "Lyrics action should stay on the now-playing surface.")
+        XCTAssertTrue(element("nowPlayingProgress").waitForNonExistence(timeout: 2), "Lyrics mode should not keep the playback progress control.")
+        XCTAssertTrue(element("playerTransportControls").waitForNonExistence(timeout: 2), "Lyrics mode should not keep play/skip controls.")
+        XCTAssertTrue(element("playerUtilityBar").waitForExistence(timeout: 2), "Lyrics mode should keep the bottom lyrics/queue switcher.")
+        XCTAssertTrue(element("playerLyricsButton").isSelected, "The lyrics button should stay selected while lyrics are shown.")
+        XCTAssertTrue(staticText(containing: "Electric night begins").waitForExistence(timeout: 2), "The page should render synchronized lyrics.")
+        XCTAssertTrue(staticText(containing: "电光之夜开始").waitForExistence(timeout: 2), "The page should render the aligned translation.")
 
-        let offset = element("lyricsOffsetControl")
-        XCTAssertTrue(offset.waitForExistence(timeout: 2), "Lyrics timing controls should stay available.")
-        XCTAssertTrue(offset.label.contains("重置歌词偏移"), "The offset control should remain accessible.")
+        let more = element("lyricsMoreMenu")
+        XCTAssertTrue(more.waitForExistence(timeout: 2), "Lyrics controls should live in the more menu.")
+        more.tap()
+        let calibration = app.buttons["歌词校准"]
+        XCTAssertTrue(calibration.waitForExistence(timeout: 2), "The more menu should expose lyrics calibration.")
+        calibration.tap()
+        XCTAssertTrue(element("lyricsOffsetSheet").waitForExistence(timeout: 2), "Calibration should open a sheet.")
+        XCTAssertTrue(app.sliders["lyricsOffsetControl"].waitForExistence(timeout: 2), "Calibration should offer an offset slider.")
+        XCTAssertTrue(app.buttons["重置"].waitForExistence(timeout: 2), "Calibration should offer a reset action.")
+        XCTAssertTrue(app.buttons["lyricsAutoAlignButton"].waitForExistence(timeout: 2), "Calibration should offer auto-align.")
+        XCTAssertTrue(app.staticTexts["已对齐"].waitForExistence(timeout: 2), "The slider should show the current offset.")
 
         let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "Lyrics sheet"
+        screenshot.name = "Lyrics page"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+    }
+
+    @MainActor
+    func testLyricsButtonTogglesNowPlayingPage() throws {
+        try openFullPlayerFromMini()
+
+        let lyricsButton = element("playerLyricsButton")
+        XCTAssertTrue(lyricsButton.waitForExistence(timeout: 3), "The now-playing screen should expose a persistent lyrics switch.")
+        lyricsButton.tap()
+
+        let lyricsPage = element("playerLyricsPage")
+        XCTAssertTrue(lyricsPage.waitForExistence(timeout: 3), "The first tap should open lyrics in place.")
+        XCTAssertTrue(lyricsButton.isSelected, "The lyrics switch should stay on while the lyrics page is visible.")
+        XCTAssertTrue(element("playerUtilityBar").exists, "The lyrics switcher should remain reachable on the lyrics page.")
+
+        lyricsButton.tap()
+        XCTAssertTrue(lyricsPage.waitForNonExistence(timeout: 2), "A second tap should turn lyrics off.")
+        XCTAssertTrue(element("nowPlayingArtwork").waitForExistence(timeout: 2), "Turning lyrics off should restore the artwork page.")
+        XCTAssertFalse(lyricsButton.isSelected, "The lyrics switch should clear its selected state after turning off.")
+    }
+
+    @MainActor
+    func testLyricsKaraokeSweepUsesTheWordProgressRenderer() throws {
+        try openFullPlayerFromMini()
+
+        let lyricsButton = element("playerLyricsButton")
+        XCTAssertTrue(lyricsButton.waitForExistence(timeout: 3))
+        lyricsButton.tap()
+
+        let karaokeLine = element("lyricsKaraokeWordLine")
+        XCTAssertTrue(karaokeLine.waitForExistence(timeout: 3), "A word-timed line should use the progressive karaoke renderer.")
+        XCTAssertTrue(karaokeLine.label.contains("Electric night begins"))
+
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Lyrics karaoke sweep at half of first word"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
+    @MainActor
+    func testInlineLyricsPreviewOpensLyricsPage() throws {
+        try openFullPlayerFromMini()
+
+        let preview = element("playerInlineLyricsPreview")
+        XCTAssertTrue(preview.waitForExistence(timeout: 3), "Synchronized lyrics should fill the flexible space on the artwork page.")
+        XCTAssertTrue(
+            preview.label.contains("Electric night begins while every signal crosses the skyline without losing a single word"),
+            "The inline stage must expose the complete long lyric instead of an ellipsis."
+        )
+
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Inline lyrics preview"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        preview.tap()
+
+        XCTAssertTrue(element("playerLyricsPage").waitForExistence(timeout: 3), "Tapping the inline preview should open the complete lyrics mode.")
+        XCTAssertTrue(element("playerLyricsButton").isSelected, "Opening lyrics from the preview should select the persistent lyrics switch.")
+    }
+
+    @MainActor
+    func testLunaLyricDirectorIsExposedAsAnExplicitDevelopmentAction() throws {
+        try openFullPlayerFromMini()
+
+        let moreMenu = element("playerMoreMenu")
+        XCTAssertTrue(moreMenu.waitForExistence(timeout: 3), "The player should expose its more menu.")
+        moreMenu.tap()
+
+        let director = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Luna'")).firstMatch
+        XCTAssertTrue(director.waitForExistence(timeout: 2), "Luna direction should be an explicit development action, not an automatic playback request.")
+        XCTAssertTrue(element("nowPlayingView").exists, "Opening the director menu must not replace or dismiss the player.")
+    }
+
+    @MainActor
+    func testLyricsPrecisionHostActionIsEnabledAndUnsafeOnDeviceActionIsHidden() throws {
+        try openFullPlayerFromMini()
+
+        let moreMenu = element("playerMoreMenu")
+        XCTAssertTrue(moreMenu.waitForExistence(timeout: 3))
+        moreMenu.tap()
+
+        let hostAction = app.buttons.matching(NSPredicate(format: "label CONTAINS '高精度主机'")).firstMatch
+        XCTAssertTrue(hostAction.waitForExistence(timeout: 2), "Line-synced lyrics should expose the precision host action.")
+        XCTAssertTrue(hostAction.isEnabled, "A missing runtime host configuration must surface as a tap error, not a grey button.")
+        XCTAssertFalse(
+            app.buttons.matching(NSPredicate(format: "label CONTAINS '本机生成'")).firstMatch.exists,
+            "The MLX action must stay hidden after real-device Metal SIGABRT failures."
+        )
+    }
+
+    @MainActor
+    func testLyricsModeHidesPlaybackControls() throws {
+        try openFullPlayerFromMini()
+
+        let lyricsButton = element("playerLyricsButton")
+        XCTAssertTrue(lyricsButton.waitForExistence(timeout: 3), "The lyrics switch should be available.")
+        XCTAssertTrue(element("nowPlayingProgress").waitForExistence(timeout: 2), "Artwork mode should show playback progress.")
+        lyricsButton.tap()
+
+        XCTAssertTrue(element("playerLyricsPage").waitForExistence(timeout: 3), "Lyrics should stay inside the now-playing surface.")
+        XCTAssertTrue(element("nowPlayingProgress").waitForNonExistence(timeout: 2), "Progress should be gone in lyrics mode, not delayed-hidden.")
+        XCTAssertTrue(element("playerTransportControls").waitForNonExistence(timeout: 2), "Play/skip controls should be gone in lyrics mode.")
+        XCTAssertTrue(element("playerUtilityBar").exists, "The lyrics/AirPlay/queue switcher should stay on the same surface.")
+        XCTAssertTrue(lyricsButton.isSelected, "The lyrics switch should stay selected.")
+
+        lyricsButton.tap()
+        XCTAssertTrue(element("nowPlayingProgress").waitForExistence(timeout: 2), "Turning lyrics off should restore playback progress.")
+        XCTAssertTrue(element("playerTransportControls").waitForExistence(timeout: 2), "Turning lyrics off should restore play/skip controls.")
     }
 
     @MainActor
@@ -140,9 +411,9 @@ final class PlayerChromeUITests: XCTestCase {
         let nowPlaying = element("nowPlayingView")
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open for chrome layout verification.")
 
-        let switcher = element("playerModeSwitchButton")
-        XCTAssertTrue(switcher.waitForExistence(timeout: 2), "The toolbar music/MV switcher should be visible.")
-        XCTAssertGreaterThan(switcher.frame.minY, 80, "The player toolbar should stay below the status bar.")
+        let utilityBar = element("playerUtilityBar")
+        XCTAssertTrue(utilityBar.waitForExistence(timeout: 2), "The player utility bar should be visible.")
+        XCTAssertGreaterThan(utilityBar.frame.minY, 80, "The player chrome should stay below the status bar.")
     }
 
     @MainActor
@@ -343,23 +614,29 @@ final class PlayerChromeUITests: XCTestCase {
     }
 
     @MainActor
-    func testMiniPlayerKeepsTabBarVisibleWhileHomeScrolls() throws {
+    func testMiniPlayerAndTabBarFollowNativeScrollMinimization() throws {
         let homeList = element("homeList")
-        let musicTab = app.tabBars.buttons["音乐"]
-        let favoritesTab = app.tabBars.buttons["收藏夹"]
-        let searchTab = app.tabBars.buttons["搜索"]
+        let tabBar = app.tabBars.firstMatch
+        let miniPlayer = element("miniPlayer")
 
-        XCTAssertTrue(element("miniPlayer").waitForExistence(timeout: 5), "Fixture playback should expose the mini player.")
-        for tab in [musicTab, favoritesTab, searchTab] {
-            XCTAssertTrue(tab.waitForExistence(timeout: 2), "The system tab bar should be visible before scrolling.")
-        }
+        XCTAssertTrue(miniPlayer.waitForExistence(timeout: 5), "Fixture playback should expose the LNPopup mini player.")
+        XCTAssertTrue(tabBar.waitForExistence(timeout: 2), "The native system tab bar should be visible before scrolling.")
+        let expandedTabFrame = tabBar.frame
+        let expandedMiniFrame = miniPlayer.frame
 
         homeList.swipeUp()
 
-        for tab in [musicTab, favoritesTab, searchTab] {
-            XCTAssertTrue(tab.waitForExistence(timeout: 1), "The system tab bar should remain visible while a mini player exists.")
-            XCTAssertTrue(tab.isHittable, "The system tab bar should remain interactive after scrolling the cover wall.")
-        }
+        XCTAssertTrue(
+            waitForNativeBottomBarCompaction(
+                tabBar: tabBar,
+                miniPlayer: miniPlayer,
+                expandedTabFrame: expandedTabFrame,
+                expandedMiniFrame: expandedMiniFrame,
+                timeout: 2
+            ),
+            "Scrolling should let iOS 27 compact the Tab Bar and move the LNPopup mini player into its native inline geometry."
+        )
+        XCTAssertTrue(miniPlayer.exists, "The mini player should remain available in the compact native bottom-bar state.")
     }
 
     @MainActor
@@ -388,29 +665,76 @@ final class PlayerChromeUITests: XCTestCase {
     }
 
     @MainActor
+    private func waitForNativeBottomBarCompaction(
+        tabBar: XCUIElement,
+        miniPlayer: XCUIElement,
+        expandedTabFrame: CGRect,
+        expandedMiniFrame: CGRect,
+        timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let compactTabFrame = tabBar.frame
+            let compactMiniFrame = miniPlayer.frame
+            if compactTabFrame.height < expandedTabFrame.height - 2 ||
+                compactTabFrame.minY > expandedTabFrame.minY + 2 ||
+                compactMiniFrame.minY > expandedMiniFrame.minY + 2 ||
+                compactMiniFrame.width < expandedMiniFrame.width - 2 {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        } while Date() < deadline
+        return false
+    }
+
+    @MainActor
     private func assertDensePlayerLayout() throws {
         let nowPlaying = element("nowPlayingView")
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 3), "Full player should be open before dense layout verification.")
 
         let topChrome = element("playerTopChrome")
+        let artwork = element("nowPlayingArtwork")
         let metadata = metadataElement()
         let progress = element("nowPlayingProgress")
         let transport = element("playerTransportControls")
         let utilityBar = element("playerUtilityBar")
 
-        let elements = [topChrome, metadata, progress, transport, utilityBar]
+        let elements = [topChrome, artwork, metadata, progress, transport, utilityBar]
         for element in elements {
             XCTAssertTrue(element.waitForExistence(timeout: 2), "Dense player layout element should exist: \(element)")
             XCTAssertFalse(element.frame.isEmpty, "Dense player layout element should have a measurable frame: \(element)")
         }
 
         let coverArea = centerPlayerCoverArea()
+        let compactHeight = app.frame.height <= 700
         XCTAssertGreaterThanOrEqual(coverArea.screenPoint.y, topChrome.frame.maxY + 36, "Cover area should stay below the top chrome.")
         XCTAssertLessThanOrEqual(coverArea.screenPoint.y, metadata.frame.minY - 24, "Cover area should stay above title metadata.")
-        XCTAssertGreaterThanOrEqual(metadata.frame.minY - topChrome.frame.maxY, 178, "Dense player layout should preserve room for visible cover art.")
+        XCTAssertGreaterThanOrEqual(artwork.frame.minY, app.frame.minY - 1, "Artwork should remain within the visible screen bounds.")
+        let artworkMetadataGap = metadata.frame.minY - artwork.frame.maxY
+        XCTAssertGreaterThanOrEqual(
+            artworkMetadataGap,
+            10,
+            "Artwork and metadata should keep a visible fixed gap."
+        )
+        XCTAssertLessThanOrEqual(
+            artworkMetadataGap,
+            18,
+            "Artwork and metadata should stay grouped instead of gaining elastic space."
+        )
         assertVerticalOrder(metadata, progress, "Title metadata should stay above progress.")
         assertVerticalOrder(progress, transport, "Progress should stay above transport controls.")
         assertVerticalOrder(transport, utilityBar, "Transport controls should stay above the utility bar.")
+
+        XCTAssertLessThanOrEqual(
+            transport.frame.minY - progress.frame.maxY,
+            compactHeight ? 22 : 28,
+            "Progress and transport should remain one fixed-rhythm control cluster."
+        )
+        XCTAssertLessThanOrEqual(
+            utilityBar.frame.minY - transport.frame.maxY,
+            compactHeight ? 32 : 38,
+            "Only a bounded secondary gap should separate transport from utility controls."
+        )
 
         let layoutElements = [metadata, progress, transport, utilityBar]
         for firstIndex in 0..<layoutElements.count {

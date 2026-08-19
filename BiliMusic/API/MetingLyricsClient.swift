@@ -7,16 +7,65 @@ enum LyricsProvider: String, CaseIterable, Codable, Identifiable, Sendable {
     case netease
     case kugou
     case tencent
+    case biliSubtitle
+    case amll
+    case vocadb
+    case lrclib
+    case imported
+    case precisionHost
 
     var id: String { rawValue }
+
+    static var catalogCases: [LyricsProvider] { [.netease, .kugou, .tencent, .lrclib, .vocadb] }
 
     var displayName: String {
         switch self {
         case .netease: "网易云"
         case .kugou: "酷狗"
         case .tencent: "QQ 音乐"
+        case .biliSubtitle: "B 站字幕"
+        case .amll: "AMLL 逐字"
+        case .vocadb: "VocaDB"
+        case .lrclib: "LRCLIB"
+        case .imported: "本地导入"
+        case .precisionHost: "高精度主机"
         }
     }
+
+    /// 已停用，仅用于识别并丢弃旧缓存。
+    var isRetired: Bool { self == .biliSubtitle }
+}
+
+enum LyricsVersionScope: String, Codable, Sendable {
+    case exactCover
+    case sameRecording
+    case canonicalOriginal
+    case textOnlyFallback
+    case manual
+}
+
+enum LyricsTimingKind: String, Codable, Sendable {
+    case word
+    case line
+    case none
+}
+
+enum LyricVoiceRole: String, Codable, Sendable {
+    case lead
+    case backing
+    case duetA
+    case duetB
+    case together
+
+    var isSecondary: Bool {
+        self == .backing
+    }
+}
+
+enum LyricsSearchScope: String, Sendable {
+    case automatic
+    case coverVersion
+    case originalRecording
 }
 
 struct LyricsSearchResult: Codable, Hashable, Identifiable, Sendable {
@@ -27,17 +76,59 @@ struct LyricsSearchResult: Codable, Hashable, Identifiable, Sendable {
     let album: String?
     let duration: Int?
     let artworkID: String?
+    var timingKindHint: LyricsTimingKind? = nil
 
     var stableID: String { "\(provider.rawValue):\(id)" }
 }
 
-struct LyricsDocument: Codable, Equatable, Sendable {
+struct LyricsExternalHit: Sendable {
+    var result: LyricsSearchResult
+    var document: LyricsDocument
+}
+
+struct LyricsDocument: Equatable, Sendable {
     let result: LyricsSearchResult
     let lyric: String?
     let translatedLyric: String?
     let romanizedLyric: String?
     let karaokeLyric: String?
     let karaokeTranslatedLyric: String?
+    var versionScope: LyricsVersionScope
+    var timingKind: LyricsTimingKind
+    var timingNeedsConfirmation: Bool
+    var appliesToCurrentCover: Bool
+    var followsPlayback: Bool
+    var vocalLines: [LyricsVocalLine]?
+
+    init(
+        result: LyricsSearchResult,
+        lyric: String?,
+        translatedLyric: String?,
+        romanizedLyric: String?,
+        karaokeLyric: String?,
+        karaokeTranslatedLyric: String?,
+        versionScope: LyricsVersionScope = .sameRecording,
+        timingKind: LyricsTimingKind? = nil,
+        timingNeedsConfirmation: Bool = false,
+        appliesToCurrentCover: Bool = true,
+        followsPlayback: Bool? = nil,
+        vocalLines: [LyricsVocalLine]? = nil
+    ) {
+        self.result = result
+        self.lyric = lyric
+        self.translatedLyric = translatedLyric
+        self.romanizedLyric = romanizedLyric
+        self.karaokeLyric = karaokeLyric
+        self.karaokeTranslatedLyric = karaokeTranslatedLyric
+        self.versionScope = versionScope
+        self.timingKind = timingKind ?? Self.inferredTimingKind(
+            karaokeLyric: karaokeLyric,
+            lyric: lyric)
+        self.timingNeedsConfirmation = timingNeedsConfirmation
+        self.appliesToCurrentCover = appliesToCurrentCover
+        self.followsPlayback = followsPlayback ?? (self.timingKind != .none)
+        self.vocalLines = vocalLines
+    }
 
     var preferredMainLyric: String? {
         Self.firstText(karaokeLyric, lyric)
@@ -49,6 +140,57 @@ struct LyricsDocument: Codable, Equatable, Sendable {
 
     var hasLyrics: Bool { preferredMainLyric != nil }
 
+    var hasWordSync: Bool { Self.firstText(karaokeLyric) != nil }
+    var hasLineSync: Bool { lyric.map(Self.containsLRCTimestamps) ?? false }
+    var hasTranslation: Bool { Self.firstText(translatedLyric, karaokeTranslatedLyric) != nil }
+    var hasRomanization: Bool { Self.firstText(romanizedLyric) != nil }
+
+    var bannerText: String? {
+        switch versionScope {
+        case .exactCover:
+            return timingKind == .none ? "翻唱版 · 纯文本" : "翻唱版 · 精确同步"
+        case .sameRecording:
+            return nil
+        case .canonicalOriginal:
+            return timingNeedsConfirmation ? "原唱歌词 · 时间轴待确认" : "原唱歌词"
+        case .textOnlyFallback:
+            if timingKind == .none { return "纯文本歌词" }
+            return followsPlayback ? "歌词 · 待确认" : "歌词 · 不跟随播放"
+        case .manual:
+            return result.provider == .imported ? "本地手动歌词" : nil
+        }
+    }
+
+    func applying(policy: LyricsTimingPolicy) -> LyricsDocument {
+        var copy = self
+        copy.versionScope = policy.scope
+        copy.timingKind = policy.timingKind
+        copy.timingNeedsConfirmation = policy.needsConfirmation
+        copy.appliesToCurrentCover = policy.appliesToCurrentCover
+        copy.followsPlayback = policy.followsPlayback
+        return copy
+    }
+
+    func restoringPlaybackTiming(as scope: LyricsVersionScope = .manual) -> LyricsDocument {
+        var copy = self
+        copy.versionScope = scope
+        copy.timingKind = Self.inferredTimingKind(karaokeLyric: karaokeLyric, lyric: lyric)
+        copy.timingNeedsConfirmation = false
+        copy.appliesToCurrentCover = true
+        copy.followsPlayback = copy.timingKind != .none
+        return copy
+    }
+
+    static func containsLRCTimestamps(_ text: String) -> Bool {
+        text.range(of: #"\[\d{1,2}:\d{2}"#, options: .regularExpression) != nil
+    }
+
+    private static func inferredTimingKind(karaokeLyric: String?, lyric: String?) -> LyricsTimingKind {
+        if firstText(karaokeLyric) != nil { return .word }
+        if let lyric, containsLRCTimestamps(lyric) { return .line }
+        return .none
+    }
+
     private static func firstText(_ values: String?...) -> String? {
         values.lazy.compactMap { value in
             let text = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -57,7 +199,48 @@ struct LyricsDocument: Codable, Equatable, Sendable {
     }
 }
 
-struct LyricsWordPayload: Equatable, Sendable {
+extension LyricsDocument: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case result, lyric, translatedLyric, romanizedLyric, karaokeLyric, karaokeTranslatedLyric
+        case versionScope, timingKind, timingNeedsConfirmation, appliesToCurrentCover, followsPlayback, vocalLines
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        result = try container.decode(LyricsSearchResult.self, forKey: .result)
+        lyric = try container.decodeIfPresent(String.self, forKey: .lyric)
+        translatedLyric = try container.decodeIfPresent(String.self, forKey: .translatedLyric)
+        romanizedLyric = try container.decodeIfPresent(String.self, forKey: .romanizedLyric)
+        karaokeLyric = try container.decodeIfPresent(String.self, forKey: .karaokeLyric)
+        karaokeTranslatedLyric = try container.decodeIfPresent(String.self, forKey: .karaokeTranslatedLyric)
+        versionScope = try container.decodeIfPresent(LyricsVersionScope.self, forKey: .versionScope) ?? .sameRecording
+        timingKind = try container.decodeIfPresent(LyricsTimingKind.self, forKey: .timingKind)
+            ?? Self.inferredTimingKind(karaokeLyric: karaokeLyric, lyric: lyric)
+        timingNeedsConfirmation = try container.decodeIfPresent(Bool.self, forKey: .timingNeedsConfirmation) ?? false
+        appliesToCurrentCover = try container.decodeIfPresent(Bool.self, forKey: .appliesToCurrentCover) ?? true
+        followsPlayback = try container.decodeIfPresent(Bool.self, forKey: .followsPlayback)
+            ?? (timingKind != .none)
+        vocalLines = try container.decodeIfPresent([LyricsVocalLine].self, forKey: .vocalLines)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(result, forKey: .result)
+        try container.encodeIfPresent(lyric, forKey: .lyric)
+        try container.encodeIfPresent(translatedLyric, forKey: .translatedLyric)
+        try container.encodeIfPresent(romanizedLyric, forKey: .romanizedLyric)
+        try container.encodeIfPresent(karaokeLyric, forKey: .karaokeLyric)
+        try container.encodeIfPresent(karaokeTranslatedLyric, forKey: .karaokeTranslatedLyric)
+        try container.encode(versionScope, forKey: .versionScope)
+        try container.encode(timingKind, forKey: .timingKind)
+        try container.encode(timingNeedsConfirmation, forKey: .timingNeedsConfirmation)
+        try container.encode(appliesToCurrentCover, forKey: .appliesToCurrentCover)
+        try container.encode(followsPlayback, forKey: .followsPlayback)
+        try container.encodeIfPresent(vocalLines, forKey: .vocalLines)
+    }
+}
+
+struct LyricsWordPayload: Codable, Equatable, Sendable {
     let from: Double
     let to: Double
     let text: String
@@ -69,6 +252,40 @@ struct LyricsLinePayload: Equatable, Sendable {
     let text: String
     let translation: String?
     let words: [LyricsWordPayload]
+    let voiceRole: LyricVoiceRole
+    let layerID: String
+    let overlapGroup: String?
+
+    init(
+        from: Double,
+        to: Double,
+        text: String,
+        translation: String?,
+        words: [LyricsWordPayload],
+        voiceRole: LyricVoiceRole = .lead,
+        layerID: String = "lead",
+        overlapGroup: String? = nil
+    ) {
+        self.from = from
+        self.to = to
+        self.text = text
+        self.translation = translation
+        self.words = words
+        self.voiceRole = voiceRole
+        self.layerID = layerID
+        self.overlapGroup = overlapGroup
+    }
+}
+
+struct LyricsVocalLine: Codable, Equatable, Sendable {
+    let from: Double
+    let to: Double
+    let text: String
+    let translation: String?
+    let words: [LyricsWordPayload]
+    let voiceRole: LyricVoiceRole
+    let layerID: String
+    let overlapGroup: String?
 }
 
 struct AutomaticLyricsMatch: Sendable {
@@ -78,7 +295,12 @@ struct AutomaticLyricsMatch: Sendable {
     let document: LyricsDocument?
 }
 
-actor MetingLyricsClient {
+protocol LyricsCatalogSearching: Sendable {
+    func search(keyword: String, provider: LyricsProvider) async throws -> [LyricsSearchResult]
+    func fetchLyrics(for result: LyricsSearchResult) async throws -> LyricsDocument
+}
+
+actor MetingLyricsClient: LyricsCatalogSearching {
     enum ClientError: LocalizedError {
         case invalidResponse
         case server(String)
@@ -112,18 +334,84 @@ actor MetingLyricsClient {
         return lower.contains("周杰伦") || lower.contains("jay") ? .kugou : .netease
     }
 
-    /// 清洗服务返回的关键词通常是「歌名-歌手」。这里只做一致性排序，避免 Meting
-    /// 搜索结果第一项属于同歌手的另一首歌；不恢复 LRCLIB 的时长/相似度评分系统。
+    /// 只在同一版本范围内比较标题/歌手/时长，不把翻唱和原唱混成一个模糊分。
     static func rankedCandidates(
         _ candidates: [LyricsSearchResult],
-        keyword: String
+        keyword: String,
+        originalArtists: [String] = [],
+        coverPerformers: [String] = [],
+        duration: Int? = nil,
+        preferCover: Bool = false
     ) -> [LyricsSearchResult] {
         let intent = searchIntent(from: keyword)
         return candidates.enumerated().sorted { lhs, rhs in
-            let leftScore = candidateScore(lhs.element, intent: intent)
-            let rightScore = candidateScore(rhs.element, intent: intent)
+            let leftScope = LyricsVersionClassifier.scope(
+                for: lhs.element,
+                originalArtists: originalArtists,
+                coverPerformers: coverPerformers,
+                isCoverSearch: preferCover)
+            let rightScope = LyricsVersionClassifier.scope(
+                for: rhs.element,
+                originalArtists: originalArtists,
+                coverPerformers: coverPerformers,
+                isCoverSearch: preferCover)
+            let leftRank = LyricsVersionClassifier.rank(leftScope, preferCover: preferCover)
+            let rightRank = LyricsVersionClassifier.rank(rightScope, preferCover: preferCover)
+            if leftRank != rightRank { return leftRank < rightRank }
+            let leftHasVerifiedWords = hasReliableWordTiming(
+                lhs.element,
+                expectedDuration: duration)
+            let rightHasVerifiedWords = hasReliableWordTiming(
+                rhs.element,
+                expectedDuration: duration)
+            if leftHasVerifiedWords != rightHasVerifiedWords { return leftHasVerifiedWords }
+            let leftScore = candidateScore(
+                lhs.element,
+                intent: intent,
+                focusArtists: preferCover ? coverPerformers : originalArtists,
+                duration: duration)
+            let rightScore = candidateScore(
+                rhs.element,
+                intent: intent,
+                focusArtists: preferCover ? coverPerformers : originalArtists,
+                duration: duration)
             return leftScore == rightScore ? lhs.offset < rhs.offset : leftScore > rightScore
         }.map(\.element)
+    }
+
+    /// A word-timed catalog entry is reliable for priority only when its recording duration is
+    /// compatible with the current track. Unknown durations retain the existing word preference;
+    /// a known large mismatch remains visible in manual search without being promoted as exact.
+    static func hasReliableWordTiming(
+        _ candidate: LyricsSearchResult,
+        expectedDuration: Int?
+    ) -> Bool {
+        guard candidate.timingKindHint == .word else { return false }
+        guard let expectedDuration, expectedDuration > 0,
+              let candidateDuration = candidate.duration, candidateDuration > 0 else {
+            return true
+        }
+        return abs(candidateDuration - expectedDuration) <= 4
+    }
+
+    /// 手动搜索：多源去重后按同一套标题/歌手/时长规则排序，保留各平台条目。
+    static func aggregatedCandidates(
+        _ batches: [[LyricsSearchResult]],
+        keyword: String,
+        originalArtists: [String] = [],
+        coverPerformers: [String] = [],
+        duration: Int? = nil,
+        preferCover: Bool = false
+    ) -> [LyricsSearchResult] {
+        var seen = Set<String>()
+        let pooled = batches.flatMap { $0 }.filter { seen.insert($0.stableID).inserted }
+        return rankedCandidates(
+            pooled,
+            keyword: keyword,
+            originalArtists: originalArtists,
+            coverPerformers: coverPerformers,
+            duration: duration,
+            preferCover: preferCover)
     }
 
     func resolveSearchKeyword(for track: Track) async -> String {
@@ -165,6 +453,8 @@ actor MetingLyricsClient {
         case .netease: return try await searchNetease(trimmed)
         case .kugou: return try await searchKugou(trimmed)
         case .tencent: return try await searchTencent(trimmed)
+        case .biliSubtitle, .amll, .vocadb, .lrclib, .imported, .precisionHost:
+            return []
         }
     }
 
@@ -173,6 +463,8 @@ actor MetingLyricsClient {
         case .netease: return try await fetchNeteaseLyrics(for: result)
         case .kugou: return try await fetchKugouLyrics(for: result)
         case .tencent: return try await fetchTencentLyrics(for: result)
+        case .biliSubtitle, .amll, .vocadb, .lrclib, .imported, .precisionHost:
+            throw ClientError.noLyrics
         }
     }
 
@@ -203,8 +495,7 @@ actor MetingLyricsClient {
     }
 
     private func fetchNeteaseLyrics(for result: LyricsSearchResult) async throws -> LyricsDocument {
-        let json = try await neteaseEAPI(path: "/api/song/lyric/v1", body: [
-            "id": result.id,
+        let v1 = try await neteaseLyricPayload(path: "/api/song/lyric/v1", id: result.id, extra: [
             "cp": false,
             "tv": 0,
             "lv": 0,
@@ -214,6 +505,28 @@ actor MetingLyricsClient {
             "ytv": 0,
             "yrv": 0,
         ])
+        if let document = neteaseDocument(result: result, json: v1) {
+            return document
+        }
+        let legacy = try await neteaseLyricPayload(path: "/api/song/lyric", id: result.id, extra: [
+            "lv": -1,
+            "tv": -1,
+            "rv": -1,
+            "kv": -1,
+        ])
+        if let document = neteaseDocument(result: result, json: legacy) {
+            return document
+        }
+        throw ClientError.noLyrics
+    }
+
+    private func neteaseLyricPayload(path: String, id: String, extra: [String: Any]) async throws -> [String: Any] {
+        var body: [String: Any] = extra
+        body["id"] = id
+        return try await neteaseEAPI(path: path, body: body)
+    }
+
+    private func neteaseDocument(result: LyricsSearchResult, json: [String: Any]) -> LyricsDocument? {
         let document = LyricsDocument(
             result: result,
             lyric: Self.lyricText(json["lrc"]),
@@ -221,8 +534,7 @@ actor MetingLyricsClient {
             romanizedLyric: Self.lyricText(json["romalrc"]),
             karaokeLyric: Self.lyricText(json["yrc"]),
             karaokeTranslatedLyric: Self.lyricText(json["ytlrc"]))
-        guard document.hasLyrics else { throw ClientError.noLyrics }
-        return document
+        return document.hasLyrics ? document : nil
     }
 
     private func neteaseEAPI(path: String, body: [String: Any]) async throws -> [String: Any] {
@@ -514,7 +826,9 @@ actor MetingLyricsClient {
 
     private static func candidateScore(
         _ candidate: LyricsSearchResult,
-        intent: (title: String, artist: String?)
+        intent: (title: String, artist: String?),
+        focusArtists: [String] = [],
+        duration: Int? = nil
     ) -> Int {
         let wantedTitle = comparable(intent.title)
         let title = comparable(candidate.title)
@@ -524,12 +838,30 @@ actor MetingLyricsClient {
         } else if !wantedTitle.isEmpty, title.contains(wantedTitle) || wantedTitle.contains(title) {
             score += 60
         }
-        if let wantedArtist = intent.artist.map(comparable), !wantedArtist.isEmpty {
-            let artist = comparable(candidate.artist)
-            if artist == wantedArtist {
-                score += 30
-            } else if artist.contains(wantedArtist) || wantedArtist.contains(artist) {
-                score += 20
+        let wantedArtists = focusArtists.isEmpty
+            ? [intent.artist].compactMap { $0 }
+            : focusArtists
+        let artist = comparable(candidate.artist)
+        for wanted in wantedArtists.map(comparable) where !wanted.isEmpty {
+            if artist == wanted {
+                score += 40
+                break
+            }
+            if artist.contains(wanted) || wanted.contains(artist) {
+                score += 25
+                break
+            }
+        }
+        if let wantedDuration = duration, wantedDuration > 0, let candidateDuration = candidate.duration {
+            let delta = abs(candidateDuration - wantedDuration)
+            if delta <= 3 {
+                score += 50
+            } else if delta <= 8 {
+                score += 25
+            } else if delta <= 15 {
+                score += 8
+            } else if delta > 30 {
+                score -= 50
             }
         }
         return score
@@ -592,6 +924,19 @@ enum LyricsParser {
     }
 
     static func lines(from document: LyricsDocument, duration: Int) -> [LyricsLinePayload] {
+        if let vocalLines = document.vocalLines, !vocalLines.isEmpty {
+            return vocalLines.map { line in
+                LyricsLinePayload(
+                    from: line.from,
+                    to: line.to,
+                    text: line.text,
+                    translation: line.translation,
+                    words: line.words,
+                    voiceRole: line.voiceRole,
+                    layerID: line.layerID,
+                    overlapGroup: line.overlapGroup)
+            }
+        }
         guard let main = document.preferredMainLyric else { return [] }
         var rawLines = timedLines(main)
         if rawLines.isEmpty {
@@ -601,8 +946,9 @@ enum LyricsParser {
         for line in timedLines(document.preferredTranslationLyric ?? "") {
             translations[Int((line.from * 100).rounded())] = line.text
         }
-        return rawLines.enumerated().map { index, line in
-            let next = index + 1 < rawLines.count ? rawLines[index + 1].from : line.from + 5
+        let parsed = rawLines.enumerated().map { index, line in
+            let next = rawLines.dropFirst(index + 1).first(where: { $0.from > line.from + 0.08 })?.from
+                ?? line.from + 5
             let end = line.duration.map { line.from + $0 } ?? max(next, line.from + 1)
             return LyricsLinePayload(
                 from: line.from,
@@ -611,6 +957,7 @@ enum LyricsParser {
                 translation: translations[Int((line.from * 100).rounded())],
                 words: line.words)
         }
+        return LyricVocalArrangement.arrange(parsed)
     }
 
     private static func timedLines(_ text: String) -> [RawLine] {
@@ -699,5 +1046,179 @@ enum LyricsParser {
     private static func number(_ match: NSTextCheckingResult, group: Int, text: String) -> Double? {
         guard let range = Range(match.range(at: group), in: text) else { return nil }
         return Double(text[range])
+    }
+}
+
+enum LyricVocalArrangement {
+    private struct LabeledText {
+        let text: String
+        let role: LyricVoiceRole
+        let isExplicit: Bool
+    }
+
+    static func arrange(_ source: [LyricsLinePayload]) -> [LyricsLinePayload] {
+        var arranged: [LyricsLinePayload] = []
+        arranged.reserveCapacity(source.count + source.count / 4)
+
+        for (index, line) in source.enumerated() {
+            let labeled = labeledText(line.text)
+            if let split = splitInlineBacking(labeled.text) {
+                let group = groupID(for: line, index: index)
+                arranged.append(copy(
+                    line,
+                    text: split.lead,
+                    words: words(matching: split.lead, in: line.words),
+                    role: labeled.isExplicit ? labeled.role : .lead,
+                    layerID: "\(group)-lead",
+                    overlapGroup: group))
+                arranged.append(copy(
+                    line,
+                    text: split.backing,
+                    translation: .some(nil),
+                    words: words(matching: split.backing, in: line.words),
+                    role: split.role,
+                    layerID: "\(group)-backing",
+                    overlapGroup: group))
+            } else {
+                arranged.append(copy(
+                    line,
+                    text: labeled.text,
+                    role: labeled.role,
+                    layerID: "line-\(index)-\(labeled.role.rawValue)"))
+            }
+        }
+
+        // Repeated LRC timestamps are the only unlabeled multi-line form we
+        // can safely treat as simultaneous. Mere tail overlap is common in
+        // ordinary karaoke files and must not be promoted to a duet.
+        var cursor = 0
+        while cursor < arranged.count {
+            let start = arranged[cursor].from
+            var end = cursor + 1
+            while end < arranged.count, abs(arranged[end].from - start) <= 0.08 {
+                end += 1
+            }
+            if end - cursor > 1 {
+                let group = "timestamp-\(Int((start * 1_000).rounded()))-\(cursor)"
+                for offset in cursor..<end where arranged[offset].overlapGroup == nil {
+                    let role: LyricVoiceRole
+                    switch offset - cursor {
+                    case 0: role = arranged[offset].voiceRole == .lead ? .duetA : arranged[offset].voiceRole
+                    case 1: role = arranged[offset].voiceRole == .lead ? .duetB : arranged[offset].voiceRole
+                    default: role = arranged[offset].voiceRole == .lead ? .backing : arranged[offset].voiceRole
+                    }
+                    arranged[offset] = copy(
+                        arranged[offset],
+                        role: role,
+                        layerID: "\(group)-\(offset - cursor)",
+                        overlapGroup: group)
+                }
+            }
+            cursor = end
+        }
+        return arranged
+    }
+
+    private static func labeledText(_ source: String) -> LabeledText {
+        let labels: [(String, LyricVoiceRole)] = [
+            (#"^(?:和声|伴唱|Backing|B\.?V\.?)\s*[:：]\s*(.+)$"#, .backing),
+            (#"^(?:主唱|Lead)\s*[:：]\s*(.+)$"#, .lead),
+            (#"^(?:男声?|A)\s*[:：]\s*(.+)$"#, .duetA),
+            (#"^(?:女声?|B)\s*[:：]\s*(.+)$"#, .duetB),
+            (#"^(?:合|合唱|Together|All)\s*[:：]\s*(.+)$"#, .together),
+        ]
+        for (pattern, role) in labels {
+            guard let match = firstMatch(pattern, in: source),
+                  let range = Range(match.range(at: 1), in: source) else { continue }
+            let text = source[range].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty {
+                return LabeledText(text: text, role: role, isExplicit: true)
+            }
+        }
+        return LabeledText(text: source, role: .lead, isExplicit: false)
+    }
+
+    private static func splitInlineBacking(
+        _ source: String
+    ) -> (lead: String, backing: String, role: LyricVoiceRole)? {
+        let pattern = #"^(.+?)[（(]\s*((?:(?:和声|伴唱|Backing|B\.?V\.?)\s*[:：]\s*)?[^()（）]+)[）)]\s*$"#
+        guard let match = firstMatch(pattern, in: source),
+              let leadRange = Range(match.range(at: 1), in: source),
+              let backingRange = Range(match.range(at: 2), in: source) else { return nil }
+        let lead = source[leadRange].trimmingCharacters(in: .whitespacesAndNewlines)
+        var backing = source[backingRange].trimmingCharacters(in: .whitespacesAndNewlines)
+        let explicitPattern = #"^(?:和声|伴唱|Backing|B\.?V\.?)\s*[:：]\s*"#
+        let explicitlyLabeled = backing.range(of: explicitPattern, options: .regularExpression) != nil
+        backing = backing.replacingOccurrences(of: explicitPattern, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !lead.isEmpty,
+              !backing.isEmpty,
+              explicitlyLabeled || isPlausibleBackingText(backing) else { return nil }
+        return (lead, backing, .backing)
+    }
+
+    private static func isPlausibleBackingText(_ text: String) -> Bool {
+        let normalized = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let stageDirections = ["前奏", "间奏", "尾奏", "伴奏", "重复", "music", "instrumental", "repeat"]
+        guard !stageDirections.contains(where: normalized.contains) else { return false }
+        let meaningful = normalized.unicodeScalars.filter {
+            CharacterSet.letters.union(.decimalDigits).contains($0)
+        }
+        return meaningful.count >= 2 && meaningful.count <= 48
+    }
+
+    private static func words(
+        matching text: String,
+        in source: [LyricsWordPayload]
+    ) -> [LyricsWordPayload] {
+        guard !source.isEmpty else { return [] }
+        let target = normalized(text)
+        guard !target.isEmpty else { return [] }
+        for lower in source.indices {
+            var candidate = ""
+            for upper in lower..<source.endIndex {
+                candidate += normalized(source[upper].text)
+                if candidate == target {
+                    return Array(source[lower...upper])
+                }
+                if candidate.count > target.count { break }
+            }
+        }
+        return []
+    }
+
+    private static func normalized(_ text: String) -> String {
+        String(text.unicodeScalars.filter {
+            CharacterSet.letters.union(.decimalDigits).contains($0)
+        }).lowercased()
+    }
+
+    private static func groupID(for line: LyricsLinePayload, index: Int) -> String {
+        "inline-\(Int((line.from * 1_000).rounded()))-\(index)"
+    }
+
+    private static func copy(
+        _ line: LyricsLinePayload,
+        text: String? = nil,
+        translation: String?? = nil,
+        words: [LyricsWordPayload]? = nil,
+        role: LyricVoiceRole? = nil,
+        layerID: String? = nil,
+        overlapGroup: String?? = nil
+    ) -> LyricsLinePayload {
+        LyricsLinePayload(
+            from: line.from,
+            to: line.to,
+            text: text ?? line.text,
+            translation: translation ?? line.translation,
+            words: words ?? line.words,
+            voiceRole: role ?? line.voiceRole,
+            layerID: layerID ?? line.layerID,
+            overlapGroup: overlapGroup ?? line.overlapGroup)
+    }
+
+    private static func firstMatch(_ pattern: String, in text: String) -> NSTextCheckingResult? {
+        try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+            .firstMatch(in: text, range: NSRange(text.startIndex..., in: text))
     }
 }

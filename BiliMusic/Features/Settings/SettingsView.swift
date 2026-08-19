@@ -23,6 +23,12 @@ struct SettingsView: View {
     @State private var cdnProbeRows: [AudioCDNProbeRow] = []
     @State private var isTestingCDN = false
     @State private var cdnProbeMessage: String?
+    @State private var localAlignerBytes = OnDeviceLyricsAligner.downloadedModelBytes
+    @State private var localAlignerBusy = false
+    @State private var localAlignerStatus: String?
+    @AppStorage(PrecisionLyricsHostConfiguration.overrideURLKey) private var precisionHostURL = ""
+    @State private var precisionHostTesting = false
+    @State private var precisionHostStatus: String?
 
     var body: some View {
         NavigationStack {
@@ -45,8 +51,10 @@ struct SettingsView: View {
                 } header: {
                     Text("账号")
                 } footer: {
-                    if !loggedIn {
-                        Text("登录后可获得更高音质、收藏夹和封面资料库。")
+                    if CookieStore.isExpired {
+                        Text("登录已失效，请重新扫码。本地「我喜欢」和已缓存的收藏夹仍可播放。")
+                    } else if !loggedIn {
+                        Text("登录后可获得更高音质、收藏夹和封面资料库。未登录也可以先把歌曲加入「我喜欢」。")
                     }
                 }
                 if loggedIn {
@@ -60,7 +68,7 @@ struct SettingsView: View {
                     } header: {
                         Text("音乐资料库")
                     } footer: {
-                        Text("首页会直接展示这个收藏夹的封面。建议选择一个只保存音乐的收藏夹。")
+                        Text("首页会用这个收藏夹当旧封面，并混入一批新歌。建议选择一个只保存音乐的收藏夹。")
                     }
                 }
                 Section {
@@ -145,6 +153,59 @@ struct SettingsView: View {
                     Text("在线播放的歌曲会在后台保存到本地，下次播放不再消耗流量。")
                 }
                 Section {
+                    LabeledContent("Qwen3 本机歌词模型") {
+                        Text(localAlignerBytes > 0 ? formattedModelSize : "未下载")
+                            .foregroundStyle(.secondary)
+                    }
+                    if localAlignerBusy {
+                        HStack {
+                            ProgressView()
+                            Text(localAlignerStatus ?? "正在删除本机模型")
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if localAlignerBytes > 0 {
+                        Button("删除本机歌词模型", role: .destructive) {
+                            removeLocalAlignerModel()
+                        }
+                    }
+                    if let localAlignerStatus, !localAlignerBusy {
+                        Text(localAlignerStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("本机逐字歌词（已停用）")
+                } footer: {
+                    Text("真机两次确认 MLX 在 Metal 完成队列触发不可捕获的 SIGABRT，因此不再提供本机生成入口。已有模型可以删除；逐字生成请使用下面的高精度主机。")
+                }
+                Section {
+                    TextField("http://100.78.10.98:8765", text: $precisionHostURL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                    Button {
+                        testPrecisionLyricsHost()
+                    } label: {
+                        HStack {
+                            Label(precisionHostTesting ? "连接中" : "测试主机", systemImage: "desktopcomputer.and.macbook")
+                            Spacer()
+                            if precisionHostTesting { ProgressView() }
+                        }
+                    }
+                    .disabled(precisionHostTesting || PrecisionLyricsHostConfiguration.baseURL == nil)
+                    if let precisionHostStatus {
+                        Text(precisionHostStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("高精度逐字歌词主机")
+                } footer: {
+                    Text(PrecisionLyricsHostConfiguration.accessToken == nil
+                        ? "当前构建没有注入访问令牌。地址可留空使用构建默认值；生成只在你主动点击时上传缓存音频。"
+                        : "Windows 主机使用人声分离、Qwen 与 WhisperX 双模型共识。只在你主动点击时上传缓存音频，失败不会覆盖现有歌词。")
+                }
+                Section {
                     Toggle("连接 Wi-Fi 时优先播放 MV", isOn: $preferMVOnWiFi)
                     Toggle("清洗列表标题", isOn: $cleanListTitles)
                     NavigationLink {
@@ -155,7 +216,7 @@ struct SettingsView: View {
                 } header: {
                     Text("播放")
                 } footer: {
-                    Text("进入后台时 MV 会切回纯音乐流。标题清洗是实验功能，关闭时显示 B 站原标题和 UP 主。")
+                    Text("进入后台时 MV 会切回纯音乐流。列表标题清洗只作用于尚未识别的歌曲；已识别的翻唱会显示“翻唱者 · 原唱”。")
                 }
             }
             .formStyle(.grouped)
@@ -178,6 +239,7 @@ struct SettingsView: View {
                 }
             }
             .task {
+                refreshLocalAlignerState()
                 loadCDNProbeRows()
                 await loadUsername()
                 await loadFolders()
@@ -198,9 +260,79 @@ struct SettingsView: View {
         }
     }
 
+    private var formattedModelSize: String {
+        ByteCountFormatter.string(fromByteCount: localAlignerBytes, countStyle: .file)
+    }
+
+    private func refreshLocalAlignerState() {
+        localAlignerBytes = OnDeviceLyricsAligner.downloadedModelBytes
+    }
+
+    private func prepareLocalAlignerModel() {
+        guard !localAlignerBusy else { return }
+        localAlignerBusy = true
+        localAlignerStatus = "正在下载本机模型"
+        Task { @MainActor in
+            defer {
+                localAlignerBusy = false
+                refreshLocalAlignerState()
+            }
+            do {
+                try await OnDeviceLyricsAligner.shared.prepareCompletePipeline { _, message in
+                    Task { @MainActor in
+                        localAlignerStatus = message.localizedAlignerStatus
+                    }
+                }
+                localAlignerStatus = "模型已就绪"
+            } catch {
+                localAlignerStatus = error.localizedDescription
+            }
+        }
+    }
+
+    private func removeLocalAlignerModel() {
+        guard !localAlignerBusy else { return }
+        localAlignerBusy = true
+        Task { @MainActor in
+            defer {
+                localAlignerBusy = false
+                refreshLocalAlignerState()
+            }
+            do {
+                try await OnDeviceLyricsAligner.shared.removeDownloadedModel()
+                localAlignerStatus = "模型已删除"
+            } catch {
+                localAlignerStatus = error.localizedDescription
+            }
+        }
+    }
+
+    private func testPrecisionLyricsHost() {
+        guard !precisionHostTesting else { return }
+        precisionHostTesting = true
+        precisionHostStatus = "正在连接..."
+        Task { @MainActor in
+            defer { precisionHostTesting = false }
+            do {
+                let milliseconds = try await PrecisionLyricsHostClient.shared.healthCheck()
+                precisionHostStatus = "主机在线 · \(milliseconds) ms"
+            } catch {
+                precisionHostStatus = error.localizedDescription
+            }
+        }
+    }
+
     /// 登录后拉取并显示用户名。
     private func loadUsername() async {
+        if let cached = BiliSessionStore.shared.session.uname, !cached.isEmpty {
+            username = cached
+        }
         guard loggedIn, let accountID = CookieStore.mid else { return }
+        await BiliSessionStore.shared.refreshFromNav()
+        if let sessionName = BiliSessionStore.shared.session.uname, !sessionName.isEmpty {
+            username = sessionName
+            return
+        }
         let loadedUsername = try? await BiliClient().myInfo().uname
         guard loggedIn, CookieStore.mid == accountID else { return }
         username = loadedUsername
@@ -429,11 +561,15 @@ struct QRLoginView: View {
                         guard !Task.isCancelled, loginAttemptID == attemptID else { return }
                         consecutivePollFailures = 0
                         switch result {
-                        case .success(let cookie):
+                        case .success(let cookie, let refreshToken, let buvid3):
                             guard CookieStore.save(cookie) else {
                                 status = "登录信息无法写入钥匙串"
                                 return
                             }
+                            BiliSessionStore.shared.adopt(
+                                cookie: cookie,
+                                refreshToken: refreshToken,
+                                buvid3: buvid3)
                             onSuccess()
                             return
                         case .scanned:

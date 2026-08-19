@@ -40,15 +40,29 @@ struct BiliClient {
         return headers
     }
 
-    // 默认 URLSession.shared 的请求超时是 60s——某个接口卡住时用户要干等一分钟,
-    // 预取任务也会一直挂着。元数据接口都很轻,12s 足够,失败快速暴露。
+    // 默认 URLSession.shared 的请求超时是 60s——某个接口卡住时用户要干等一分钟。
+    // 发现/搜索和起播必须分会话：同一 host 默认最多 6 条连接，首页一排搜索会把 playurl 堵住。
+    private enum RequestKind {
+        case playback
+        case utility
+    }
+
     private static let session: URLSession = {
+        makeSession(maxConnectionsPerHost: 3)
+    }()
+
+    private static let playbackSession: URLSession = {
+        makeSession(maxConnectionsPerHost: 4)
+    }()
+
+    private static func makeSession(maxConnectionsPerHost: Int) -> URLSession {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 12
         config.timeoutIntervalForResource = 20
         config.waitsForConnectivity = true
+        config.httpMaximumConnectionsPerHost = maxConnectionsPerHost
         return URLSession(configuration: config)
-    }()
+    }
 
     /// B 站接口返回的错误（code + message）。
     struct APIError: LocalizedError {
@@ -73,7 +87,7 @@ struct BiliClient {
     /// 注意：传入的 url 必须已是合法编码。搜索的 query 由 WBISigner 百分号编码并据此签名,
     /// 其余接口的参数都是 ASCII(bvid/cid/页码)。**不能**在这里再 addingPercentEncoding——
     /// 那会把 `%E5` 二次编码成 `%25E5`,服务器收到的是字面量而非中文,搜索静默返回错误结果。
-    private func get<T: Decodable>(_ url: String) async throws -> T {
+    private func get<T: Decodable>(_ url: String, kind: RequestKind = .utility) async throws -> T {
         let start = CFAbsoluteTimeGetCurrent()
         guard let urlObj = URL(string: url) else {
             throw APIError(code: -1, message: "URL 非法")
@@ -83,12 +97,14 @@ struct BiliClient {
         if let cookie = CookieStore.cookie {
             req.setValue(cookie, forHTTPHeaderField: "Cookie")
         }
-        let (data, response) = try await Self.session.data(for: req)
+        let session = kind == .playback ? Self.playbackSession : Self.session
+        let (data, response) = try await session.data(for: req)
         let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
         log.debug("GET \(elapsed, format: .fixed(precision: 1))ms \(Self.sanitizedLogURL(url))")
         try await Self.validateHTTPResponse(response, data: data)
         let env = try await Self.decode(Envelope<T>.self, from: data)
         guard env.code == 0 else {
+            Self.noteAuthenticationFailureIfNeeded(code: env.code)
             throw APIError(code: env.code, message: env.message)
         }
         guard let payload = env.data else {
@@ -130,6 +146,7 @@ struct BiliClient {
         }
         let env = try await Self.decode(VoidEnvelope.self, from: data)
         guard env.code == 0 else {
+            Self.noteAuthenticationFailureIfNeeded(code: env.code)
             throw APIError(code: env.code, message: env.message)
         }
     }
@@ -162,7 +179,14 @@ struct BiliClient {
         let code = envelope?.code ?? http.statusCode
         let message = envelope?.message?.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedMessage = message.flatMap { $0.isEmpty ? nil : $0 } ?? "HTTP \(http.statusCode)"
+        noteAuthenticationFailureIfNeeded(code: code)
         throw APIError(code: code, message: resolvedMessage)
+    }
+
+    static func noteAuthenticationFailureIfNeeded(code: Int) {
+        if code == 401 || code == -101 {
+            BiliSessionStore.shared.markExpired()
+        }
     }
 
     // MARK: - 视频信息
@@ -203,7 +227,7 @@ struct BiliClient {
 
     /// 取视频详情。
     func videoInfo(bvid: String) async throws -> VideoInfo {
-        try await get("https://api.bilibili.com/x/web-interface/view?bvid=\(bvid)")
+        try await get("https://api.bilibili.com/x/web-interface/view?bvid=\(bvid)", kind: .playback)
     }
 
     /// 分 P 条目。
@@ -216,7 +240,7 @@ struct BiliClient {
 
     /// 取分 P 列表（比 videoInfo 轻量，只为补 cid/时长）。
     func pageList(bvid: String) async throws -> [PageListItem] {
-        try await get("https://api.bilibili.com/x/player/pagelist?bvid=\(bvid)")
+        try await get("https://api.bilibili.com/x/player/pagelist?bvid=\(bvid)", kind: .playback)
     }
 
     // MARK: - 音频流
@@ -306,7 +330,8 @@ struct BiliClient {
             "fourk": "1",
         ])
         let info: PlayInfo = try await get(
-            "https://api.bilibili.com/x/player/wbi/playurl?\(query)")
+            "https://api.bilibili.com/x/player/wbi/playurl?\(query)",
+            kind: .playback)
         guard let dash = info.dash, let audios = dash.audio, !audios.isEmpty else {
             throw APIError(code: -1, message: "无 DASH 音频流")
         }
@@ -369,7 +394,8 @@ struct BiliClient {
         for qn in profile.qualityCandidates(preferredQuality: preferredQuality) {
             do {
                 let info: VideoPlayInfo = try await get(
-                    "https://api.bilibili.com/x/player/playurl?bvid=\(bvid)&cid=\(cid)&qn=\(qn)&fnval=0&fourk=1")
+                    "https://api.bilibili.com/x/player/playurl?bvid=\(bvid)&cid=\(cid)&qn=\(qn)&fnval=0&fourk=1",
+                    kind: .playback)
                 if let raw = info.durl?.first?.url, let url = URL(string: raw) {
                     return VideoStream(url: url, quality: info.quality ?? qn)
                 }
@@ -511,6 +537,72 @@ struct BiliClient {
         try await get("https://api.bilibili.com/x/web-interface/archive/related?bvid=\(bvid)")
     }
 
+    // MARK: - 首页推荐流 (WBI)
+
+    /// 个性化首页推荐（登录后更像音乐发现；未登录是泛化内容）。
+    struct FeedData: Decodable {
+        let item: [FeedItem]?
+    }
+
+    /// 首页推荐流条目。直播/广告没有 BV，解码时跳过。
+    struct FeedItem: Decodable {
+        struct Owner: Decodable {
+            let mid: Int?
+            let name: String?
+        }
+
+        let id: Int?
+        let bvid: String?
+        let cid: Int?
+        let goto: String?
+        let title: String?
+        let pic: String?
+        let duration: Int?
+        let tid: Int?
+        let owner: Owner?
+
+        var isPlayableVideo: Bool {
+            guard let bvid, bvid.hasPrefix("BV"), let title, !title.isEmpty else { return false }
+            if let goto, goto != "av", goto != "vertical_av" { return false }
+            return (duration ?? 0) > 0
+        }
+
+        var coverURL: URL? {
+            guard let pic, !pic.isEmpty else { return nil }
+            return URL(string: pic.hasPrefix("//") ? "https:" + pic : pic)
+        }
+    }
+
+    /// 拉一页首页推荐。`freshIndex` 递增才会换一批，避免总拿到同一页。
+    func homeFeed(freshIndex: Int, pageSize: Int = 14) async throws -> [FeedItem] {
+        do {
+            return try await homeFeedOnce(freshIndex: freshIndex, pageSize: pageSize)
+        } catch let error as APIError where error.code == -403 {
+            await WBISigner.invalidateCachedKey()
+            return try await homeFeedOnce(freshIndex: freshIndex, pageSize: pageSize)
+        }
+    }
+
+    private func homeFeedOnce(freshIndex: Int, pageSize: Int) async throws -> [FeedItem] {
+        let index = max(freshIndex, 1)
+        let params = [
+            "ps": String(min(max(pageSize, 1), 30)),
+            "fresh_idx": String(index),
+            "fresh_idx_1h": String(index),
+            "fresh_type": index <= 1 ? "3" : "4",
+            "brush": String(index),
+            "web_location": "1430650",
+        ]
+        let query = try await WBISigner.sign(params)
+        do {
+            let data: FeedData = try await get(
+                "https://api.bilibili.com/x/web-interface/wbi/index/top/feed/rcmd?\(query)")
+            return (data.item ?? []).filter(\.isPlayableVideo)
+        } catch let error as APIError where error.code == -352 {
+            throw APIError(code: -352, message: "触发风控，请稍后再试")
+        }
+    }
+
     // MARK: - 扫码登录
 
     /// 登录二维码（展示用 url + 轮询用 key）。
@@ -529,7 +621,7 @@ struct BiliClient {
         case waiting          // 未扫码 (86101)
         case scanned          // 已扫码待确认 (86090)
         case expired          // 二维码过期 (86038)
-        case success(cookie: String)
+        case success(cookie: String, refreshToken: String?, buvid3: String?)
     }
 
     /// 轮询扫码状态。登录成功时响应头才是 Cookie 的权威来源，回调 URL 仅用于补缺。
@@ -538,6 +630,7 @@ struct BiliClient {
             let url: String
             let code: Int
             let message: String
+            let refresh_token: String?
         }
         var components = URLComponents(
             string: "https://passport.bilibili.com/x/passport-login/web/qrcode/poll")!
@@ -561,9 +654,13 @@ struct BiliClient {
                 throw APIError(code: -1, message: "登录响应无效")
             }
             let responseCookies = Self.cookies(from: http, requestURL: url)
-            return .success(cookie: try Self.qrLoginCookie(
-                callbackURL: poll.url,
-                responseCookies: responseCookies))
+            let buvid3 = responseCookies.first(where: { $0.name == "buvid3" })?.value
+            return .success(
+                cookie: try Self.qrLoginCookie(
+                    callbackURL: poll.url,
+                    responseCookies: responseCookies),
+                refreshToken: poll.refresh_token,
+                buvid3: buvid3)
         case 86038: return .expired
         case 86090: return .scanned
         case 86101: return .waiting
@@ -868,5 +965,55 @@ struct BiliClient {
     /// 取当前登录用户信息（nav 接口）。
     func myInfo() async throws -> UserInfo {
         try await get("https://api.bilibili.com/x/web-interface/nav")
+    }
+
+    /// 读取 nav 资料。未登录时 code 可能是 -101，但 data 仍可能带 wbi_img。
+    func navProfile() async throws -> BiliNavProfile {
+        struct NavEnvelope: Decodable {
+            struct Data: Decodable {
+                struct Wbi: Decodable {
+                    let img_url: String?
+                    let sub_url: String?
+                }
+                let isLogin: Bool?
+                let mid: Int?
+                let uname: String?
+                let face: String?
+                let wbi_img: Wbi?
+            }
+            let code: Int
+            let message: String
+            let data: Data?
+        }
+
+        var request = URLRequest(url: URL(string: "https://api.bilibili.com/x/web-interface/nav")!)
+        request.timeoutInterval = 12
+        Self.headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
+        if let cookie = CookieStore.cookie {
+            request.setValue(cookie, forHTTPHeaderField: "Cookie")
+        }
+        let (data, response) = try await Self.session.data(for: request)
+        try await Self.validateHTTPResponse(response, data: data)
+        let envelope = try await Self.decode(NavEnvelope.self, from: data)
+        guard let payload = envelope.data else {
+            if envelope.code == -101 || envelope.code == 401 {
+                return BiliNavProfile(isLogin: false, mid: nil, uname: nil, face: nil, imgKey: nil, subKey: nil)
+            }
+            throw APIError(code: envelope.code, message: envelope.message)
+        }
+        let isLogin = payload.isLogin ?? (envelope.code == 0 && payload.mid != nil)
+        return BiliNavProfile(
+            isLogin: isLogin,
+            mid: payload.mid,
+            uname: payload.uname,
+            face: payload.face,
+            imgKey: payload.wbi_img?.img_url.flatMap(Self.wbiKey(from:)),
+            subKey: payload.wbi_img?.sub_url.flatMap(Self.wbiKey(from:)))
+    }
+
+    private static func wbiKey(from url: String) -> String? {
+        let last = url.split(separator: "/").last.map(String.init) ?? url
+        let key = last.split(separator: ".").first.map(String.init) ?? last
+        return key.isEmpty ? nil : key
     }
 }

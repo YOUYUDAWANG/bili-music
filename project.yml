@@ -9,6 +9,12 @@ fileGroups:
 packages:
   LNPopupUI:
     path: Vendor/LNPopupUI
+  MLXAudio:
+    url: https://github.com/Blaizzy/mlx-audio-swift.git
+    exactVersion: 0.1.3
+  SwiftHuggingFace:
+    url: https://github.com/huggingface/swift-huggingface.git
+    exactVersion: 0.8.1
 targets:
   BiliMusic:
     type: application
@@ -19,6 +25,12 @@ targets:
           - "**/CLAUDE.md"
     dependencies:
       - package: LNPopupUI
+      - package: MLXAudio
+        product: MLXAudioCore
+      - package: MLXAudio
+        product: MLXAudioSTT
+      - package: SwiftHuggingFace
+        product: HuggingFace
     # 签名 Team ID 不入库：各自维护本地 Local.xcconfig（见 Local.xcconfig.example）
     configFiles:
       Debug: Local.xcconfig
@@ -40,6 +52,13 @@ targets:
         CADisableMinimumFrameDurationOnPhone: true
         BiliMusicMetadataAPIURL: $(BILIMUSIC_METADATA_API_URL)
         BiliMusicMetadataAPIKey: $(BILIMUSIC_METADATA_API_KEY)
+        BiliMusicLyricDirectorAPIURL: $(BILIMUSIC_LYRIC_DIRECTOR_API_URL)
+        BiliMusicLDDCLyricsAPIURL: $(BILIMUSIC_LDDC_LYRICS_API_URL)
+        BiliMusicLDDCLyricsAPIKey: $(BILIMUSIC_LDDC_LYRICS_API_KEY)
+        BiliMusicPrecisionLyricsHostURL: $(BILIMUSIC_PRECISION_LYRICS_HOST_URL)
+        BiliMusicPrecisionLyricsHostFallbackURL: $(BILIMUSIC_PRECISION_LYRICS_HOST_FALLBACK_URL)
+        BiliMusicPrecisionLyricsHostToken: $(BILIMUSIC_PRECISION_LYRICS_HOST_TOKEN)
+        NSLocalNetworkUsageDescription: 连接你自己的 Windows 电脑生成高精度逐字歌词。
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
     postBuildScripts:
@@ -49,6 +68,19 @@ targets:
           if metadata_worker_token="$(security find-generic-password -a BiliMusic -s com.youyudawang.BiliMusic.metadata-api -w 2>/dev/null)"; then
             /usr/libexec/PlistBuddy -c "Set :BiliMusicMetadataAPIKey ${metadata_worker_token}" "${TARGET_BUILD_DIR}/${INFOPLIST_PATH}"
             unset metadata_worker_token
+          fi
+          if lddc_lyrics_token="$(security find-generic-password -a BiliMusic -s com.youyudawang.BiliMusic.lddc-lyrics-api -w 2>/dev/null)"; then
+            /usr/libexec/PlistBuddy -c "Set :BiliMusicLDDCLyricsAPIKey ${lddc_lyrics_token}" "${TARGET_BUILD_DIR}/${INFOPLIST_PATH}"
+            lddc_lyrics_plist="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/BiliMusicLDDCLyrics.plist"
+            /usr/bin/plutil -create binary1 "${lddc_lyrics_plist}"
+            /usr/libexec/PlistBuddy -c "Add :AccessToken string ${lddc_lyrics_token}" "${lddc_lyrics_plist}"
+            unset lddc_lyrics_token
+          fi
+          if precision_host_token="$(security find-generic-password -a BiliMusic -s com.youyudawang.BiliMusic.precision-lyrics-host -w 2>/dev/null)"; then
+            precision_host_plist="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/BiliMusicPrecisionLyricsHost.plist"
+            /usr/bin/plutil -create binary1 "${precision_host_plist}"
+            /usr/libexec/PlistBuddy -c "Add :AccessToken string ${precision_host_token}" "${precision_host_plist}"
+            unset precision_host_token
           fi
   BiliMusicTests:
     type: bundle.unit-test

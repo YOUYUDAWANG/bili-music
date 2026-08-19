@@ -162,6 +162,27 @@ final class PlaybackPersistenceTests: XCTestCase {
         let loaded = await store.load(preferredFolderID: 9)
         XCTAssertEqual(loaded?.tracks.first?.cid, 445566)
     }
+
+    func testCoverLibrarySnapshotPreservesDiscoveryTracks() async throws {
+        let url = tempDir.appendingPathComponent("cover-library-discovery.json")
+        let store = CoverLibrarySnapshotStore(fileURLForTesting: url)
+        let library = Track(
+            bvid: "BVLIB001",
+            title: "旧歌",
+            artist: "A",
+            coverURL: URL(string: "https://example.invalid/old.jpg"),
+            duration: 180)
+        let discovery = Track(
+            bvid: "BVNEW001",
+            title: "新歌",
+            artist: "B",
+            coverURL: URL(string: "https://example.invalid/new.jpg"),
+            duration: 200)
+        await store.save(folderID: 3, tracks: [library], discoveryTracks: [discovery])
+        let loaded = await store.load(preferredFolderID: 3)
+        XCTAssertEqual(loaded?.tracks.map(\.bvid), ["BVLIB001"])
+        XCTAssertEqual(loaded?.discoveryTracks.map(\.bvid), ["BVNEW001"])
+    }
 }
 
 @MainActor

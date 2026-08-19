@@ -71,6 +71,7 @@ CachedAsyncImage(url: coverURL) { image in
 
 | 日期 | 变更 |
 |------|------|
+| 2026-08-19 | 新增 `PlayerSurface` token、`HapticIntent.transportImpact`；`CachedAsyncImage` 0.15s 淡入。 |
 | 2026-08-14 | 明确“系统玻璃外壳 + 横版影像内容”分层；播放器收敛为封面双色光场，不使用高饱和生成撞色。 |
 | 2026-07-27 | 全项目 review 修复 + 文档同步：品牌色改 B 站蓝青（`brand`/`brandSoft` 动态色），删除 `playerGradient` 改 `PlayerArtworkPalette`，补 Haptics/TrackRow/UIComponents。 |
 | 2026-06-24 | 初始文档创建。 |

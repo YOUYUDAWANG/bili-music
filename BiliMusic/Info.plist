@@ -2,10 +2,22 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>BiliMusicLDDCLyricsAPIKey</key>
+	<string>$(BILIMUSIC_LDDC_LYRICS_API_KEY)</string>
+	<key>BiliMusicLDDCLyricsAPIURL</key>
+	<string>$(BILIMUSIC_LDDC_LYRICS_API_URL)</string>
+	<key>BiliMusicLyricDirectorAPIURL</key>
+	<string>$(BILIMUSIC_LYRIC_DIRECTOR_API_URL)</string>
 	<key>BiliMusicMetadataAPIKey</key>
 	<string>$(BILIMUSIC_METADATA_API_KEY)</string>
 	<key>BiliMusicMetadataAPIURL</key>
 	<string>$(BILIMUSIC_METADATA_API_URL)</string>
+	<key>BiliMusicPrecisionLyricsHostFallbackURL</key>
+	<string>$(BILIMUSIC_PRECISION_LYRICS_HOST_FALLBACK_URL)</string>
+	<key>BiliMusicPrecisionLyricsHostToken</key>
+	<string>$(BILIMUSIC_PRECISION_LYRICS_HOST_TOKEN)</string>
+	<key>BiliMusicPrecisionLyricsHostURL</key>
+	<string>$(BILIMUSIC_PRECISION_LYRICS_HOST_URL)</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
@@ -29,6 +41,8 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>连接你自己的 Windows 电脑生成高精度逐字歌词。</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>

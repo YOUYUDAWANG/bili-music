@@ -1,8 +1,8 @@
 import Foundation
 import SwiftUI
 
-/// 封面驱动的私人音乐库。首页不生成推荐，优先展示持久化收藏快照、缓存和播放历史，
-/// 再在后台用用户指定的 B 站收藏夹补齐封面。
+/// 封面驱动的私人音乐库。收藏夹旧封面和发现新歌混在同一条瀑布流里；
+/// 发现优先走会换页的首页推荐流，并记住最近展示过的 BV。
 struct HomeView: View {
     @Environment(PlayerEngine.self) private var engine
     @Binding var showSettings: Bool
@@ -13,6 +13,7 @@ struct HomeView: View {
     @State private var errorMessage: String?
     @State private var trackTapTrigger = 0
     @State private var activeLoadID = UUID()
+    @State private var discoveryTask: Task<Void, Never>?
 
     init(
         showSettings: Binding<Bool> = .constant(false),
@@ -51,7 +52,7 @@ struct HomeView: View {
             }
 
             LinearGradient(
-                colors: [Color.black.opacity(0.65), Color.black.opacity(0.20), Color.clear],
+                colors: [AppTheme.background.opacity(0.88), AppTheme.background.opacity(0.35), .clear],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -73,14 +74,7 @@ struct HomeView: View {
             HStack(spacing: 0) {
                 Button {
                     guard !tracks.isEmpty else { return }
-                    trackTapTrigger += 1
-                    let randomIndex = Int.random(in: tracks.indices)
-                    Task {
-                        await engine.play(
-                            tracks: tracks,
-                            startAt: randomIndex,
-                            queueMode: .shuffle)
-                    }
+                    playSelection(startAt: Int.random(in: tracks.indices), queueMode: .shuffle)
                 } label: {
                     Image(systemName: "shuffle")
                         .font(.system(size: 15, weight: .semibold))
@@ -157,9 +151,7 @@ struct HomeView: View {
         let isCurrent = engine.current.map { track.key.matches($0) } ?? false
         let pixelWidth = featured ? 1_200 : 620
         return Button {
-            trackTapTrigger += 1
-            engine.beginPlayback(tracks: tracks, startAt: index)
-            openPlayer()
+            playSelection(startAt: index)
         } label: {
             CachedAsyncImage(
                 url: BiliArtworkURL.widescreenThumbnail(track.coverURL, width: pixelWidth),
@@ -188,15 +180,13 @@ struct HomeView: View {
         .buttonStyle(.plain)
         .contextMenu {
             Button {
+                cancelDiscovery()
                 Task { await engine.playRadio(seed: track) }
             } label: {
                 Label("电台播放", systemImage: PlayerEngine.QueueMode.radio.icon)
             }
             Button {
-                trackTapTrigger += 1
-                Task {
-                    await engine.play(tracks: tracks, startAt: index, queueMode: .shuffle)
-                }
+                playSelection(startAt: index, queueMode: .shuffle)
             } label: {
                 Label("随机播放资料库", systemImage: PlayerEngine.QueueMode.shuffle.icon)
             }
@@ -205,6 +195,9 @@ struct HomeView: View {
             } label: {
                 Label("添加到队列", systemImage: "text.badge.plus")
             }
+        } preview: {
+            MagazineArtwork(url: track.coverURL, pixelWidth: 640)
+                .frame(width: 320)
         }
         .accessibilityLabel("\(track.title)，\(track.artist)")
         .accessibilityValue(isCurrent ? "正在播放" : "")
@@ -237,7 +230,7 @@ struct HomeView: View {
     private var emptyMessage: String {
         if let errorMessage { return errorMessage }
         return CookieStore.isLoggedIn
-            ? "在设置里选择一个音乐收藏夹，封面会成为首页的播放入口。"
+            ? "在设置里选择一个音乐收藏夹。封面墙会把收藏夹和一批新歌混在一起。"
             : "登录 B 站账号后选择音乐收藏夹，或先缓存几首歌曲。"
     }
 
@@ -264,34 +257,56 @@ struct HomeView: View {
 
         let savedSnapshot = await CoverLibrarySnapshotStore.shared.load(preferredFolderID: libraryFolderId)
         guard !Task.isCancelled, activeLoadID == loadID else { return }
-        let persisted = savedSnapshot?.tracks ?? []
-        if !persisted.isEmpty {
-            tracks = persisted
+        var library = savedSnapshot?.tracks ?? []
+        let savedDiscovery = savedSnapshot?.discoveryTracks ?? []
+        if !library.isEmpty {
+            present(library: library, discovery: savedDiscovery)
             loading = false
         }
 
         await CacheStore.shared.loadIfNeeded()
         await PlaybackHistoryStore.shared.loadIfNeeded()
+        await LibraryStore.shared.loadIfNeeded()
 
         guard !Task.isCancelled, activeLoadID == loadID else { return }
-        let localTracks = deduplicated(
-            persisted
-                + CacheStore.shared.entries.map(\.track)
-                + PlaybackHistoryStore.shared.entries.map(\.track)
-        )
-        if !localTracks.isEmpty {
-            tracks = localTracks
+        let storedLibrary = resolvedStoredLibrary()
+        if !storedLibrary.isEmpty {
+            library = deduplicated(library + storedLibrary)
+            present(library: library, discovery: savedDiscovery)
             loading = false
+        } else if library.isEmpty {
+            let fallback = deduplicated(
+                CacheStore.shared.entries.map(\.track)
+                    + PlaybackHistoryStore.shared.entries.map(\.track)
+            )
+            if !fallback.isEmpty {
+                library = fallback
+                tracks = fallback
+                loading = false
+            }
         }
 
         guard CookieStore.isLoggedIn, let accountID = CookieStore.mid else {
             loading = false
+            scheduleDiscovery(
+                library: library,
+                savedDiscovery: savedDiscovery,
+                forceRefresh: forceRemoteRefresh,
+                loadID: loadID,
+                folderID: savedSnapshot?.folderID)
             return
         }
         if !forceRemoteRefresh,
            let savedAt = savedSnapshot?.savedAt,
-           Date().timeIntervalSince(savedAt) < 15 * 60 {
+           Date().timeIntervalSince(savedAt) < 15 * 60,
+           !library.isEmpty {
             loading = false
+            scheduleDiscovery(
+                library: library,
+                savedDiscovery: savedDiscovery,
+                forceRefresh: false,
+                loadID: loadID,
+                folderID: savedSnapshot?.folderID)
             return
         }
 
@@ -301,6 +316,12 @@ struct HomeView: View {
             guard !Task.isCancelled, activeLoadID == loadID, CookieStore.mid == accountID else { return }
             guard let folder = selectedFolder(from: folders) else {
                 loading = false
+                scheduleDiscovery(
+                    library: library,
+                    savedDiscovery: savedDiscovery,
+                    forceRefresh: forceRemoteRefresh,
+                    loadID: loadID,
+                    folderID: savedSnapshot?.folderID)
                 return
             }
 
@@ -318,7 +339,8 @@ struct HomeView: View {
                 page += 1
 
                 if !favoriteTracks.isEmpty {
-                    tracks = deduplicated(favoriteTracks + localTracks)
+                    library = favoriteTracks
+                    present(library: library, discovery: savedDiscovery)
                     loading = false
                 }
 
@@ -329,33 +351,132 @@ struct HomeView: View {
 
             if !favoriteTracks.isEmpty {
                 FavoriteManager.shared.markLoaded(folderId: folder.id, title: folder.title, tracks: favoriteTracks)
-                await CoverLibrarySnapshotStore.shared.save(folderID: folder.id, tracks: favoriteTracks)
+                await CoverLibrarySnapshotStore.shared.save(
+                    folderID: folder.id,
+                    tracks: favoriteTracks,
+                    discoveryTracks: savedDiscovery)
                 engine.preload(tracks: favoriteTracks, limit: 2, delay: .milliseconds(900))
             }
+            scheduleDiscovery(
+                library: library,
+                savedDiscovery: savedDiscovery,
+                forceRefresh: forceRemoteRefresh,
+                loadID: loadID,
+                folderID: folder.id)
         } catch {
             guard !Task.isCancelled, activeLoadID == loadID, CookieStore.mid == accountID else { return }
             if tracks.isEmpty {
                 errorMessage = error.localizedDescription
             }
+            scheduleDiscovery(
+                library: library,
+                savedDiscovery: savedDiscovery,
+                forceRefresh: forceRemoteRefresh,
+                loadID: loadID,
+                folderID: savedSnapshot?.folderID)
         }
         loading = false
     }
 
+    private func resolvedStoredLibrary() -> [Track] {
+        if libraryFolderId != 0 {
+            return LibraryStore.shared.tracks(forRemoteFolder: libraryFolderId)
+        }
+        if let lastFolderId = FavoriteManager.shared.lastFolderId {
+            return LibraryStore.shared.tracks(forRemoteFolder: lastFolderId)
+        }
+        return LibraryStore.shared.tracks(in: LibraryCollection.likedID)
+    }
+
+    private func playSelection(startAt index: Int, queueMode: PlayerEngine.QueueMode? = nil) {
+        guard tracks.indices.contains(index) else { return }
+        cancelDiscovery()
+        trackTapTrigger += 1
+        if let queueMode {
+            Task {
+                await engine.play(tracks: tracks, startAt: index, queueMode: queueMode)
+            }
+        } else {
+            engine.beginPlayback(tracks: tracks, startAt: index)
+            openPlayer()
+        }
+    }
+
+    private func cancelDiscovery() {
+        discoveryTask?.cancel()
+        discoveryTask = nil
+    }
+
+    private func scheduleDiscovery(
+        library: [Track],
+        savedDiscovery: [Track],
+        forceRefresh: Bool,
+        loadID: UUID,
+        folderID: Int?
+    ) {
+        cancelDiscovery()
+        let delay: Duration = forceRefresh ? .milliseconds(800) : .seconds(2)
+        discoveryTask = Task {
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, activeLoadID == loadID else { return }
+            await applyDiscovery(
+                library: library,
+                savedDiscovery: savedDiscovery,
+                forceRefresh: forceRefresh,
+                loadID: loadID,
+                folderID: folderID)
+        }
+    }
+
+    private func present(library: [Track], discovery: [Track]) {
+        let cleanLibrary = deduplicated(library)
+        let cleanDiscovery = deduplicated(discovery)
+        tracks = cleanDiscovery.isEmpty
+            ? cleanLibrary
+            : HomeCoverMixer.mix(library: cleanLibrary, discovery: cleanDiscovery)
+    }
+
+    private func applyDiscovery(
+        library: [Track],
+        savedDiscovery: [Track],
+        forceRefresh: Bool,
+        loadID: UUID,
+        folderID: Int?
+    ) async {
+        if !savedDiscovery.isEmpty {
+            present(library: library, discovery: savedDiscovery)
+        }
+        await RecommendationMemory.shared.loadIfNeeded()
+        let memoryKeys = await RecommendationMemory.shared.recentKeys()
+        let excluded = Set(library.map(\.key)).union(memoryKeys)
+        let discovery = await RecommendationEngine().recommendations(
+            mode: .home,
+            context: .init(current: engine.current, excludedKeys: excluded),
+            limit: HomeCoverMixer.discoveryBudget(forLibraryCount: library.count),
+            policy: .home(trigger: forceRefresh ? .manualRefresh : .initialHomeLoad))
+        guard !Task.isCancelled, activeLoadID == loadID else { return }
+        let usableDiscovery = deduplicated(discovery)
+        if usableDiscovery.isEmpty {
+            if !savedDiscovery.isEmpty {
+                present(library: library, discovery: savedDiscovery)
+            }
+            return
+        }
+        await RecommendationMemory.shared.record(usableDiscovery.map(\.bvid))
+        present(library: library, discovery: usableDiscovery)
+        if let folderID {
+            await CoverLibrarySnapshotStore.shared.save(
+                folderID: folderID,
+                tracks: deduplicated(library),
+                discoveryTracks: usableDiscovery)
+        }
+        engine.preload(tracks: Array(tracks.prefix(4)), limit: 2, delay: .milliseconds(900))
+    }
+
     private func selectedFolder(from folders: [BiliClient.FavFolder]) -> BiliClient.FavFolder? {
         let nonEmpty = folders.filter { $0.media_count > 0 }
-        if libraryFolderId != 0,
-           let selected = nonEmpty.first(where: { $0.id == libraryFolderId }) {
-            return selected
-        }
-        if let lastFolderId = FavoriteManager.shared.lastFolderId,
-           let last = nonEmpty.first(where: { $0.id == lastFolderId }) {
-            return last
-        }
-        return nonEmpty.first(where: {
-            $0.title.localizedCaseInsensitiveContains("music")
-                || $0.title.contains("音乐")
-                || $0.title.contains("歌曲")
-        }) ?? nonEmpty.first
+        return FavoriteFolderSelector.targetFolder(from: nonEmpty, preferredId: libraryFolderId)
+            ?? FavoriteFolderSelector.targetFolder(from: folders, preferredId: libraryFolderId)
     }
 
     private func deduplicated(_ source: [Track]) -> [Track] {

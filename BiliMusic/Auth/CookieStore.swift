@@ -67,6 +67,7 @@ enum CookieStore {
         cachedCookie = newValue
         loadedFromKeychain = true
         lock.unlock()
+        BiliSessionStore.shared.handleCookieChange(newValue)
         postAuthenticationDidChange()
         return true
     }
@@ -135,8 +136,14 @@ enum CookieStore {
         }
     }
 
-    /// 是否存在已保存的登录态。
-    static var isLoggedIn: Bool { cookie != nil }
+    /// 是否存在仍有效的登录态。Cookie 还在但 nav 已判定失效时返回 false。
+    static var isLoggedIn: Bool {
+        cookie != nil && !BiliSessionStore.shared.isExpired
+    }
+
+    static var isExpired: Bool {
+        BiliSessionStore.shared.isExpired
+    }
 
     /// Cookie 里的 DedeUserID,收藏夹等接口需要
     static var mid: String? {

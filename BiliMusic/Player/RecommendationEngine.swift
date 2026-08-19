@@ -46,16 +46,22 @@ struct RecommendationSchedulingPolicy: Equatable {
     var historySeedLimit: Int
     var cachedSeedLimit: Int
     var fallbackKeywordLimit: Int
+    var homeFeedPageLimit: Int
+    var tasteArtistLimit: Int
+    var tasteTitleLimit: Int
     var scoringPriority: TaskPriority
 
     static func home(trigger: Trigger) -> RecommendationSchedulingPolicy {
         RecommendationSchedulingPolicy(
             trigger: trigger,
-            favoriteSeedLimit: 5,
-            relatedPerFavoriteSeedLimit: 10,
+            favoriteSeedLimit: 3,
+            relatedPerFavoriteSeedLimit: 6,
             historySeedLimit: 2,
-            cachedSeedLimit: 2,
+            cachedSeedLimit: 1,
             fallbackKeywordLimit: 1,
+            homeFeedPageLimit: 1,
+            tasteArtistLimit: 4,
+            tasteTitleLimit: 3,
             scoringPriority: .utility)
     }
 
@@ -71,6 +77,9 @@ struct RecommendationSchedulingPolicy: Equatable {
                 historySeedLimit: 1,
                 cachedSeedLimit: 1,
                 fallbackKeywordLimit: 2,
+                homeFeedPageLimit: 0,
+                tasteArtistLimit: 0,
+                tasteTitleLimit: 0,
                 scoringPriority: .userInitiated)
         }
     }
@@ -97,6 +106,8 @@ struct RecommendationEngine {
         case playlistNeighbor
         case artistSearch
         case fallbackSearch
+        case homeFeed
+        case tasteSearch
 
         var baseScore: Int {
             switch self {
@@ -106,6 +117,8 @@ struct RecommendationEngine {
             case .playlistNeighbor: 70
             case .artistSearch: 46
             case .fallbackSearch: 30
+            case .homeFeed: 58
+            case .tasteSearch: 84
             }
         }
     }
@@ -128,6 +141,7 @@ struct RecommendationEngine {
         let cachedKeys: Set<TrackKey>
         let favoriteBVIDs: Set<String>
         let favoriteFolder: FavoriteFolderSnapshot?
+        let taste: ListeningTaste
     }
 
     private let client = BiliClient()
@@ -150,8 +164,8 @@ struct RecommendationEngine {
         let snapshot = await Self.makeSnapshot(mode: mode)
         let cacheKey = Self.cacheKey(mode: mode, context: context, snapshot: snapshot)
 
-        // 电台要的是「最佳下一首」,需要实时最高分,不缓存、不随机。其余模式缓存候选池。
-        if mode != .radio, let cached = await RecommendationPoolCache.shared.pool(for: cacheKey) {
+        // 电台要实时最高分；首页每次换一批，都不走 8 分钟池。related 面板仍缓存。
+        if mode == .relatedPanel, let cached = await RecommendationPoolCache.shared.pool(for: cacheKey) {
             let usable = Self.usable(cached, mode: mode, snapshot: snapshot)
             let available = usable.filter { !Self.contains(context.excludedKeys, matching: $0.track) }
             // 池子还够抽 / 或首次加载(无排除集)就直接用;被排除集掏空了才重建。
@@ -168,7 +182,7 @@ struct RecommendationEngine {
         let pool = await Task.detached(priority: schedulingPolicy.scoringPriority) {
             Self.scoredPool(candidates, mode: mode, context: context, snapshot: snapshot)
         }.value
-        if mode != .radio {
+        if mode == .relatedPanel {
             await RecommendationPoolCache.shared.store(pool, for: cacheKey)
         }
         let usable = Self.usable(pool, mode: mode, snapshot: snapshot)
@@ -194,36 +208,42 @@ struct RecommendationEngine {
 
         switch mode {
         case .home:
-            // 首页刷新必须快:旧逻辑会串行请求收藏/历史/缓存/当前歌曲十几个 related,
-            // 真机上点击"换一批"会明显变慢。这里按质量分层短路,够用就停止补源。
-            let favorites = await favoriteSeeds(
-                maxCount: policy.favoriteSeedLimit,
-                snapshot: snapshot,
-                priority: policy.scoringPriority)
-            candidates += await relatedCandidates(
-                from: favorites,
-                source: .favoriteSeed,
-                perSeedLimit: policy.relatedPerFavoriteSeedLimit,
-                priority: policy.scoringPriority)
-
-            if candidates.count < 16, let current = context.current {
+            // 用常听歌手和歌名去音乐区找；搜到足够像你的歌，就不再拿首页流/related 掺水。
+            if policy.tasteArtistLimit > 0 || policy.tasteTitleLimit > 0 {
+                candidates += await tasteSearchCandidates(
+                    taste: snapshot.taste,
+                    artistLimit: policy.tasteArtistLimit,
+                    titleLimit: policy.tasteTitleLimit,
+                    priority: policy.scoringPriority)
+            }
+            let alignedCount = alignedToTaste(candidates, taste: snapshot.taste).count
+            let needsFiller = snapshot.taste.isEmpty || alignedCount < 8
+            if needsFiller, policy.homeFeedPageLimit > 0 {
+                candidates += alignedToTaste(
+                    await homeFeedCandidates(
+                        pageCount: policy.homeFeedPageLimit,
+                        priority: policy.scoringPriority),
+                    taste: snapshot.taste)
+            }
+            if needsFiller, candidates.count < 12 {
+                let seeds = snapshot.taste.seedTracks.isEmpty
+                    ? await favoriteSeeds(
+                        maxCount: policy.favoriteSeedLimit,
+                        snapshot: snapshot,
+                        priority: policy.scoringPriority)
+                    : Array(snapshot.taste.seedTracks.prefix(policy.favoriteSeedLimit))
+                candidates += alignedToTaste(
+                    await relatedCandidates(
+                        from: seeds,
+                        source: .favoriteSeed,
+                        perSeedLimit: policy.relatedPerFavoriteSeedLimit,
+                        priority: policy.scoringPriority),
+                    taste: snapshot.taste)
+            }
+            if snapshot.taste.isEmpty, candidates.count < 12, let current = context.current {
                 candidates += await relatedCandidates(
                     from: [current],
                     source: .relatedCurrent,
-                    perSeedLimit: 12,
-                    priority: policy.scoringPriority)
-            }
-            if candidates.count < 16 {
-                candidates += await relatedCandidates(
-                    from: Array(snapshot.historyTracks.prefix(policy.historySeedLimit)),
-                    source: .relatedHistory,
-                    perSeedLimit: 8,
-                    priority: policy.scoringPriority)
-            }
-            if candidates.count < 16 {
-                candidates += await relatedCandidates(
-                    from: Array(snapshot.cachedTracks.prefix(policy.cachedSeedLimit)),
-                    source: .relatedHistory,
                     perSeedLimit: 8,
                     priority: policy.scoringPriority)
             }
@@ -255,11 +275,95 @@ struct RecommendationEngine {
 
     func nextRadioTrack(after current: Track?, excludedKeys: Set<TrackKey>) async -> Track? {
         guard let current else { return nil }
+        await RecommendationMemory.shared.loadIfNeeded()
+        let memoryKeys = await RecommendationMemory.shared.recentKeys()
         let tracks = await recommendations(
             mode: .radio,
-            context: Context(current: current, excludedKeys: excludedKeys),
+            context: Context(current: current, excludedKeys: excludedKeys.union(memoryKeys)),
             limit: 8)
-        return tracks.first
+        guard let pick = tracks.first else { return nil }
+        await RecommendationMemory.shared.record([pick.bvid])
+        return pick
+    }
+
+    private func tasteSearchCandidates(
+        taste: ListeningTaste,
+        artistLimit: Int,
+        titleLimit: Int,
+        perQueryLimit: Int = 10,
+        priority: TaskPriority? = nil
+    ) async -> [Candidate] {
+        let cursor = await RecommendationMemory.shared.nextFeedIndices(count: 1).first ?? 1
+        let queries = ListeningTaste.searchPlan(
+            artists: taste.artists,
+            titles: taste.titles,
+            artistLimit: artistLimit,
+            titleLimit: titleLimit,
+            page: cursor)
+        guard !queries.isEmpty else { return [] }
+        return await withTaskGroup(of: [Candidate].self) { group in
+            var remaining = queries
+            func search(_ query: ListeningTaste.Query) async -> [Candidate] {
+                guard !Task.isCancelled,
+                      let items = try? await self.client.search(
+                        keyword: query.keyword,
+                        page: query.page,
+                        musicOnly: true
+                      ) else { return [] }
+                return items
+                    .map(Track.init(search:))
+                    .filter { MusicFilter.isSearchResultMusic($0, query: query.keyword) }
+                    .filter { MusicFilter.isMusic($0) }
+                    .prefix(perQueryLimit)
+                    .map { Candidate(track: $0, source: .tasteSearch, seed: nil) }
+            }
+            for _ in 0..<min(2, remaining.count) {
+                let query = remaining.removeFirst()
+                group.addTask(priority: priority) {
+                    await search(query)
+                }
+            }
+            var candidates: [Candidate] = []
+            while let batch = await group.next() {
+                guard !Task.isCancelled else {
+                    group.cancelAll()
+                    break
+                }
+                candidates.append(contentsOf: batch)
+                if !remaining.isEmpty {
+                    let query = remaining.removeFirst()
+                    group.addTask(priority: priority) {
+                        await search(query)
+                    }
+                }
+            }
+            return candidates
+        }
+    }
+
+    private func alignedToTaste(_ candidates: [Candidate], taste: ListeningTaste) -> [Candidate] {
+        guard !taste.isEmpty else { return candidates }
+        return candidates.filter { taste.matches(title: $0.track.title, artist: $0.track.artist) }
+    }
+
+    private func homeFeedCandidates(pageCount: Int, priority: TaskPriority? = nil) async -> [Candidate] {
+        let indices = await RecommendationMemory.shared.nextFeedIndices(count: pageCount)
+        return await withTaskGroup(of: [Candidate].self) { group in
+            for index in indices {
+                group.addTask(priority: priority) {
+                    guard let items = try? await self.client.homeFeed(freshIndex: index) else { return [] }
+                    return items
+                        .map(Track.init(feed:))
+                        .filter { MusicFilter.isSearchResultMusic($0) }
+                        .map { Candidate(track: $0, source: .homeFeed, seed: nil) }
+                }
+            }
+            var candidates: [Candidate] = []
+            for await batch in group {
+                candidates.append(contentsOf: batch)
+            }
+            return candidates
+        }
     }
 
     private func relatedCandidates(
@@ -382,13 +486,28 @@ struct RecommendationEngine {
         let cacheEntries = CacheStore.shared.entries
         let favoriteBVIDs = FavoriteManager.shared.favoriteBVIDs
         let favoriteFolder = await favoriteFolderSnapshot(mode: mode)
+        var liked: [Track] = []
+        var library: [Track] = []
+        if mode == .home {
+            await LibraryStore.shared.loadIfNeeded()
+            liked = LibraryStore.shared.tracks(in: LibraryCollection.likedID)
+            if let folderID = favoriteFolder?.id {
+                library = LibraryStore.shared.tracks(forRemoteFolder: folderID)
+            }
+        }
+        let taste = ListeningTaste.build(
+            liked: liked,
+            library: library,
+            history: historyEntries.map { ($0.track, $0.playCount) },
+            metadataFor: { TrackMetadataStore.shared.entry(for: $0)?.metadata })
         return Snapshot(
             historyTracks: historyEntries.map(\.track),
             recentKeys: Set(historyEntries.prefix(mode == .radio ? 20 : 8).map(\.key)),
             cachedTracks: cacheEntries.map(\.track),
             cachedKeys: Set(cacheEntries.map(\.key)),
             favoriteBVIDs: favoriteBVIDs,
-            favoriteFolder: favoriteFolder)
+            favoriteFolder: favoriteFolder,
+            taste: taste)
     }
 
     @MainActor
@@ -411,6 +530,7 @@ struct RecommendationEngine {
     /// 不能烘进缓存的池子里,否则会把池子越缩越小。
     private static func scoredPool(_ candidates: [Candidate], mode: Mode, context: Context, snapshot: Snapshot) -> [ScoredTrack] {
         let current = context.current
+        let occurrenceCounts = occurrenceCounts(in: candidates)
 
         let scored = candidates
             .filter { isDisplayableRecommendation($0.track, mode: mode) }
@@ -419,7 +539,9 @@ struct RecommendationEngine {
                 return !candidate.track.key.matches(current)
             }
             .map { candidate in
-                (candidate.track, score(candidate, current: current, queue: context.queue, mode: mode, snapshot: snapshot))
+                var value = score(candidate, current: current, queue: context.queue, mode: mode, snapshot: snapshot)
+                value -= hubPenalty(occurrenceCount: occurrenceCounts[candidate.track.bvid] ?? 1)
+                return (candidate.track, value)
             }
             .filter { $0.1 > 0 }
 
@@ -515,8 +637,26 @@ struct RecommendationEngine {
         if hasBadRecommendationHint(text) {
             score -= 48
         }
+        if snapshot.taste.matches(title: track.title, artist: track.artist) {
+            score += 22
+        }
         score += Int.random(in: -10...10)
         return score
+    }
+
+    static func hubPenalty(occurrenceCount: Int) -> Int {
+        switch occurrenceCount {
+        case ...1: 0
+        case 2: 12
+        case 3: 28
+        default: 45
+        }
+    }
+
+    private static func occurrenceCounts(in candidates: [Candidate]) -> [String: Int] {
+        candidates.reduce(into: [:]) { counts, candidate in
+            counts[candidate.track.bvid, default: 0] += 1
+        }
     }
 
     private static func contains(_ keys: Set<TrackKey>, matching track: Track) -> Bool {
@@ -538,11 +678,16 @@ struct RecommendationEngine {
     }
 
     private func searchTerms(for track: Track) -> [String] {
+        let metadata = TrackMetadataStore.shared.entry(for: track)?.metadata
+        let tasteArtists = ListeningTaste.artists(in: track, metadata: metadata)
+        if !tasteArtists.isEmpty {
+            return Array(tasteArtists.prefix(2))
+        }
         let artist = track.artist.trimmingCharacters(in: .whitespacesAndNewlines)
         let parsed = parsedTitle(track.title)
         var terms: [String] = []
-        if !artist.isEmpty {
-            terms.append("\(artist) 音乐")
+        if ListeningTaste.isUsableArtist(artist) {
+            terms.append(artist)
         }
         if let parsed {
             terms.append(parsed)
@@ -585,4 +730,16 @@ struct RecommendationEngine {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+}
+
+/// 从 related 列表里挑下一首：跳过刚展示过的热门节点，并在剩余音乐里随机，避免总是第一条。
+enum RadioRelatedPicker {
+    static func pick(from tracks: [Track], recentBVIDs: Set<String>) -> Track? {
+        let unused = tracks.filter { !recentBVIDs.contains($0.bvid) }
+        let strict = unused.filter(MusicFilter.isStrictMusic)
+        if let pick = Array(strict.prefix(8)).randomElement() { return pick }
+        let loose = unused.filter(MusicFilter.isMusic)
+        if let pick = Array(loose.prefix(8)).randomElement() { return pick }
+        return nil
+    }
 }

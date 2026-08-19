@@ -1,184 +1,131 @@
 import AVKit
 import SwiftUI
 
-// MARK: - Lyrics Sheet
-
-struct LyricsSheetView: View {
+struct LyricsOffsetSheet: View {
     @Environment(PlayerEngine.self) private var engine
     @Environment(\.dismiss) private var dismiss
-    @State private var showSearch = false
-    @State private var showTranslation = true
+    @State private var alignedTick = 0
+    @State private var didBeginOffsetEditing = false
 
     var body: some View {
-        let active = currentLyricIndex
-        return NavigationStack {
-            Group {
-                if engine.lyricsLoading && engine.lyrics.isEmpty {
-                    ProgressView("正在从 \(engine.lyricProvider.displayName) 查找歌词")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if engine.lyrics.isEmpty {
-                    ContentUnavailableView {
-                        Label("暂无歌词", systemImage: "quote.bubble")
-                    } description: {
-                        Text(engine.lyricSearchError ?? "自动匹配失败，可以手动选择歌词来源。")
-                    } actions: {
-                        Button("手动搜索") { showSearch = true }
-                            .buttonStyle(.borderedProminent)
-                    }
-                } else {
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 30) {
-                                ForEach(Array(engine.lyrics.enumerated()), id: \.element.id) { index, line in
-                                    lyricRow(line, isActive: index == active)
-                                        .id(line.id)
-                                }
-                            }
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 96)
-                        }
-                        .mask {
-                            LinearGradient(
-                                stops: [
-                                    .init(color: .clear, location: 0),
-                                    .init(color: .black, location: 0.13),
-                                    .init(color: .black, location: 0.82),
-                                    .init(color: .clear, location: 1),
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom)
-                        }
-                        .onChange(of: currentLyricIndex) { _, index in
-                            guard let line = engine.lyrics[safe: index] else { return }
-                            withAnimation(.easeInOut(duration: 0.28)) {
-                                proxy.scrollTo(line.id, anchor: .center)
-                            }
-                        }
-                        .task(id: engine.lyricsDocument?.result.stableID) {
-                            guard let line = engine.lyrics[safe: currentLyricIndex] else { return }
-                            proxy.scrollTo(line.id, anchor: .center)
-                        }
-                    }
+        NavigationStack {
+            VStack(spacing: 20) {
+                Text(offsetTitle)
+                    .font(.title2.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .accessibilityIdentifier("lyricsOffsetValue")
+
+                Slider(
+                    value: offsetBinding,
+                    in: -10...10,
+                    step: 0.05,
+                    onEditingChanged: persistIfNeeded
+                )
+                .tint(AppTheme.accent)
+                .accessibilityLabel("歌词偏移")
+                .accessibilityIdentifier("lyricsOffsetControl")
+
+                HStack {
+                    Text("延后")
+                    Spacer()
+                    Text("提前")
                 }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                Button("自动对齐") {
+                    Task { await engine.autoAlignLyricOffset() }
+                }
+                .disabled(!engine.canAutoAlignLyricOffset)
+                .accessibilityIdentifier("lyricsAutoAlignButton")
+
+                Button("重置") {
+                    engine.resetLyricOffset()
+                }
+                .disabled(engine.lyricOffsetMilliseconds == 0)
             }
-            .navigationTitle(engine.lyricsDocument?.result.title ?? "歌词")
+            .padding(.horizontal, 24)
+            .padding(.top, 12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .accessibilityIdentifier("lyricsOffsetSheet")
+            .navigationTitle("歌词校准")
             .navigationBarTitleDisplayMode(.inline)
-            .safeAreaInset(edge: .bottom) {
-                lyricControls
-            }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成") { dismiss() }
                 }
             }
-            .sheet(isPresented: $showSearch) {
-                LyricsSearchSheet()
-            }
         }
+        .presentationDetents([.height(280)])
+        .presentationDragIndicator(.visible)
+        .sensoryFeedback(.intent(.selection), trigger: alignedTick)
     }
 
-    private func lyricRow(_ line: PlayerEngine.LyricLine, isActive: Bool) -> some View {
-        Button {
-            engine.seek(to: line)
-        } label: {
-            VStack(alignment: .leading, spacing: 7) {
-                highlightedText(for: line, isActive: isActive)
-                    .font(.system(size: isActive ? 30 : 24, weight: isActive ? .bold : .medium))
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                if showTranslation,
-                   let translation = line.translation,
-                   !translation.isEmpty {
-                    Text(translation)
-                        .font(.system(size: isActive ? 16 : 14, weight: .medium))
-                        .foregroundStyle(isActive ? AppTheme.label.opacity(0.72) : .secondary.opacity(0.68))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .opacity(isActive ? 1 : 0.58)
-        .accessibilityLabel(line.text)
-        .accessibilityHint("跳转到这句歌词")
-    }
-
-    private func highlightedText(for line: PlayerEngine.LyricLine, isActive: Bool) -> Text {
-        guard isActive, !line.words.isEmpty else {
-            return Text(line.text).foregroundColor(isActive ? AppTheme.label : .secondary)
-        }
-        var attributed = AttributedString()
-        for word in line.words {
-            let isPast = engine.adjustedLyricTime >= word.from
-            var segment = AttributedString(word.text)
-            segment.foregroundColor = isPast ? AppTheme.label : AppTheme.label.opacity(0.34)
-            attributed.append(segment)
-        }
-        return Text(attributed)
-    }
-
-    private var lyricControls: some View {
-        HStack(spacing: 18) {
-            Button { showSearch = true } label: {
-                Image(systemName: "magnifyingglass")
-            }
-            .accessibilityLabel("手动匹配歌词")
-
-            Button { engine.adjustLyricOffset(by: -500) } label: {
-                Image(systemName: "minus")
-            }
-            .accessibilityLabel("歌词延后半秒")
-
-            Button { engine.resetLyricOffset() } label: {
-                Text(offsetLabel)
-                    .font(.caption.monospacedDigit().weight(.semibold))
-                    .frame(minWidth: 48)
-            }
-            .accessibilityLabel("重置歌词偏移")
-            .accessibilityIdentifier("lyricsOffsetControl")
-
-            Button { engine.adjustLyricOffset(by: 500) } label: {
-                Image(systemName: "plus")
-            }
-            .accessibilityLabel("歌词提前半秒")
-
-            if engine.lyrics.contains(where: { $0.translation?.isEmpty == false }) {
-                Button { showTranslation.toggle() } label: {
-                    Image(systemName: showTranslation ? "character.book.closed.fill" : "character.book.closed")
-                }
-                .accessibilityLabel(showTranslation ? "隐藏翻译" : "显示翻译")
-            }
-        }
-        .font(.system(size: 18, weight: .semibold))
-        .padding(.horizontal, 20)
-        .frame(height: 52)
-        .background(.ultraThinMaterial, in: Capsule())
-        .padding(.horizontal, 24)
-        .padding(.bottom, 8)
-    }
-
-    private var offsetLabel: String {
+    private var offsetTitle: String {
         let seconds = Double(engine.lyricOffsetMilliseconds) / 1000
-        return String(format: "%+.1fs", seconds)
+        if abs(seconds) < 0.001 { return "已对齐" }
+        if seconds > 0 { return String(format: "提前 %.2f 秒", seconds) }
+        return String(format: "延后 %.2f 秒", -seconds)
     }
 
-    private var currentLyricIndex: Int {
-        guard !engine.lyrics.isEmpty else { return 0 }
-        if let active = engine.lyrics.firstIndex(where: { line in
-            engine.adjustedLyricTime >= line.from && engine.adjustedLyricTime < line.to
-        }) {
-            return active
+    private var offsetBinding: Binding<Double> {
+        Binding(
+            get: { Double(engine.lyricOffsetMilliseconds) / 1000 },
+            set: { newValue in
+                let snapped = abs(newValue) < 0.08 ? 0 : newValue
+                let milliseconds = Int((snapped * 1000).rounded())
+                if milliseconds == 0, engine.lyricOffsetMilliseconds != 0 {
+                    alignedTick += 1
+                }
+                engine.setLyricOffset(milliseconds: milliseconds, persist: false)
+            }
+        )
+    }
+
+    private func persistIfNeeded(_ editing: Bool) {
+        if editing {
+            didBeginOffsetEditing = true
+            return
         }
-        return engine.lyrics.lastIndex { line in engine.adjustedLyricTime >= line.from } ?? 0
+        guard didBeginOffsetEditing else { return }
+        didBeginOffsetEditing = false
+        engine.setLyricOffset(milliseconds: engine.lyricOffsetMilliseconds, persist: true)
     }
 }
 
-private struct LyricsSearchSheet: View {
+struct ImportLyricsSheet: View {
+    @Environment(PlayerEngine.self) private var engine
+    @Environment(\.dismiss) private var dismiss
+    @State private var importText = ""
+
+    var body: some View {
+        NavigationStack {
+            TextEditor(text: $importText)
+                .padding()
+                .navigationTitle("导入歌词")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("取消") { dismiss() }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("导入") {
+                            Task {
+                                await engine.importPlainLyrics(importText)
+                                dismiss()
+                            }
+                        }
+                        .disabled(importText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+        }
+    }
+}
+
+struct LyricsSearchSheet: View {
     @Environment(PlayerEngine.self) private var engine
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
-    @State private var provider: LyricsProvider = .netease
 
     var body: some View {
         NavigationStack {
@@ -189,16 +136,6 @@ private struct LyricsSearchSheet: View {
                         .submitLabel(.search)
                         .onSubmit { search() }
 
-                    Menu(provider.displayName) {
-                        ForEach(LyricsProvider.allCases) { value in
-                            Button(value.displayName) {
-                                provider = value
-                                search()
-                            }
-                        }
-                    }
-                    .buttonStyle(.bordered)
-
                     Button("搜索") { search() }
                         .buttonStyle(.borderedProminent)
                 }
@@ -206,33 +143,61 @@ private struct LyricsSearchSheet: View {
 
                 if engine.lyricsLoading {
                     ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if engine.lyricSearchResults.isEmpty {
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 24)
+                }
+                if let error = engine.lyricSearchError, !engine.lyricSearchResults.isEmpty {
+                    Text(error)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
+                }
+                if engine.lyricSearchResults.isEmpty, !engine.lyricsLoading {
                     ContentUnavailableView(
                         "没有候选",
                         systemImage: "magnifyingglass",
-                        description: Text(engine.lyricSearchError ?? "换一个关键词或歌词平台试试。"))
-                } else {
-                    List(engine.lyricSearchResults) { result in
+                        description: Text(engine.lyricSearchError ?? "会同时搜索网易云、QQ、酷狗、LRCLIB 和 VocaDB。"))
+                } else if !engine.lyricSearchResults.isEmpty {
+                    List(engine.lyricSearchResults, id: \.stableID) { result in
                         Button {
                             Task {
                                 await engine.selectLyricsResult(result)
-                                if engine.lyricsDocument?.result.stableID == result.stableID {
+                                if engine.lyricsDocument != nil, engine.lyricSearchError == nil {
                                     dismiss()
                                 }
                             }
                         } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(result.title)
-                                    .font(.headline)
-                                    .foregroundStyle(.primary)
-                                Text([result.artist, result.album].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
+                            HStack(alignment: .top, spacing: 10) {
+                                VStack(spacing: 5) {
+                                    Text(result.provider.displayName)
+                                        .font(.caption.weight(.semibold))
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(.fill.tertiary, in: Capsule())
+                                    if result.timingKindHint == .word {
+                                        Text(MetingLyricsClient.hasReliableWordTiming(
+                                            result,
+                                            expectedDuration: engine.current?.duration
+                                        ) ? "逐字" : "逐字\n时长不符")
+                                            .font(.caption2.weight(.bold))
+                                            .foregroundStyle(.tint)
+                                            .multilineTextAlignment(.center)
+                                    }
+                                }
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(result.title)
+                                        .font(.headline)
+                                        .foregroundStyle(.primary)
+                                    Text(candidateSubtitle(for: result))
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .buttonStyle(.plain)
+                        .disabled(engine.lyricsLoading)
                     }
                     .listStyle(.plain)
                 }
@@ -246,12 +211,15 @@ private struct LyricsSearchSheet: View {
             }
             .task {
                 guard query.isEmpty else { return }
-                query = engine.lyricSearchKeyword.isEmpty
-                    ? (engine.current?.title ?? "")
-                    : engine.lyricSearchKeyword
-                provider = engine.lyricProvider
+                if let track = engine.current {
+                    let metadata = TrackMetadataStore.shared.entry(for: track)?.metadata
+                    query = LyricsAutoMatchGate.defaultSearchKeyword(
+                        track: track,
+                        metadata: metadata,
+                        lastKeyword: engine.lyricSearchKeyword)
+                }
                 if engine.lyricSearchResults.isEmpty {
-                    await engine.searchLyrics(keyword: query, provider: provider)
+                    await engine.searchLyrics(keyword: query)
                 }
             }
         }
@@ -259,8 +227,83 @@ private struct LyricsSearchSheet: View {
 
     private func search() {
         Task {
-            await engine.searchLyrics(keyword: query, provider: provider)
+            await engine.searchLyrics(keyword: query)
         }
+    }
+
+    private func candidateSubtitle(for result: LyricsSearchResult) -> String {
+        let metadata = engine.current.flatMap { TrackMetadataStore.shared.entry(for: $0)?.metadata }
+        let scope = LyricsVersionClassifier.scope(
+            for: result,
+            originalArtists: metadata?.originalArtists ?? [],
+            coverPerformers: metadata?.coverPerformers ?? [],
+            isCoverSearch: metadata?.isCover == true)
+        let scopeLabel: String
+        switch scope {
+        case .exactCover: scopeLabel = "翻唱版"
+        case .sameRecording: scopeLabel = "当前版本"
+        case .canonicalOriginal: scopeLabel = "原唱"
+        case .textOnlyFallback: scopeLabel = "文本候选"
+        case .manual: scopeLabel = "手动"
+        }
+        let duration = result.duration.map { "\($0)s" } ?? "时长未知"
+        return [scopeLabel, result.artist, duration]
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+    }
+}
+
+struct TrackIdentityEditorSheet: View {
+    @Environment(PlayerEngine.self) private var engine
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = ""
+    @State private var originals = ""
+    @State private var covers = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("干净歌名", text: $title)
+                TextField("原唱，用逗号分隔", text: $originals)
+                TextField("翻唱者，用逗号分隔", text: $covers)
+            }
+            .navigationTitle("手动修正")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        Task {
+                            await engine.applyManualTrackIdentity(
+                                canonicalTitle: title,
+                                originalArtists: splitNames(originals),
+                                coverPerformers: splitNames(covers))
+                            dismiss()
+                        }
+                    }
+                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .onAppear {
+                if let track = engine.current {
+                    let stored = TrackMetadataStore.shared.entry(for: track)?.metadata
+                    title = LyricsAutoMatchGate.searchTitle(track: track, metadata: stored)
+                        ?? stored?.canonicalTitle
+                        ?? track.title
+                    originals = stored?.originalArtists.joined(separator: "，") ?? ""
+                    covers = stored?.coverPerformers.joined(separator: "，") ?? ""
+                }
+            }
+        }
+    }
+
+    private func splitNames(_ value: String) -> [String] {
+        value
+            .split(whereSeparator: { ",，、/".contains($0) })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
 }
 

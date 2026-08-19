@@ -13,6 +13,7 @@ final class FavoriteManager {
     private(set) var defaultFolderTitle: String?
     private(set) var folders: [BiliClient.FavFolder] = []
     private(set) var foldersLoading = false
+    private(set) var libraryRevision = 0
     private var allIDsSyncedAt: Date?
     private var allIDsSyncAttemptedAt: Date?
     private var allIDsSyncTask: Task<Void, Never>?
@@ -73,6 +74,10 @@ final class FavoriteManager {
         }
         folderBVIDs[folderId, default: []].formUnion(tracks.map(\.bvid))
         rebuildFavoriteBVIDs()
+        LibraryStore.shared.replaceRemoteFolder(
+            id: folderId,
+            title: title ?? defaultFolderTitle ?? "收藏夹",
+            tracks: tracks)
     }
 
     /// 记住默认收藏夹（不触发网络）。
@@ -85,13 +90,22 @@ final class FavoriteManager {
     /// 统一用跨收藏夹并集判定(与「维护已收藏 bvid 全集」的语义一致),
     /// 避免默认夹加载完成前后同一首歌的心形状态无操作自翻转。
     func isFavorite(_ track: Track) -> Bool {
-        favoriteBVIDs.contains(track.bvid)
+        if CookieStore.isLoggedIn {
+            return favoriteBVIDs.contains(track.bvid)
+        }
+        return LibraryStore.shared.isLiked(track)
     }
 
-    /// 切换收藏到默认收藏夹（无默认夹则给出提示）。
+    /// 切换收藏：已登录写入音乐收藏夹，没有音乐夹才退回 B 站默认夹；未登录只写本地「我喜欢」。
     func toggle(track: Track) async {
+        if !CookieStore.isLoggedIn {
+            LibraryStore.shared.toggleLiked(track)
+            libraryRevision += 1
+            lastError = nil
+            return
+        }
         let generation = authenticationGeneration
-        guard let folderId = await defaultFolderId() else {
+        guard let folderId = await targetFolderId() else {
             guard authenticationGeneration == generation else { return }
             // loadFolders 失败时 lastError 已是真实网络错误,不要用「没有收藏夹」覆盖;
             // 只有加载成功且确实没有任何夹时才提示去创建。
@@ -140,6 +154,13 @@ final class FavoriteManager {
             let loadedFolders = try await task.value
             guard authenticationGeneration == generation else { return }
             folders = loadedFolders
+            for folder in loadedFolders {
+                LibraryStore.shared.rememberRemoteFolder(
+                    id: folder.id,
+                    title: folder.title,
+                    itemCount: folder.media_count,
+                    coverURL: nil)
+            }
             let validFolderIDs = Set(folders.map(\.id))
             folderBVIDs = folderBVIDs.filter { validFolderIDs.contains($0.key) }
             fullyLoadedFolderIDs.formIntersection(validFolderIDs)
@@ -227,17 +248,29 @@ final class FavoriteManager {
         }
     }
 
-    /// 取默认收藏夹 id：优先上次用的，否则取「默认」夹或第一个。
+    /// 点收藏的目标夹：设置里的音乐收藏夹 / 标题像音乐的夹，否则 B 站默认夹。
+    @discardableResult
+    func targetFolderId() async -> Int? {
+        if folders.isEmpty {
+            await loadFolders()
+        }
+        guard let folder = FavoriteFolderSelector.targetFolder(
+            from: folders,
+            preferredId: FavoriteFolderSelector.preferredMusicFolderID
+        ) else {
+            return nil
+        }
+        remember(folderId: folder.id, title: folder.title)
+        return folder.id
+    }
+
+    /// 取默认收藏夹 id：标题含「默认」的夹，否则第一个。
     @discardableResult
     func defaultFolderId() async -> Int? {
         if folders.isEmpty {
             await loadFolders()
         }
-        if let lastFolderId,
-           folders.contains(where: { $0.id == lastFolderId }) {
-            return lastFolderId
-        }
-        guard let folder = folders.first(where: { $0.title.contains("默认") }) ?? folders.first else {
+        guard let folder = FavoriteFolderSelector.fallbackDefaultFolder(from: folders) else {
             return nil
         }
         remember(folderId: folder.id, title: folder.title)
@@ -278,6 +311,16 @@ final class FavoriteManager {
             folderBVIDs[folderId] = updated
             folderMutationVersions[folderId, default: 0] += 1
             rebuildFavoriteBVIDs()
+            let folderTitle = folders.first(where: { $0.id == folderId })?.title
+                ?? defaultFolderTitle
+                ?? "收藏夹"
+            if add {
+                LibraryStore.shared.addLiked(track)
+                LibraryStore.shared.upsert(track, intoRemote: folderId, title: folderTitle)
+            } else {
+                LibraryStore.shared.remove(track, fromRemote: folderId)
+            }
+            libraryRevision += 1
             lastError = nil
         } catch {
             guard authenticationGeneration == generation else { return }

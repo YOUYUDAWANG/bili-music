@@ -1,0 +1,30 @@
+[project]
+name = "bilimusic-lddc-lyrics-backend"
+version = "0.1.0"
+description = "Private word-timed lyrics catalog for BiliMusic"
+requires-python = ">=3.10,<3.13"
+license = {text = "GPL-3.0-only"}
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.34,<1",
+  "LDDC @ git+https://github.com/chenmozhijin/LDDC.git@84631e8cd011fcc3f71ca0ae017e2c9758958ffc",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9", "httpx>=0.28,<1"]
+
+[project.scripts]
+bilimusic-lddc-backend = "lddc_backend.app:run"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["lddc_backend"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

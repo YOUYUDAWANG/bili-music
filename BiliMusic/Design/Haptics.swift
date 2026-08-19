@@ -13,6 +13,7 @@ enum HapticIntent: Equatable {
     case error
     case start
     case stop
+    case transportImpact
 }
 
 extension SensoryFeedback {
@@ -26,6 +27,7 @@ extension SensoryFeedback {
         case .error:         return .error
         case .start:         return .start
         case .stop:          return .stop
+        case .transportImpact: return .impact(weight: .medium)
         }
     }
 }

@@ -293,6 +293,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     @ViewBuilder var placeholder: () -> Placeholder
 
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var image: UIImage?
     @State private var loadedIdentifier: String?
 
@@ -301,10 +302,12 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         Group {
             if let resolvedDisplayImage {
                 content(Image(uiImage: resolvedDisplayImage))
+                    .transition(.opacity)
             } else {
                 placeholder()
             }
         }
+        .animation(reduceMotion ? nil : .easeIn(duration: 0.15), value: resolvedDisplayImage == nil)
         .task(id: loadIdentifier) {
             await load()
         }

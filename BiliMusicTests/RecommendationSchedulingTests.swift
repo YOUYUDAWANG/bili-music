@@ -6,11 +6,14 @@ final class RecommendationSchedulingTests: XCTestCase {
         let policy = RecommendationSchedulingPolicy.home(trigger: .initialHomeLoad)
 
         XCTAssertEqual(policy.trigger, .initialHomeLoad)
-        XCTAssertEqual(policy.favoriteSeedLimit, 5)
-        XCTAssertEqual(policy.relatedPerFavoriteSeedLimit, 10)
+        XCTAssertEqual(policy.favoriteSeedLimit, 3)
+        XCTAssertEqual(policy.relatedPerFavoriteSeedLimit, 6)
         XCTAssertEqual(policy.historySeedLimit, 2)
-        XCTAssertEqual(policy.cachedSeedLimit, 2)
+        XCTAssertEqual(policy.cachedSeedLimit, 1)
         XCTAssertEqual(policy.fallbackKeywordLimit, 1)
+        XCTAssertEqual(policy.homeFeedPageLimit, 1)
+        XCTAssertEqual(policy.tasteArtistLimit, 4)
+        XCTAssertEqual(policy.tasteTitleLimit, 3)
         XCTAssertEqual(policy.scoringPriority, .utility)
     }
 
@@ -39,9 +42,9 @@ final class RecommendationSchedulingTests: XCTestCase {
     }
 
     func testRecommendationTapSetsSuppressionBeforePlayback() throws {
-        let source = try Self.sourceFile("BiliMusic/Features/Player/NowPlayingView.swift")
+        let source = try Self.sourceFile("BiliMusic/Features/Player/PlayerQueuePage.swift")
         let suppressionRange = try XCTUnwrap(source.range(of: "suppressNextRecommendationRefresh = true"))
-        let playbackRange = try XCTUnwrap(source.range(of: "Task { await engine.play(tracks: recommendedTracks, startAt: index, queueMode: .radio) }"))
+        let playbackRange = try XCTUnwrap(source.range(of: "Task { await engine.play(tracks: contextStore.recommendedTracks, startAt: index, queueMode: .radio) }"))
 
         XCTAssertLessThan(suppressionRange.lowerBound, playbackRange.lowerBound)
     }
@@ -138,6 +141,13 @@ final class RecommendationSchedulingTests: XCTestCase {
         XCTAssertFalse(RecommendationEngine.isDisplayableRecommendation(gameplay, mode: .radio))
     }
 
+    func testHubPenaltyGrowsWhenTheSameRelatedTrackAppearsUnderManySeeds() {
+        XCTAssertEqual(RecommendationEngine.hubPenalty(occurrenceCount: 1), 0)
+        XCTAssertEqual(RecommendationEngine.hubPenalty(occurrenceCount: 2), 12)
+        XCTAssertEqual(RecommendationEngine.hubPenalty(occurrenceCount: 3), 28)
+        XCTAssertEqual(RecommendationEngine.hubPenalty(occurrenceCount: 6), 45)
+    }
+
     func testRecommendationDisplayFilterAcceptsMusicMV() {
         let mv = makeRecommendationTrack(
             typeID: 193,
@@ -154,8 +164,17 @@ final class RecommendationSchedulingTests: XCTestCase {
         let home = try Self.sourceFile("BiliMusic/Features/Home/HomeView.swift")
         let nowPlaying = try Self.sourceFile("BiliMusic/Features/Player/NowPlayingView.swift")
 
+        let contextStore = try Self.sourceFile("BiliMusic/Features/Player/PlayerContextStore.swift")
         XCTAssertTrue(home.contains("@State private var tracks: [Track] = []"))
-        XCTAssertTrue(nowPlaying.contains("@State private var recommendedTracks: [Track] = []"))
+        XCTAssertTrue(home.contains("HomeCoverMixer.mix"))
+        let engine = try Self.sourceFile("BiliMusic/Player/RecommendationEngine.swift")
+        XCTAssertTrue(engine.contains("tasteSearchCandidates"))
+        XCTAssertTrue(engine.contains("alignedToTaste"))
+        XCTAssertTrue(home.contains("cancelDiscovery()"))
+        let client = try Self.sourceFile("BiliMusic/API/BiliClient.swift")
+        XCTAssertTrue(client.contains("playbackSession"))
+        XCTAssertTrue(client.contains("kind: .playback"))
+        XCTAssertTrue(contextStore.contains("var recommendedTracks: [Track] = []"))
         XCTAssertTrue(nowPlaying.contains("RecommendationPanelRefreshPolicy.currentTrackChanged"))
         XCTAssertFalse(home.contains("recommendedTracks"))
     }

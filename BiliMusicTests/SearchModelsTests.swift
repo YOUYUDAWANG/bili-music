@@ -304,12 +304,13 @@ final class SearchModelsTests: XCTestCase {
             duration: 213)
         let metadata = NormalizedTrackMetadata(
             canonicalTitle: "アイドル",
-            artists: ["YOASOBI"],
-            performers: [],
+            originalArtists: ["YOASOBI"],
+            coverPerformers: [],
             uploader: "搬运UP",
             language: "ja",
             aliases: [],
-            searchQueries: ["アイドル YOASOBI"],
+            lyricSearchQueries: ["アイドル YOASOBI"],
+            isCover: false,
             confidence: 0.98,
             needsReview: false,
             serviceVersion: "test-v1")

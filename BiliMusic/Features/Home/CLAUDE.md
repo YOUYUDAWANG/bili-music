@@ -2,12 +2,12 @@
 
 ## 模块职责
 
-封面驱动的私人音乐库。首页不生成推荐，直接用用户指定收藏夹、本地缓存和播放历史中的真实 16:9 封面作为播放入口。
+封面驱动的私人音乐库。指定收藏夹是旧歌来源；发现新歌来自会换页的首页推荐流，和旧封面混在同一条 1+4 瀑布流里。
 
 ## 入口与启动
 
-- 文件: `HomeView.swift`, `CoverLibrarySnapshotStore.swift`
-- 页面出现时先读取持久化封面快照，再合并缓存和播放历史；收藏夹网络刷新在后台完成。收藏条目带 cid 时写入 `Track`；快照按 bvid 去重并优先保留已解析 cid。
+- 文件: `HomeView.swift`, `CoverLibrarySnapshotStore.swift`, `HomeCoverMixer.swift`
+- 页面出现时先读取持久化封面快照（含上次发现曲），收藏夹网络刷新在后台完成；有夹之后不再把缓存/历史拼进墙。发现推迟约 2 秒，点封面会取消，避免和起播抢网。收藏条目带 cid 时写入 `Track`；快照按 bvid 去重并优先保留已解析 cid。
 
 ## 对外接口
 
@@ -22,29 +22,34 @@
 - 第一张封面在静止状态与顶部胶囊保持呼吸空间；ScrollView 依赖 LNPopup 动态安全区，并额外保留 8pt resting buffer。
 - 点击封面直接播放；长按可电台播放、随机播放资料库或加入队列。
 - 点击封面时，`PlayerEngine.beginPlayback` 在同一帧提交唯一真实选曲，随后由 RootView 打开同一个 LNPopup 播放器。Home 不再挂载 `NowPlayingView`、matched geometry、关闭延时 Task 或第二套关闭按钮；mini/full 开合全部由 LNPopupController 管理。
-- 下拉刷新会重新同步指定收藏夹。
-- 封面快照保存在 `Documents/cover-library.json`，15 分钟内冷启动不重复请求收藏夹。
+- 下拉刷新会重新同步指定收藏夹，并换一批发现曲。
+- 封面快照保存在 `Documents/cover-library.json`，15 分钟内冷启动不重复请求收藏夹；发现曲一并写入，冷启动可立刻混排。
+- 发现去重看 `RecommendationMemory`（`recommendation-memory.json`，6 小时）。
 
 ## 关键依赖与配置
 
-- `CacheStore` / `PlaybackHistoryStore` — 无网络时的本地封面来源。
+- `CacheStore` / `PlaybackHistoryStore` — 收藏夹还没准备好时的离线兜底。
 - `BiliClient.favFolders()` / `favItems()` — 指定收藏夹的封面来源。
+- `ListeningTaste` + `BiliClient.search` — 按常听歌手找新歌。
+- `BiliClient.homeFeed(freshIndex:)` — 只补新鲜度；related 只用常听种子。
 - 首页收藏夹沿用 `UserDefaults.integer(forKey: "recommendFolderId")`，避免升级后丢失原选择。
 
 ## 数据模型
 
 - 首页使用的是 `Track`（定义在 PlayerEngine 同文件）。
-- 持久化快照：收藏夹 id、保存时间和最多 480 个 `Track`。
+- 持久化快照：收藏夹 id、保存时间、最多 480 首收藏封面，以及最多 48 首发现曲。
 
 ## 相关文件清单
 
 - `HomeView.swift`
 - `CoverLibrarySnapshotStore.swift`
+- `HomeCoverMixer.swift`
 
 ## 变更记录
 
 | 日期 | 变更 |
 |------|------|
+| 2026-08-19 | 首页重新混入发现曲：收藏夹与推荐流新旧穿插，并记住已展示 BV。 |
 | 2026-08-19 | 收藏夹封面快照写入 cid，按 bvid 去重时优先保留已有 cid。 |
 | 2026-08-19 | 撤销 Home 自制 matched-geometry 播放器层；封面点击、mini/full 开合统一回归 LNPopup。 |
 | 2026-06-24 | 初始文档创建。 |

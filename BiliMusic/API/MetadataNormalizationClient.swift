@@ -3,12 +3,13 @@ import Foundation
 struct MetadataNormalizationResponse: Decodable, Sendable {
     let version: String
     let canonicalTitle: String
-    let artists: [String]
-    let performers: [String]
+    let originalArtists: [String]
+    let coverPerformers: [String]
     let uploader: String?
     let language: String
     let aliases: [String]
-    let searchQueries: [String]
+    let lyricSearchQueries: [String]
+    let isCover: Bool
     let confidence: Double
     let needsReview: Bool
     let degraded: Bool
@@ -16,19 +17,60 @@ struct MetadataNormalizationResponse: Decodable, Sendable {
     var metadata: NormalizedTrackMetadata {
         NormalizedTrackMetadata(
             canonicalTitle: canonicalTitle,
-            artists: artists,
-            performers: performers,
+            originalArtists: originalArtists,
+            coverPerformers: coverPerformers,
             uploader: uploader,
             language: language,
             aliases: aliases,
-            searchQueries: searchQueries,
+            lyricSearchQueries: lyricSearchQueries,
+            isCover: isCover,
             confidence: confidence,
             needsReview: needsReview,
             serviceVersion: version)
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case version, canonicalTitle
+        case originalArtists, artists
+        case coverPerformers, performers
+        case uploader, language, aliases
+        case lyricSearchQueries, searchQueries
+        case isCover, confidence, needsReview, degraded
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(String.self, forKey: .version)
+        canonicalTitle = try container.decode(String.self, forKey: .canonicalTitle)
+        originalArtists = Self.decodeNames(container, .originalArtists, .artists)
+        coverPerformers = Self.decodeNames(container, .coverPerformers, .performers)
+        uploader = try container.decodeIfPresent(String.self, forKey: .uploader)
+        language = try container.decodeIfPresent(String.self, forKey: .language) ?? "und"
+        aliases = try container.decodeIfPresent([String].self, forKey: .aliases) ?? []
+        lyricSearchQueries = Self.decodeNames(container, .lyricSearchQueries, .searchQueries)
+        isCover = try container.decodeIfPresent(Bool.self, forKey: .isCover)
+            ?? !coverPerformers.isEmpty
+        confidence = try container.decodeIfPresent(Double.self, forKey: .confidence) ?? 0
+        needsReview = try container.decodeIfPresent(Bool.self, forKey: .needsReview) ?? false
+        degraded = try container.decodeIfPresent(Bool.self, forKey: .degraded) ?? false
+    }
+
+    private static func decodeNames(
+        _ container: KeyedDecodingContainer<CodingKeys>,
+        _ keys: CodingKeys...
+    ) -> [String] {
+        for key in keys {
+            if let values = try? container.decode([String].self, forKey: key) {
+                return values
+            }
+        }
+        return []
+    }
 }
 
 actor MetadataNormalizationClient: TrackMetadataNormalizing {
+    static let currentServiceVersion = "music-metadata-v7-layered-identity"
+
     enum ClientError: LocalizedError {
         case unconfigured
         case invalidResponse
@@ -70,18 +112,23 @@ actor MetadataNormalizationClient: TrackMetadataNormalizing {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("BiliMusic/iOS", forHTTPHeaderField: "User-Agent")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
+        var body: [String: Any] = [
             "title": track.title,
             "uploader": track.artist,
             "duration": track.duration,
             "bvid": track.bvid,
-        ])
+        ]
+        if let cid = track.cid {
+            body["cid"] = cid
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw ClientError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else { throw ClientError.server(http.statusCode) }
         let result = try JSONDecoder().decode(MetadataNormalizationResponse.self, from: data)
         guard !result.degraded else { throw ClientError.degraded }
+        guard result.version == Self.currentServiceVersion else { throw ClientError.invalidResponse }
         let title = result.canonicalTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { throw ClientError.invalidResponse }
         return result.metadata

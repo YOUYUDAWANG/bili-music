@@ -14,6 +14,14 @@ struct BiliMusicApp: App {
         WindowGroup {
             RootView()
                 .environment(engine)
+#if DEBUG
+                .task {
+                    await OnDeviceAlignerSmokeTest.runIfRequested()
+                }
+                .task {
+                    await OnDeviceCurrentLyricsSmokeTest.runIfRequested(engine: engine)
+                }
+#endif
         }
     }
 }

@@ -66,6 +66,19 @@ struct Track: Identifiable, Equatable, Codable, Sendable {
                   coverURL: URL(string: item.pic), duration: item.duration)
     }
 
+    init(feed item: BiliClient.FeedItem) {
+        self.init(
+            aid: item.id,
+            ownerMid: item.owner?.mid,
+            typeID: item.tid,
+            bvid: item.bvid ?? "",
+            cid: item.cid,
+            title: item.title ?? "",
+            artist: item.owner?.name ?? "",
+            coverURL: item.coverURL,
+            duration: item.duration ?? 0)
+    }
+
     init(playlist item: BiliClient.UPPlaylistItem, artist: String, ownerMid: Int) {
         self.init(aid: item.aid, ownerMid: ownerMid, bvid: item.bvid, cid: item.cid,
                   title: item.title, artist: artist,
@@ -122,7 +135,10 @@ enum TrackTitleFormatter {
     }
 
     static func displayMetadata(for track: Track, clean: Bool = shouldCleanListTitles) -> DisplayMetadata {
-        let track = TrackMetadataStore.shared.applyingCachedMetadata(to: track)
+        if let stored = TrackMetadataStore.shared.entry(for: track) {
+            let applied = stored.metadata.applying(to: track)
+            return DisplayMetadata(title: applied.title, artist: applied.artist)
+        }
         let cacheKey = DisplayMetadataCacheKey(
             trackKey: track.key,
             title: track.title,
@@ -427,19 +443,28 @@ final class PlayerEngine {
         let text: String
         let translation: String?
         let words: [LyricWord]
+        let voiceRole: LyricVoiceRole
+        let layerID: String
+        let overlapGroup: String?
 
         init(
             from: Double,
             to: Double,
             text: String,
             translation: String? = nil,
-            words: [LyricWord] = []
+            words: [LyricWord] = [],
+            voiceRole: LyricVoiceRole = .lead,
+            layerID: String = "lead",
+            overlapGroup: String? = nil
         ) {
             self.from = from
             self.to = to
             self.text = text
             self.translation = translation
             self.words = words
+            self.voiceRole = voiceRole
+            self.layerID = layerID
+            self.overlapGroup = overlapGroup
         }
     }
 
@@ -456,8 +481,10 @@ final class PlayerEngine {
     private(set) var lyricSearchKeyword = ""
     private(set) var lyricProvider: LyricsProvider = .netease
     private(set) var lyricOffsetMilliseconds = 0
+    private var lyricOffsetUserSet = false
     private(set) var lyricsLoading = false
     private(set) var lyricSearchError: String?
+    private var lyricSearchGeneration = UUID()
     private(set) var videoAvailable = false
     private(set) var currentAudioQuality: Int?
     private(set) var currentAudioBandwidth: Int?
@@ -473,6 +500,13 @@ final class PlayerEngine {
     var adjustedLyricTime: Double {
         currentTime + Double(lyricOffsetMilliseconds) / 1000
     }
+    var lyricsFollowPlayback: Bool {
+        lyricsDocument?.followsPlayback == true
+            && (lyricsDocument?.timingKind == .word || lyricsDocument?.timingKind == .line)
+    }
+    var lyricsBanner: String? {
+        lyricsDocument?.bannerText
+    }
     var hasNext: Bool {
         queueIndex + 1 < queue.count || queueMode == .radio || queueMode == .repeatOne || (queueMode == .shuffle && queue.count > 1)
     }
@@ -480,7 +514,7 @@ final class PlayerEngine {
     var avPlayer: AVPlayer? { player }
 
     private let client = BiliClient()
-    private let lyricsClient = MetingLyricsClient()
+    private let metadataController: MusicMetadataController
     private let streamResolver: any AudioStreamResolving
     private let playbackDiagnostics: PlaybackDiagnostics
     private let startupTestHooks: PlaybackStartupTestHooks
@@ -522,6 +556,7 @@ final class PlayerEngine {
     private var startupArtworkTask: Task<Void, Never>?
     private var autoMVTask: Task<Void, Never>?
     private var autoCacheTask: Task<Void, Never>?
+    private var lyricAlignTask: Task<Void, Never>?
     private var postPlaybackTask: Task<Void, Never>?
     private var remoteStartupFallbackTask: Task<Void, Never>?
     private var preparedVideoStreams: [TrackKey: PreparedVideoStream] = [:]
@@ -560,7 +595,8 @@ final class PlayerEngine {
         radioTrackProvider: (@MainActor (Track, Set<TrackKey>) async -> Track?)? = nil,
         queueStore: PlaybackQueueStore? = nil,
         metadataStore: TrackMetadataStore? = nil,
-        metadataNormalizer: (any TrackMetadataNormalizing)? = nil
+        metadataNormalizer: (any TrackMetadataNormalizing)? = nil,
+        metadataController: MusicMetadataController? = nil
     ) {
         let resolvedMetadataStore = metadataStore ?? .shared
         self.playbackDiagnostics = playbackDiagnostics
@@ -569,9 +605,13 @@ final class PlayerEngine {
         self.radioTrackProvider = radioTrackProvider
         self.queueStore = queueStore ?? .shared
         self.metadataStore = resolvedMetadataStore
+        self.metadataController = metadataController ?? MusicMetadataController(metadataStore: resolvedMetadataStore)
         self.metadataResolver = TrackMetadataResolver(
             store: resolvedMetadataStore,
-            normalizer: metadataNormalizer ?? MetadataNormalizationClient())
+            normalizer: metadataNormalizer ?? MetadataNormalizationClient(),
+            requiredServiceVersion: metadataNormalizer == nil
+                ? MetadataNormalizationClient.currentServiceVersion
+                : nil)
 #if DEBUG
         self.persistsPlaybackQueue = queueStore != nil || !startupTestHooks.isActive
 #else
@@ -1117,69 +1157,225 @@ final class PlayerEngine {
         seek(to: seconds)
     }
 
-    func searchLyrics(keyword: String, provider: LyricsProvider) async {
+    func searchLyrics(keyword: String) async {
         guard let track = current else { return }
         let expectedKey = track.key
-        lyricProvider = provider
+        let searchGeneration = UUID()
+        lyricSearchGeneration = searchGeneration
         lyricSearchKeyword = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
         lyricSearchError = nil
         lyricsLoading = true
-        do {
-            let results = try await lyricsClient.search(
-                keyword: lyricSearchKeyword,
-                provider: provider)
-            guard current.map({ expectedKey.matches($0) }) ?? false else { return }
-            lyricSearchResults = results
-            if results.isEmpty {
-                lyricSearchError = "没有搜索到候选歌曲"
-            }
-        } catch {
-            guard current.map({ expectedKey.matches($0) }) ?? false else { return }
-            lyricSearchResults = []
-            lyricSearchError = error.localizedDescription
-        }
-        if current.map({ expectedKey.matches($0) }) ?? false {
-            lyricsLoading = false
-        }
+        let session = await metadataController.search(keyword: lyricSearchKeyword, track: track)
+        guard lyricSearchGeneration == searchGeneration,
+              current.map({ expectedKey.matches($0) }) ?? false else { return }
+        applyLyricsSession(session, applyDocument: false)
     }
 
     func selectLyricsResult(_ result: LyricsSearchResult) async {
         guard let track = current else { return }
         let expectedKey = track.key
+        lyricSearchGeneration = UUID()
         lyricsLoading = true
         lyricSearchError = nil
-        do {
-            let document = try await lyricsClient.fetchLyrics(for: result)
-            guard current.map({ expectedKey.matches($0) }) ?? false else { return }
-            lyricProvider = result.provider
-            applyLyrics(document, to: track, offsetMilliseconds: lyricOffsetMilliseconds)
-            await LyricsStore.shared.save(
-                document: document,
-                offsetMilliseconds: lyricOffsetMilliseconds,
-                for: track)
-        } catch {
-            guard current.map({ expectedKey.matches($0) }) ?? false else { return }
-            lyricSearchError = error.localizedDescription
+        let session = await metadataController.select(
+            result,
+            for: track,
+            offsetMilliseconds: lyricOffsetMilliseconds,
+            offsetIsUserSet: lyricOffsetUserSet)
+        guard current.map({ expectedKey.matches($0) }) ?? false else { return }
+        applyLyricsSession(session, applyDocument: session.document != nil, track: track)
+    }
+
+    func setLyricOffset(milliseconds: Int, persist: Bool = true, userSet: Bool = true) {
+        guard let track = current else { return }
+        lyricOffsetMilliseconds = min(max(milliseconds, -10_000), 10_000)
+        lyricOffsetUserSet = userSet
+        if userSet {
+            lyricAlignTask?.cancel()
         }
-        if current.map({ expectedKey.matches($0) }) ?? false {
-            lyricsLoading = false
+        guard persist else { return }
+        Task {
+            await metadataController.persistOffset(lyricOffsetMilliseconds, userSet: userSet, for: track)
         }
     }
 
     func adjustLyricOffset(by milliseconds: Int) {
-        guard let track = current else { return }
-        lyricOffsetMilliseconds = min(max(lyricOffsetMilliseconds + milliseconds, -10_000), 10_000)
-        Task {
-            await LyricsStore.shared.updateOffset(lyricOffsetMilliseconds, for: track)
-        }
+        setLyricOffset(milliseconds: lyricOffsetMilliseconds + milliseconds)
     }
 
     func resetLyricOffset() {
-        guard let track = current else { return }
-        lyricOffsetMilliseconds = 0
-        Task {
-            await LyricsStore.shared.updateOffset(0, for: track)
+        setLyricOffset(milliseconds: 0, persist: true, userSet: true)
+    }
+
+    var canAutoAlignLyricOffset: Bool {
+        lyricsDocument?.timingKind != .none && lyricsFollowPlayback
+    }
+
+    var canGenerateOnDeviceWordTimings: Bool {
+        current != nil
+            && lyricsDocument?.hasLyrics == true
+            && lyricsDocument?.timingKind != .word
+            && !lyrics.isEmpty
+    }
+
+    var canRegenerateOnDeviceWordTimings: Bool {
+        current != nil
+            && lyricsDocument?.timingKind == .word
+            && lyricsDocument?.hasLineSync == true
+    }
+
+    var canGeneratePrecisionHostWordTimings: Bool {
+        current != nil
+            && lyricsDocument?.hasLineSync == true
+            && lyricsDocument?.vocalLines?.isEmpty != false
+    }
+
+    func autoAlignLyricOffset() async {
+        guard let track = current, let document = lyricsDocument, document.timingKind != .none else { return }
+        let expectedKey = track.key
+        let rms: [Double]?
+        if let url = CacheStore.shared.localAudioURL(for: track) {
+            rms = await Task.detached(priority: .utility) {
+                LyricsOffsetEstimator.rmsEnvelope(from: url)
+            }.value
+        } else {
+            rms = nil
         }
+        guard current.map({ expectedKey.matches($0) }) == true else { return }
+        guard let suggestion = LyricsOffsetEstimator.suggest(
+            for: document,
+            trackDuration: track.duration,
+            audioRMS: rms,
+            allowStructure: true) else { return }
+        setLyricOffset(milliseconds: suggestion.offsetMilliseconds, persist: true, userSet: false)
+    }
+
+    func generateOnDeviceWordTimings(
+        rebuildTimeline: Bool = false,
+        replaceExistingWordTimings: Bool = false,
+        progress: @escaping OnDeviceLyricsAligner.ProgressHandler
+    ) async throws -> OnDeviceLyricsAlignmentResult {
+        guard let track = current,
+              let currentDocument = lyricsDocument,
+              currentDocument.hasLyrics else {
+            throw OnDeviceLyricsAlignerError.noTimedLyrics
+        }
+        let document: LyricsDocument
+        let lineSnapshot: [LyricLine]
+        if replaceExistingWordTimings {
+            guard currentDocument.timingKind == .word,
+                  currentDocument.hasLineSync else {
+                throw OnDeviceLyricsAlignerError.noTimedLyrics
+            }
+            document = LyricsDocument(
+                result: currentDocument.result,
+                lyric: currentDocument.lyric,
+                translatedLyric: currentDocument.translatedLyric,
+                romanizedLyric: currentDocument.romanizedLyric,
+                karaokeLyric: nil,
+                karaokeTranslatedLyric: nil,
+                versionScope: currentDocument.versionScope,
+                timingKind: .line,
+                timingNeedsConfirmation: currentDocument.timingNeedsConfirmation,
+                appliesToCurrentCover: currentDocument.appliesToCurrentCover,
+                followsPlayback: true,
+                vocalLines: nil)
+            lineSnapshot = LyricsParser.lines(from: document, duration: track.duration).map { line in
+                LyricLine(
+                    from: line.from,
+                    to: line.to,
+                    text: line.text,
+                    translation: line.translation,
+                    voiceRole: line.voiceRole,
+                    layerID: line.layerID,
+                    overlapGroup: line.overlapGroup)
+            }
+        } else {
+            guard currentDocument.timingKind != .word, !lyrics.isEmpty else {
+                throw OnDeviceLyricsAlignerError.noTimedLyrics
+            }
+            document = currentDocument
+            lineSnapshot = lyrics
+        }
+        guard !lineSnapshot.isEmpty else { throw OnDeviceLyricsAlignerError.noTimedLyrics }
+        let expectedKey = track.key
+        let cleanedLanguage = metadataStore.entry(for: track)?.metadata.language
+        let alignmentInput = OnDeviceKaraokeBuilder.preparedInput(
+            from: lineSnapshot,
+            preferredLanguageCode: cleanedLanguage)
+
+        await CacheStore.shared.loadIfNeeded()
+        if CacheStore.shared.localAudioURL(for: track) == nil {
+            await DownloadManager.shared.download(track: track)
+        }
+        guard let audioURL = CacheStore.shared.localAudioURL(for: track) else {
+            throw OnDeviceLyricsAlignerError.noAudio
+        }
+
+        let alignment = try await OnDeviceLyricsAligner.shared.align(
+            audioURL: audioURL,
+            input: alignmentInput,
+            lines: lineSnapshot,
+            rebuildTimeline: rebuildTimeline || document.timingKind == .none,
+            calibrateTimeline: !rebuildTimeline && document.timingKind != .none,
+            progress: progress)
+        guard current.map({ expectedKey.matches($0) }) == true else {
+            throw CancellationError()
+        }
+        let upgraded = try OnDeviceKaraokeBuilder.upgradedDocument(
+            from: document,
+            lines: lineSnapshot,
+            input: alignmentInput,
+            alignment: alignment)
+        await metadataController.saveOnDeviceWordLyrics(upgraded, for: track)
+        guard current.map({ expectedKey.matches($0) }) == true else {
+            throw CancellationError()
+        }
+        lyricOffsetUserSet = false
+        applyLyrics(upgraded, to: track, offsetMilliseconds: 0)
+        return alignment
+    }
+
+    func generatePrecisionHostWordTimings(
+        progress: @escaping PrecisionLyricsHostClient.ProgressHandler
+    ) async throws -> PrecisionLyricsHostAlignment {
+        guard let track = current,
+              let document = lyricsDocument,
+              document.hasLineSync else {
+            throw PrecisionLyricsHostError.noLineSyncedLyrics
+        }
+        let expectedKey = track.key
+        await CacheStore.shared.loadIfNeeded()
+        if CacheStore.shared.localAudioURL(for: track) == nil {
+            await DownloadManager.shared.download(track: track)
+        }
+        guard let audioURL = CacheStore.shared.localAudioURL(for: track) else {
+            throw OnDeviceLyricsAlignerError.noAudio
+        }
+        let cleanedLanguage = metadataStore.entry(for: track)?.metadata.language
+        let sourceLines = LyricsParser.lines(from: document, duration: track.duration).map { line in
+            LyricLine(from: line.from, to: line.to, text: line.text)
+        }
+        let language = OnDeviceKaraokeBuilder.preparedInput(
+            from: sourceLines,
+            preferredLanguageCode: cleanedLanguage).language
+        let alignment = try await PrecisionLyricsHostClient.shared.align(
+            audioURL: audioURL,
+            track: track,
+            document: document,
+            language: language,
+            progress: progress)
+        guard current.map({ expectedKey.matches($0) }) == true else {
+            throw CancellationError()
+        }
+        lyricAlignTask?.cancel()
+        await metadataController.saveGeneratedWordLyrics(alignment.document, for: track)
+        guard current.map({ expectedKey.matches($0) }) == true else {
+            throw CancellationError()
+        }
+        lyricOffsetUserSet = false
+        applyLyrics(alignment.document, to: track, offsetMilliseconds: 0)
+        return alignment
     }
 
     func seek(to lyricLine: LyricLine) {
@@ -1190,6 +1386,91 @@ final class PlayerEngine {
     func retryLyrics() async {
         guard let track = current else { return }
         await loadLyrics(for: track, generation: playbackGeneration, ignoreCache: true)
+    }
+
+    func refreshTrackIdentity() async {
+        guard let track = current else { return }
+        lyricsLoading = true
+        lyricSearchError = nil
+        do {
+            let normalized = try await metadataResolver.resolve(track, forceRefresh: true)
+            guard isCurrent(track, generation: playbackGeneration) else { return }
+            if queue.indices.contains(queueIndex) {
+                queue[queueIndex] = normalized
+                persistPlaybackQueue()
+                updateNowPlayingInfo()
+            }
+            await loadLyrics(for: normalized, generation: playbackGeneration, ignoreCache: true)
+        } catch {
+            guard isCurrent(track, generation: playbackGeneration) else { return }
+            lyricSearchError = error.localizedDescription
+            lyricsLoading = false
+        }
+    }
+
+    func applyManualTrackIdentity(
+        canonicalTitle: String,
+        originalArtists: [String],
+        coverPerformers: [String]
+    ) async {
+        guard let track = current else { return }
+        var source = track
+        if let stored = metadataStore.entry(for: track) {
+            source.title = stored.sourceTitle
+            source.artist = stored.sourceArtist
+        }
+        let metadata = NormalizedTrackMetadata.manual(
+            canonicalTitle: canonicalTitle,
+            originalArtists: originalArtists,
+            coverPerformers: coverPerformers,
+            uploader: source.artist,
+            isCover: !coverPerformers.isEmpty,
+            serviceVersion: MetadataNormalizationClient.currentServiceVersion)
+        await metadataStore.save(metadata, for: source)
+        let applied = metadata.applying(to: track)
+        if queue.indices.contains(queueIndex) {
+            queue[queueIndex] = applied
+            persistPlaybackQueue()
+            updateNowPlayingInfo()
+        }
+        await loadLyrics(for: applied, generation: playbackGeneration, ignoreCache: true)
+    }
+
+    func searchLyrics(scope: LyricsSearchScope) async {
+        guard let track = current else { return }
+        await loadLyrics(for: track, generation: playbackGeneration, ignoreCache: true, scope: scope)
+    }
+
+    func importPlainLyrics(_ text: String) async {
+        guard let track = current else { return }
+        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+        let document = LyricsDocument(
+            result: LyricsSearchResult(
+                provider: .imported,
+                id: track.key.description,
+                title: track.title,
+                artist: track.artist,
+                album: nil,
+                duration: track.duration,
+                artworkID: nil),
+            lyric: cleaned,
+            translatedLyric: nil,
+            romanizedLyric: nil,
+            karaokeLyric: nil,
+            karaokeTranslatedLyric: nil,
+            versionScope: .manual,
+            timingKind: LyricsDocument.containsLRCTimestamps(cleaned) ? .line : .none,
+            appliesToCurrentCover: true)
+        await metadataController.importLyrics(document, for: track)
+        applyLyrics(document, to: track, offsetMilliseconds: 0)
+    }
+
+    func confirmCurrentLyricsApplyToCover() async {
+        guard let track = current else { return }
+        if let applied = await metadataController.markCurrentLyricsAppliesToCover(for: track) {
+            applyLyrics(applied.document, to: track, offsetMilliseconds: applied.offsetMilliseconds)
+        }
     }
 
     func setPlaybackMode(_ mode: PlaybackMode) async {
@@ -1249,7 +1530,7 @@ final class PlayerEngine {
             return
         }
         autoMVTask?.cancel()
-        await LyricsStore.shared.flush()
+        await metadataController.flush()
         guard playbackMode == .mv else { return }
         let shouldPlay = wantsPlayback
         playbackMode = .music
@@ -1391,6 +1672,7 @@ final class PlayerEngine {
         lyricSearchKeyword = ""
         lyricProvider = .netease
         lyricOffsetMilliseconds = 0
+        lyricOffsetUserSet = false
         lyricsLoading = false
         lyricSearchError = nil
         videoAvailable = false
@@ -1399,6 +1681,7 @@ final class PlayerEngine {
         currentVideoQuality = nil
         autoMVTask?.cancel()
         autoCacheTask?.cancel()
+        lyricAlignTask?.cancel()
         startupArtworkTask?.cancel()
         postPlaybackTask?.cancel()
         queuePrefetchTask?.cancel()
@@ -1465,6 +1748,7 @@ final class PlayerEngine {
         queuePrefetchTask?.cancel()
         autoMVTask?.cancel()
         postPlaybackTask?.cancel()
+        lyricAlignTask?.cancel()
         remoteStartupFallbackTask?.cancel()
         pendingRadioAdvance = nil
         tearDownPlayerObservers()
@@ -1477,7 +1761,7 @@ final class PlayerEngine {
         playbackMode = .music
         queueMode = .sequential
         state = tracks.isEmpty ? .idle : .paused
-        currentTime = 0
+        currentTime = UITestFixtures.initialPlaybackTime
         isScrubbing = false
         scrubTrackKey = nil
         lyrics = []
@@ -1486,6 +1770,7 @@ final class PlayerEngine {
         lyricSearchKeyword = ""
         lyricProvider = .netease
         lyricOffsetMilliseconds = 0
+        lyricOffsetUserSet = false
         lyricsLoading = false
         lyricSearchError = nil
         if UITestFixtures.includesLyrics, let track = current {
@@ -1500,10 +1785,10 @@ final class PlayerEngine {
             )
             let document = LyricsDocument(
                 result: result,
-                lyric: "[00:00.00]Electric night begins\n[00:05.00]Signals cross the skyline\n[00:10.00]We keep the station glowing",
+                lyric: UITestFixtures.lineLyrics,
                 translatedLyric: "[00:00.00]电光之夜开始\n[00:05.00]讯号掠过天际线\n[00:10.00]我们让电台继续发光",
                 romanizedLyric: nil,
-                karaokeLyric: "[0,5000](0,800,0)Electric (800,1000,0)night (1800,1200,0)begins\n[5000,5000](0,1200,0)Signals (1200,900,0)cross (2100,900,0)the (3000,1600,0)skyline",
+                karaokeLyric: UITestFixtures.karaokeLyrics,
                 karaokeTranslatedLyric: nil
             )
             applyLyrics(document, to: track, offsetMilliseconds: 0)
@@ -1660,8 +1945,11 @@ final class PlayerEngine {
         let tracks = items
             .map(Track.init(related:))
             .filter { track in !excludedKeys.contains { $0.matches(track) } }
-        return tracks.first(where: MusicFilter.isStrictMusic)
-            ?? tracks.first(where: MusicFilter.isMusic)
+        await RecommendationMemory.shared.loadIfNeeded()
+        let recent = await RecommendationMemory.shared.recentBVIDs()
+        guard let pick = RadioRelatedPicker.pick(from: tracks, recentBVIDs: recent) else { return nil }
+        await RecommendationMemory.shared.record([pick.bvid])
+        return pick
     }
 
     private func scheduleRadioPrefetch() {
@@ -1739,6 +2027,7 @@ final class PlayerEngine {
         postPlaybackTask?.cancel()
         autoMVTask?.cancel()
         autoCacheTask?.cancel()
+        lyricAlignTask?.cancel()
         let shouldRecordHistory = resumeAt < 1 || !playedKeys.contains(track.key)
         playedKeys.insert(track.key)
         if shouldRecordHistory {
@@ -2434,51 +2723,89 @@ final class PlayerEngine {
     private func loadLyrics(
         for track: Track,
         generation: UUID,
-        ignoreCache: Bool = false
+        ignoreCache: Bool = false,
+        scope: LyricsSearchScope = .automatic
     ) async {
         lyricsLoading = true
         lyricSearchError = nil
+        let session = await metadataController.loadAutomaticLyrics(
+            for: track,
+            ignoreCache: ignoreCache,
+            scope: scope)
+        guard playbackGeneration == generation,
+              current.map({ track.key.matches($0) }) ?? false else { return }
+        applyLyricsSession(session, applyDocument: true, track: track)
+    }
 
-        if !ignoreCache, let cached = await LyricsStore.shared.entry(for: track) {
-            guard playbackGeneration == generation,
-                  current.map({ track.key.matches($0) }) ?? false else { return }
-            applyLyrics(
-                cached.document,
-                to: track,
-                offsetMilliseconds: cached.offsetMilliseconds)
-            lyricsLoading = false
-            return
+    private func applyLyricsSession(
+        _ session: MusicLyricsSession,
+        applyDocument: Bool,
+        track: Track? = nil
+    ) {
+        lyricSearchKeyword = session.keyword.isEmpty ? lyricSearchKeyword : session.keyword
+        lyricProvider = session.provider
+        if !session.candidates.isEmpty {
+            lyricSearchResults = session.candidates
+        } else if session.error == nil {
+            lyricSearchResults = []
         }
-
-        do {
-            let match = try await lyricsClient.automaticLyrics(for: track)
-            guard playbackGeneration == generation,
-                  current.map({ track.key.matches($0) }) ?? false else { return }
-            lyricSearchKeyword = match.keyword
-            lyricProvider = match.provider
-            lyricSearchResults = match.candidates
-            if let document = match.document {
-                log.info("lyrics loaded provider=\(match.provider.rawValue, privacy: .public) candidates=\(match.candidates.count)")
-                applyLyrics(document, to: track, offsetMilliseconds: 0)
-                await LyricsStore.shared.save(
-                    document: document,
-                    offsetMilliseconds: 0,
-                    for: track)
-            } else {
-                log.warning("lyrics no match provider=\(match.provider.rawValue, privacy: .public) candidates=\(match.candidates.count)")
-                lyrics = []
-                lyricsDocument = nil
-                lyricSearchError = "自动匹配失败，可手动搜索歌词"
+        lyricSearchError = session.error
+        lyricsLoading = session.isLoading
+        guard applyDocument else { return }
+        lyricOffsetUserSet = session.offsetIsUserSet
+        if let document = session.document, let track {
+            applyLyrics(document, to: track, offsetMilliseconds: session.offsetMilliseconds)
+            if !session.offsetIsUserSet,
+               document.result.provider != .precisionHost,
+               document.followsPlayback,
+               document.timingKind != .none {
+                scheduleLyricOffsetRefine(for: track, generation: playbackGeneration)
             }
-        } catch {
-            guard playbackGeneration == generation,
-                  current.map({ track.key.matches($0) }) ?? false else { return }
-            log.error("lyrics load failed: \(error.localizedDescription, privacy: .public)")
+        } else {
             lyrics = []
             lyricsDocument = nil
-            lyricSearchError = error.localizedDescription
+            lyricOffsetMilliseconds = session.offsetMilliseconds
         }
-        lyricsLoading = false
+    }
+
+    private func scheduleLyricOffsetRefine(for track: Track, generation: UUID) {
+        guard !UITestFixtures.enabled else { return }
+        lyricAlignTask?.cancel()
+        lyricAlignTask = Task(priority: .utility) { [weak self] in
+            await self?.refineLyricOffsetFromAudio(track: track, generation: generation)
+        }
+    }
+
+    private func refineLyricOffsetFromAudio(track: Track, generation: UUID) async {
+        if CacheStore.shared.localAudioURL(for: track) == nil, !PlaybackPreferences.autoCache {
+            return
+        }
+        for attempt in 0..<12 {
+            if attempt > 0 {
+                try? await Task.sleep(for: .milliseconds(1600))
+            }
+            guard !Task.isCancelled,
+                  isCurrent(track, generation: generation),
+                  !lyricOffsetUserSet else { return }
+            guard let url = CacheStore.shared.localAudioURL(for: track) else { continue }
+            let rms = await Task.detached(priority: .utility) {
+                LyricsOffsetEstimator.rmsEnvelope(from: url)
+            }.value
+            guard isCurrent(track, generation: generation),
+                  !lyricOffsetUserSet,
+                  let document = lyricsDocument,
+                  document.result.provider != .precisionHost,
+                  document.followsPlayback,
+                  document.timingKind != .none else { return }
+            guard let suggestion = LyricsOffsetEstimator.suggest(
+                for: document,
+                trackDuration: track.duration,
+                audioRMS: rms,
+                allowStructure: false),
+                  abs(suggestion.offsetMilliseconds - lyricOffsetMilliseconds) >= 80 else { return }
+            setLyricOffset(milliseconds: suggestion.offsetMilliseconds, persist: true, userSet: false)
+            return
+        }
     }
 
     private func applyLyrics(
@@ -2489,15 +2816,19 @@ final class PlayerEngine {
         lyricsDocument = document
         lyricProvider = document.result.provider
         lyricOffsetMilliseconds = offsetMilliseconds
+        let preserveTiming = document.timingKind != .none
         lyrics = LyricsParser.lines(from: document, duration: track.duration).map { line in
             LyricLine(
-                from: line.from,
-                to: line.to,
+                from: preserveTiming ? line.from : 0,
+                to: preserveTiming ? line.to : 0,
                 text: line.text,
                 translation: line.translation,
-                words: line.words.map { word in
+                words: preserveTiming ? line.words.map { word in
                     LyricWord(from: word.from, to: word.to, text: word.text)
-                })
+                } : [],
+                voiceRole: line.voiceRole,
+                layerID: line.layerID,
+                overlapGroup: line.overlapGroup)
         }
     }
 

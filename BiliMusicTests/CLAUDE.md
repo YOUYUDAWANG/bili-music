@@ -31,16 +31,36 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 | `PlayerControlLogicTests.swift` | 原生 `Slider` 提交给播放器前的进度时间边界 clamp |
 | `PreparedStreamRetryTests.swift` | prepared 流失效后 invalidate + 单次 fresh 重试、重复失败回调共享一次恢复、pause 不吞失败、坏本地缓存回退 freshRemote 并移除缓存条目 |
 | `QueueControllerTests.swift` | `nextIndex` 全模式边界（空队列、队尾、shuffle 越界/去重、radio、repeatOne 自动重复 vs 手动队尾回绕到 0）；`appendUnique` 按 `TrackKey.matches` 去重（cid 未解析时按 bvid 松匹配、不同分 P 视为不同曲目） |
-| `RecommendationSchedulingTests.swift` | 推荐调度策略（`RecommendationSchedulingPolicy` / `RecommendationPanelRefreshPolicy` / `RecommendationVisibleLoadPolicy`）、cid enrichment 判定、推荐展示过滤；含少量读源码的结构断言 |
+| `RecommendationSchedulingTests.swift` | 推荐调度策略（`RecommendationSchedulingPolicy` / `RecommendationPanelRefreshPolicy` / `RecommendationVisibleLoadPolicy`）、cid enrichment 判定、推荐展示过滤、hub 惩罚；含少量读源码的结构断言 |
+| `HomeCoverMixerTests.swift` | 首页新旧混排、去重、预算上限；`RadioRelatedPicker` 跳过刚展示的热门节点 |
+| `ListeningTasteTests.swift` | 品味歌手抽取：原唱优先、喜欢权重大、拒绝合集/UP 名 |
+| `RecommendationMemoryTests.swift` | 推荐记忆 TTL 与 `fresh_idx` 递增落盘 |
 | `SearchFocusTests.swift` | 输入首字符保持本地 idle、`SearchLocalContent` 投影（历史上限 8、recent/cached 去重合并、空态）；含少量读源码断言（无 debounce 提交路径） |
 | `SearchModelsTests.swift` | 搜索模型，以及歌词平台路由、候选一致性排序、LRC/翻译/逐字解析和 `LyricsStore` 偏移持久化 |
+| `BiliSessionTests.swift` | Cookie 解析、clearAuth、过期态、401/-101 判定 |
+| `LibraryStoreTests.swift` | 我喜欢开关、远程夹缓存和落盘恢复 |
+| `LyricHighlightModelTests.swift` | 歌词激活行与逐字 sung/current/unsung 边界 |
+| `LyricMotionDirectorTests.swift` | 九种逐行动效、v5 样片四幕循环/easing、StageScore 全行覆盖、逐字 glyph 保真、安静基线与多声部可见性 |
+| `LyricStageTokenizerTests.swift` | 中日英/emoji/标点分词、词组切分与真实 word 时间 |
+| `LyricStageFingerprintTests.swift` | Score/Performance/封面 Palette 缓存指纹 |
+| `LyricStageScoreV2Tests.swift` | V5.1 合同编解码、越界 token 与 clamp |
+| `LyricStageBudgetTests.swift` | hero/echo/大动作/主歌安静预算降级 |
+| `LyricStageCompilerV2Tests.swift` | 编译确定性、seek、二重唱、长句、partial Luna |
+| `LyricStageTimelineTests.swift` | `sample(at:)` 纯函数 |
+| `LyricStageHandoffTests.swift` | dissolve/push 绝对轨道 |
+| `LyricStagePaletteResolverTests.swift` | 封面派生配色策略 |
+| `LyricStageLegacyAdapterTests.swift` | 旧 V4/V5 指令与 wordCue 迁移 |
+| `LyricStageReduceMotionTests.swift` | Reduce Motion 位移/弹跳降级 |
+| `LyricPerformanceScoreTests.swift` | Luna v4/v5 兼容 envelope、歌词/逐字/声部指纹、composition、scene/word/stage directive clamp、本地回退与缓存失效 |
+| `LyricWordPerformanceTests.swift` | 日文标点/英文空格无损 token 映射、映射失败完整原句回退、真实 word 时间状态 |
+| `LyricsIdentityTests.swift` | 翻唱/原唱身份、歌词匹配门、搜索词用日文原名不用中文译名 |
 | `SearchStoreTests.swift` | `loadLocalContent`/`refreshLocalContent` 投影与 contentRevision 增量语义、空查询不清结果、分页部分失败保留成功页、首次搜索先展示第一页、缓存 `entry(for:)` 分 P 精确匹配 |
 
 ### UI 测试（`BiliMusicUITests/`）
 
 | 文件 | 覆盖内容 |
 |------|---------|
-| `PlayerChromeUITests.swift` | mini/full 播放器开合、手势/布局，以及歌词页逐字、翻译和偏移控件 |
+| `PlayerChromeUITests.swift` | mini/full 播放器开合、手势/布局、歌词页逐字/翻译/偏移、长歌词完整换行、显式 Luna 开发入口，以及 v5 样片只替换中央画布 |
 
 ## 共享单例隔离约定（重要）
 
@@ -80,6 +100,14 @@ CacheStore 新行为注意事项：
 
 | 日期 | 变更 |
 |------|------|
+| 2026-08-19 | v5 真实歌词舞台覆盖 StageScore、glyph 时间、声部指纹、Stage Bible/directive 与 UI 局部替换。 |
+| 2026-08-19 | v5 本地动态文字样片增加四幕时间/easing 单测与中央画布局部替换 UI 回归。 |
+| 2026-08-19 | Luna v4 增加逐字 cue/指纹/token 无损映射测试；UI fixture 改为真实逐字 QRC。 |
+| 2026-08-19 | Luna v3 测试覆盖九种效果词汇与 Cascade 多行门槛。 |
+| 2026-08-19 | `LyricPerformanceScoreTests` 覆盖 v2 逐行 composition；UI fixture 加入长句并验证中央歌词不省略。 |
+| 2026-08-19 | `LyricsIdentityTests` 覆盖按时长差自动整段对齐歌词偏移。 |
+| 2026-08-19 | `LyricsIdentityTests` 覆盖歌词搜索不拿中文译名检索。 |
+| 2026-08-19 | 新增 LyricHighlightModelTests；歌词 UI 回归改为播放器内歌词页。 |
 | 2026-08-19 | 新增 PlaybackPersistenceTests、CacheStoreTests；SearchStoreTests 覆盖第一页增量展示。 |
 | 2026-07-27 | 全面同步生产行为变化：SearchStoreTests 迁移到注入 store；PreparedStreamRetryTests 快照恢复真实索引；busy-wait 改有界等待；fixture resolver cid 对齐；新增 QueueControllerTests / MusicFilterTests / ProgressScrubMath.shouldBeginScrub 覆盖；重写本文档。 |
 | 2026-06-24 | 初始文档创建。 |

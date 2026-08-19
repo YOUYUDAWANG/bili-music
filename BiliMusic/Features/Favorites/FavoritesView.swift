@@ -1,15 +1,21 @@
 import SwiftUI
 
 /// 收藏夹列表(B 站收藏夹当歌单用)。
+private enum FavoritesDestination: Hashable {
+    case liked
+    case remote(Int)
+}
+
 struct FavoritesView: View {
     @State private var folders: [BiliClient.FavFolder] = []
-    @State private var path: [Int] = []
+    @State private var path: [FavoritesDestination] = []
     @State private var loading = false
     @State private var errorMessage: String?
     @State private var requestInFlight = false
     @State private var restoredLastFolder = false
     @State private var authenticationGeneration = UUID()
     @State private var folderPreviewURLs: [Int: [URL]] = [:]
+    private let library = LibraryStore.shared
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -22,8 +28,14 @@ struct FavoritesView: View {
                     alignment: .leading,
                     spacing: 18
                 ) {
-                    ForEach(folders) { folder in
-                        NavigationLink(value: folder.id) {
+                    NavigationLink(value: FavoritesDestination.liked) {
+                        likedFolderTile
+                    }
+                    .buttonStyle(MusicRowButtonStyle())
+                    .accessibilityIdentifier("favoriteFolder-liked")
+
+                    ForEach(visibleFolders, id: \.id) { folder in
+                        NavigationLink(value: FavoritesDestination.remote(folder.id)) {
                             favoriteFolderTile(folder)
                         }
                         .buttonStyle(MusicRowButtonStyle())
@@ -44,32 +56,39 @@ struct FavoritesView: View {
             .background(AppTheme.background.ignoresSafeArea())
             .navigationTitle("收藏夹")
             .navigationBarTitleDisplayMode(.large)
-            .navigationDestination(for: Int.self) { folderId in
-                FavFolderDetailView(
-                    folderId: folderId,
-                    title: folders.first { $0.id == folderId }?.title ?? "收藏夹")
+            .navigationDestination(for: FavoritesDestination.self) { destination in
+                switch destination {
+                case .liked:
+                    LikedLibraryView()
+                case .remote(let folderId):
+                    FavFolderDetailView(
+                        folderId: folderId,
+                        title: folderTitle(folderId))
+                }
             }
             .overlay {
-                if loading {
+                if !library.isLoaded || (loading && folders.isEmpty && library.remoteCollections().isEmpty) {
                     ProgressView()
-                } else if !CookieStore.isLoggedIn {
-                    ContentUnavailableView("需要登录", systemImage: "person.crop.circle.badge.questionmark",
-                                           description: Text("去设置页扫码登录后,这里会显示你的 B 站收藏夹"))
-                } else if let errorMessage, folders.isEmpty {
+                } else if !CookieStore.isLoggedIn,
+                          library.likedCollection.itemCount == 0,
+                          library.remoteCollections().isEmpty {
+                    ContentUnavailableView(
+                        CookieStore.isExpired ? "登录已失效" : "需要登录",
+                        systemImage: "person.crop.circle.badge.questionmark",
+                        description: Text(CookieStore.isExpired
+                            ? "重新扫码后会继续同步 B 站收藏夹；本地「我喜欢」仍可使用。"
+                            : "去设置页扫码登录后，这里会显示你的 B 站收藏夹。也可以先把歌曲加入「我喜欢」。"))
+                } else if let errorMessage, folders.isEmpty, library.remoteCollections().isEmpty {
                     ContentUnavailableView(
                         "收藏夹加载失败",
                         systemImage: "exclamationmark.triangle",
                         description: Text(errorMessage))
-                } else if folders.isEmpty && errorMessage == nil {
-                    ContentUnavailableView("没有收藏夹", systemImage: "star",
-                                           description: Text("在 B 站收藏的视频会出现在这里"))
                 }
             }
             .task { await load() }
             .onChange(of: path) { _, newValue in
-                if let folderId = newValue.last {
-                    let title = folders.first { $0.id == folderId }?.title ?? "收藏夹"
-                    FavoriteManager.shared.remember(folderId: folderId, title: title)
+                if case .remote(let folderId) = newValue.last {
+                    FavoriteManager.shared.remember(folderId: folderId, title: folderTitle(folderId))
                 }
             }
             .refreshable { await load() }
@@ -82,11 +101,45 @@ struct FavoritesView: View {
                 requestInFlight = false
                 errorMessage = nil
                 restoredLastFolder = false
-                if CookieStore.isLoggedIn {
-                    Task { await load() }
+                Task {
+                    await library.loadIfNeeded()
+                    if CookieStore.isLoggedIn {
+                        await load()
+                    }
                 }
             }
         }
+    }
+
+    private var visibleFolders: [BiliClient.FavFolder] {
+        if !folders.isEmpty { return folders }
+        return library.remoteCollections().compactMap { collection in
+            guard let remoteId = collection.remoteId else { return nil }
+            return BiliClient.FavFolder(id: remoteId, title: collection.name, media_count: collection.itemCount)
+        }
+    }
+
+    private var likedFolderTile: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            MagazineArtworkCollage(urls: library.tracks(in: LibraryCollection.likedID).prefix(4).compactMap(\.coverURL))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("我喜欢")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text("\(library.likedCollection.itemCount) 首本地收藏")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 2)
+        }
+        .contentShape(Rectangle())
+    }
+
+    private func folderTitle(_ folderId: Int) -> String {
+        folders.first { $0.id == folderId }?.title
+            ?? library.remoteCollections().first { $0.remoteId == folderId }?.name
+            ?? "收藏夹"
     }
 
     private func favoriteFolderTile(_ folder: BiliClient.FavFolder) -> some View {
@@ -108,7 +161,9 @@ struct FavoritesView: View {
 
     /// 拉取收藏夹列表，并在首次进入时恢复上次打开的夹。
     private func load() async {
-        guard !requestInFlight, let accountID = CookieStore.mid else { return }
+        await library.loadIfNeeded()
+        guard !requestInFlight else { return }
+        guard CookieStore.isLoggedIn, let accountID = CookieStore.mid else { return }
         let generation = authenticationGeneration
         requestInFlight = true
         loading = folders.isEmpty
@@ -128,7 +183,7 @@ struct FavoritesView: View {
                path.isEmpty,
                let last = FavoriteManager.shared.lastFolderId,
                folders.contains(where: { $0.id == last }) {
-                path = [last]
+                path = [.remote(last)]
             }
             restoredLastFolder = true
         } catch {
@@ -180,7 +235,10 @@ struct FavFolderDetailView: View {
                             prominent: true)
                     }
                     .buttonStyle(MusicRowButtonStyle())
-                    .contextMenu { trackMenu(first, index: 0) }
+                    .contextMenu { trackMenu(first, index: 0) } preview: {
+                        MagazineArtwork(url: first.coverURL, pixelWidth: 640)
+                            .frame(width: 320)
+                    }
                 }
 
                 if tracks.count > 1 {
@@ -202,7 +260,10 @@ struct FavFolderDetailView: View {
                                     MagazineTrackTile(track: track, isPlaying: isCurrent(track))
                                 }
                                 .buttonStyle(MusicRowButtonStyle())
-                                .contextMenu { trackMenu(track, index: index) }
+                                .contextMenu { trackMenu(track, index: index) } preview: {
+                                    MagazineArtwork(url: track.coverURL, pixelWidth: 640)
+                                        .frame(width: 320)
+                                }
                                 .onAppear {
                                     if track == tracks.last { Task { await loadMore() } }
                                 }
@@ -231,7 +292,12 @@ struct FavFolderDetailView: View {
             }
         }
         .task {
-            if tracks.isEmpty { await loadMore() }
+            await LibraryStore.shared.loadIfNeeded()
+            if CookieStore.isLoggedIn {
+                if tracks.isEmpty { await loadMore() }
+            } else if tracks.isEmpty {
+                tracks = LibraryStore.shared.tracks(forRemoteFolder: folderId).filter(MusicFilter.isMusic)
+            }
         }
         .refreshable { await reload() }
     }
@@ -328,7 +394,64 @@ struct FavFolderDetailView: View {
             engine.preload(tracks: newTracks, limit: 2, delay: .milliseconds(700))
         } catch {
             guard !Task.isCancelled, CookieStore.mid == accountID else { return }
+            if tracks.isEmpty {
+                tracks = LibraryStore.shared.tracks(forRemoteFolder: folderId).filter(MusicFilter.isMusic)
+            }
             errorMessage = error.localizedDescription
         }
+    }
+}
+
+/// 本地「我喜欢」，未登录也可播放。
+struct LikedLibraryView: View {
+    @Environment(PlayerEngine.self) private var engine
+    private let library = LibraryStore.shared
+    @State private var trackTapTrigger = 0
+
+    var body: some View {
+        let tracks = library.tracks(in: LibraryCollection.likedID)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 16) {
+                ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                    Button {
+                        trackTapTrigger += 1
+                        Task { await engine.play(tracks: tracks, startAt: index) }
+                    } label: {
+                        TrackRow(
+                            track: track,
+                            isPlaying: engine.current.map { track.key.matches($0) } ?? false)
+                    }
+                    .buttonStyle(MusicRowButtonStyle())
+                    .contextMenu {
+                        Button {
+                            Task { await engine.playRadio(seed: track) }
+                        } label: {
+                            Label("电台播放", systemImage: PlayerEngine.QueueMode.radio.icon)
+                        }
+                        Button(role: .destructive) {
+                            library.toggleLiked(track)
+                        } label: {
+                            Label("从我喜欢移除", systemImage: "heart.slash")
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+            .padding(.bottom, 32)
+        }
+        .background(AppTheme.background.ignoresSafeArea())
+        .navigationTitle("我喜欢")
+        .navigationBarTitleDisplayMode(.inline)
+        .sensoryFeedback(.intent(.lightImpact), trigger: trackTapTrigger)
+        .overlay {
+            if tracks.isEmpty {
+                ContentUnavailableView(
+                    "还没有喜欢的歌",
+                    systemImage: "heart",
+                    description: Text("未登录时点收藏会加入这里；登录后收藏到 B 站也会写入本地库。"))
+            }
+        }
+        .task { await library.loadIfNeeded() }
     }
 }

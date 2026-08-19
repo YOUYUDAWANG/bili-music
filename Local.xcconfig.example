@@ -19,3 +19,17 @@ BILIMUSIC_BUNDLE_ID = com.example.BiliMusic
 // 真机构建时建议从 macOS 钥匙串注入 BILIMUSIC_METADATA_API_KEY。
 BILIMUSIC_METADATA_API_URL = https:/$()/bilimusic-metadata.mercari-email-sale-worker.workers.dev/v1/music/normalize
 BILIMUSIC_METADATA_API_KEY =
+
+// 开发阶段 Luna 歌词导演。留空时会从上面的 metadata Worker URL 自动推导 /v1/lyrics/direct。
+BILIMUSIC_LYRIC_DIRECTOR_API_URL =
+
+// 私有 LDDC 逐字歌词聚合服务。URL 指向服务根地址；访问令牌只放钥匙串，
+// 服务名 com.youyudawang.BiliMusic.lddc-lyrics-api。
+BILIMUSIC_LDDC_LYRICS_API_URL =
+BILIMUSIC_LDDC_LYRICS_API_KEY =
+
+// 个人 Windows 高精度逐字歌词主机。访问令牌不要写在这里或提交到 Git；
+// 真机构建会从 macOS 钥匙串服务 com.youyudawang.BiliMusic.precision-lyrics-host 注入。
+BILIMUSIC_PRECISION_LYRICS_HOST_URL = http:/$()/100.78.10.98:8765
+BILIMUSIC_PRECISION_LYRICS_HOST_FALLBACK_URL = http:/$()/192.168.10.129:8765
+BILIMUSIC_PRECISION_LYRICS_HOST_TOKEN =

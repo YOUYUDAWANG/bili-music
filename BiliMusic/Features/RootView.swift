@@ -68,6 +68,8 @@ struct RootView: View {
                 Task(priority: .utility) {
                     await WBISigner.prewarm()
                 }
+                await BiliSessionStore.shared.refreshFromNav()
+                await LibraryStore.shared.loadIfNeeded()
                 await CacheStore.shared.loadIfNeeded()
                 await PlaybackHistoryStore.shared.loadIfNeeded()
 #if DEBUG
@@ -135,7 +137,7 @@ struct RootView: View {
             }
         }
         .tint(AppTheme.accent)
-        .tabBarMinimizeBehavior(.never)
+        .tabBarMinimizeBehavior(engine.current == nil ? .never : .onScrollDown)
     }
 
     private func syncPopupPresentation() {
@@ -210,6 +212,8 @@ enum AppResourceCleanup {
         ImageMemoryCache.shared.releaseReloadableImages()
         try? await CacheStore.shared.flush()
         await PlaybackHistoryStore.shared.flush()
+        await LibraryStore.shared.flush()
+        await RecommendationMemory.shared.flush()
         await engine.flushPlaybackQueue()
         await engine.handleScenePhase(isBackground: true)
     }

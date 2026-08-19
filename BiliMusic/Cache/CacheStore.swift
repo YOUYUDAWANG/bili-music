@@ -187,6 +187,15 @@ final class CacheStore {
         return candidate
     }
 
+    func localAudioURL(for track: Track) -> URL? {
+        guard let entry = entry(for: track) else { return nil }
+        let url = audioDir.appendingPathComponent(entry.fileName)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+              !isDirectory.boolValue else { return nil }
+        return url
+    }
+
     private static func titlesLikelyMatch(_ lhs: String, _ rhs: String) -> Bool {
         func normalized(_ value: String) -> String {
             value

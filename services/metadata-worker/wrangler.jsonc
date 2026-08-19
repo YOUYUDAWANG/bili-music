@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "bilimusic-metadata",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-18",
+  "workers_dev": true,
+  "kv_namespaces": [
+    {
+      "binding": "METADATA_CACHE",
+      "id": "1c9ea87a67f643c4bebcb0ac9edfeea5"
+    }
+  ],
+  "vars": {
+    "UPSTREAM_BASE_URL": "https://sub2api.hachi-mi.uk",
+    "MODEL": "gpt-5.6-luna",
+    "PROMPT_VERSION": "music-metadata-v7-layered-identity",
+    "LYRIC_DIRECTOR_VERSION": "luna-lyric-director-v5-stage-preview",
+    "LYRIC_DIRECTOR_V2_VERSION": "luna-lyric-director-v2-events"
+  },
+  "observability": {
+    "enabled": true
+  }
+}
