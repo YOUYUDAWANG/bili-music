@@ -70,21 +70,7 @@ struct LyricVFXWordToken: View {
                     }
             }
 
-            // 4. 活跃唱响流光光斑 (Traveling Light Head)
-            if isCurrent, !reduceMotion {
-                GeometryReader { proxy in
-                    let headX = proxy.size.width * CGFloat(fillProgress)
-                    Circle()
-                        .fill(glowColor)
-                        .frame(width: 8, height: 8)
-                        .blur(radius: 3)
-                        .position(x: headX, y: proxy.size.height * 0.5)
-                        .opacity(sin(fillProgress * .pi) * 0.85)
-                        .blendMode(.plusLighter)
-                }
-            }
-
-            // 5. 顶层高亮特效 (钻石十字星芒/电弧/余烬)
+            // 4. 顶层高亮特效 (钻石十字星芒/电弧/余烬)
             if isCurrent, !reduceMotion {
                 foregroundVFX
             }
@@ -420,25 +406,6 @@ struct LyricVFXLineView: View {
                                 .blur(radius: 1.2)
                         }
                     }
-            }
-
-            // 3. 推进光针与微光晕 (Progressive Traveling Flare)
-            if progress > 0 && progress < 1.0, !reduceMotion {
-                GeometryReader { proxy in
-                    let headX = proxy.size.width * CGFloat(progress)
-                    ZStack {
-                        Circle()
-                            .fill(Color.white)
-                            .frame(width: 6, height: 6)
-                            .blur(radius: 1)
-                        Circle()
-                            .fill(Color.cyan.opacity(0.65))
-                            .frame(width: 15, height: 15)
-                            .blur(radius: 5)
-                    }
-                    .position(x: headX, y: proxy.size.height * 0.5)
-                    .blendMode(.plusLighter)
-                }
             }
         }
         .scaleEffect(reduceMotion ? 1.0 : (1.0 + CGFloat(sin(progress * .pi) * 0.035)), anchor: .leading)
