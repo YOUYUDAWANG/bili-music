@@ -1,19 +1,33 @@
 ---
 type: project_topic
 status: active
-summary: "Luna 开发期歌词编排、版本化演出脚本、本地缓存与确定性回退。"
-tags: [lyrics, luna, motion, worker, development]
+summary: "NowPlaying 播放主页中区高能歌词光场舞台、三层景深排版、字级 VFX 引擎与 Luna 智能装帧。"
+tags: [lyrics, luna, motion, embellishment, vfx, nowplaying]
 contains: [decision, contract, deployment-boundary]
 created: "2026-08-19"
-updated: "2026-08-19"
-related: ["BiliMusic/API/LyricPerformanceClient.swift", "BiliMusic/API/LyricStageClientV2.swift", "BiliMusic/Features/Player/LyricStageCompilerV2.swift", "services/metadata-worker/src/director-v2.js"]
+updated: "2026-08-20"
+related: ["BiliMusic/Features/Player/NowPlayingLyricStageView.swift", "BiliMusic/Features/Player/LyricVFXTokens.swift", "BiliMusic/Features/Player/LyricEmbellishment.swift", "BiliMusic/Features/Player/LyricEmbellishmentStore.swift"]
 authoring_mode: ai_generated
 ---
-# Luna 歌词演出导演
+# NowPlaying 歌词光场舞台与微巧思演出系统
 
 ## 当前状态
 
-- V5.3 是以单曲作固定 A/B、但运行时完全通用的本地全曲编舞：规划器只消费逐行/逐字时间、歌词文本、间隙、重复簇与声部关系，不读取 BVID、标题语义、绝对秒或固定行号。重复 Hook 簇按 call / echo / converge / lock 递进，普通段落使用 stillness / leading / trailing / dialogue / stack / arc / hero；封面色只映射可读的 primary/accent/warm。V5.2 继续保留为专曲上限对照。
+- **NowPlaying 播放主页中区高能舞台落地 (`NowPlayingLyricStageView`)**：
+  - 彻底重构播放主页封面与控制栏之间的黄金弹性空间，以三层景深排版（前句散焦微暗、当前 28~32pt Hero 大字、后句预备过渡）让中区稳稳“撑住场面”。
+  - 底层渲染自适应流体双色光晕（`LyricStageLightField`），长间奏与前奏自动展现 3 颗随节拍呼吸的律动微点（`LyricInterludePulseView`），空间全周期拥有呼吸生命感。
+- **高能字级 VFX 特效引擎 (`LyricVFXTokens`)**：
+  - `impact`：唱响瞬间微弹性缩放（Pop 1.12x）+ RGB 赛博色散瞬闪 (0.12s) + 径向冲击波环；
+  - `crystallize` / `shimmer`：字符中心旋转钻石十字星芒 + 白金流光遮罩；
+  - `blaze`：赤金垂直流火渐变 + 2 颗向上飘散的微火星余烬微粒；
+  - `neon`：高频双闪点火 + 青粉双色霓虹发光管质感；
+  - `heartbeat`：双阶段心跳舒张（1.0 -> 1.08 -> 1.0 -> 1.04）+ 全局粉红光晕脉冲；
+  - `ripple`：向后方留存 2 重不同透明度的运动残影与同心波纹；
+  - `floating` / `sway`：正弦/余弦波轻柔垂直与水平浮游，如随风摇曳。
+- **12 种微巧思风格库与本地/AI 双层分发**：
+  1. 本地零延迟确定性规则引擎 (`LyricEmbellishmentDirector`)；
+  2. 露娜 AI 智能装帧 (`LyricEmbellishmentClient` -> Worker `POST /v1/lyrics/embellish`)，秒级返回情感与重点词风格表，落盘至 `Documents/lyric-embellishments.json`。
+- V5.3 与 V5.1 等全屏多幕实验保留在 Debug 菜单，不影响产品默认路径。
 - V5.3 当前没有通用 AudioPerformanceMap，也不调用 Luna；真实逐字轴拥有文字出现时刻，结构规划与构图只改变视觉。它证明“专曲 Demo 的构图知识可以先抽象为通用语法”，尚未证明音乐段落分析、音频重拍或模型分镜已经泛化。
 - 2026-08-19 起 App 另有 V5.1 Event 舞台合同 `lyric-stage-v2-events`：StyleSheet / Section / Scene / Actor / Event，由 `LyricStageCompilerV2` 预编译绝对字符轨道，`LyricStageCanvasView` 每帧只执行 `sample(at:)`。Debug 可在本地规则、当前 V5 行级舞台、V5.1 Event 舞台和样片之间切换；默认仍是本地规则。
 - Worker 已上线 `POST /v2/lyrics/direct`，与 `/v1/lyrics/direct` 并存；V2 使用独立 KV key `director-v2:`，缓存写入 App 的 `lyric-stage-v2.json`。生产当前版本 `c593e5b3-eb9e-4360-9a1e-8dd1a58ad723`：bible 与最多 4 段 scene 并行，避免超过现有 App 45s 无首包超时。Debug「生成 V5.1」打线上 `/v2`。

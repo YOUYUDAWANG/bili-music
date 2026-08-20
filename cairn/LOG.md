@@ -2,6 +2,32 @@
 
 本文件按反向时间顺序记录实质进展——最新记录放在本行下方最顶部。每条记录保持简短，只写摘要与指针；稳定结论沉淀到 `cairn/<topic>.md`。
 
+## 2026-08-20 · 电影级歌词光场舞台与露娜 AI 艺术总监四大场景全面落地
+
+- **四大场景动态编舞语法（Cinematic Motion Grammar）**：
+  - `assemble`（叙事段落字级弹性吸附聚拢、散焦到聚焦）；
+  - `gravity`（高潮段落重力下坠落地微震、冲击波光环）；
+  - `duet`（主副唱声部立体左右排布与双向对话）；
+  - `cosmicDrift`（慢歌长音/尾奏正弦双轴浮游与星尘漫游）。
+- **字级微观力学与粒子增强**：引入 0.08s 预备后撤（Anticipation）与 1.06x 爆发弹跳、八芒钻石星芒、烈焰升腾余烬；为普通 LRC 歌词实现羽化流光遮罩与流动光针（Traveling Light Head）。
+- **封面三元流体极光（Tri-Lobe Fluid Aurora）**：提取封面 Top / Middle / Bottom 三主色，随音乐能量呈现呼吸弥散。
+- **全自动直连露娜 AI**：切歌后台自动分析，顶部呈现 `✨ Luna · [情绪标签]`，点亮全曲高光。
+- 单测与全套工程验证 18/18 全通，当前真相见 `cairn/lyric-performance-director.md`。
+
+## 2026-08-20 · 歌词微巧思扩充至 12 种风格与露娜 AI 智能装帧
+
+- 微巧思库扩充为 12 种风格：新增 neon / blaze / crystallize / heartbeat / vintage / sway；实现唱响瞬间微弹跳（Pop）、长音正弦浮游、冰晶折射星芒、赤金微温与双色霓虹等单字/单词级微动效。
+- 新增 `LyricEmbellishmentStore.swift` 本地持久化与内存缓存；新增 `LyricEmbellishmentClient.swift` 支持调用极速装帧接口。
+- Worker 端新增 `POST /v1/lyrics/embellish` 与 Prompt，秒级输出轻量情绪标签与词级/句级风格清单；歌词更多菜单提供一键「露娜智能装帧」与「恢复本地规则」。
+- 双端单测全通：iOS `LyricEmbellishmentTests` 12/12，播放单测 27/27；Worker 端单测 30/30。当前真相见 `cairn/lyric-performance-director.md`。
+
+## 2026-08-20 · 歌词演出收敛：落地语义微巧思系统
+
+- 歌词演出正式从重型全屏舞台剧转向“标准排版 + 词级语义微巧思（Lyric Embellishment）”。
+- 新增 `LyricEmbellishment.swift`：定义 whisper / shimmer / impact / floating / digital / ripple 等 6 种轻量字形与微动效，实现零延迟本地确定性规则引擎与 SwiftUI 修饰器。
+- `PlayerLyricsPage` 与 `PlayerControlViews` 接入微巧思，字级高亮、弹跳、流光与等宽/衬线字体点缀生效，不影响滚动排版与 60fps 性能。
+- `LyricEmbellishmentTests` 10/10，相关高亮与播放单测 27/27 全部通过。
+
 ## 2026-08-20 · 写下整机接手手册
 
 - 新增 `cairn/handoff.md`：当前默认路径、禁止事项、密钥只记名字、Worker/LDDC/高精度主机操作、歌词舞台版本对照、验证与回滚、下一步验收。

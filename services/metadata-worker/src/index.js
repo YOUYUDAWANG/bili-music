@@ -17,6 +17,12 @@ import {
   STAGE_V2_BIBLE_PROMPT,
   STAGE_V2_SCENE_PROMPT,
 } from "./director-v2.js";
+import {
+  EMBELLISHER_PROMPT,
+  sanitizeEmbellisherInput,
+  finalizeEmbellisherOutput,
+  deterministicFallbackEmbellishment,
+} from "./embellisher.js";
 import { callOpenAICompatible } from "./provider.js";
 
 const SYSTEM_PROMPT = `You normalize music metadata from Bilibili video titles.
@@ -59,13 +65,19 @@ export default {
         ok: true,
         service: "bilimusic-metadata",
         version: env.PROMPT_VERSION,
-        endpoints: ["POST /v1/music/normalize", "POST /v1/lyrics/direct", "POST /v2/lyrics/direct"],
+        endpoints: [
+          "POST /v1/music/normalize",
+          "POST /v1/lyrics/direct",
+          "POST /v2/lyrics/direct",
+          "POST /v1/lyrics/embellish",
+        ],
       });
     }
     const isNormalize = request.method === "POST" && url.pathname === "/v1/music/normalize";
     const isDirector = request.method === "POST" && url.pathname === "/v1/lyrics/direct";
     const isDirectorV2 = request.method === "POST" && url.pathname === "/v2/lyrics/direct";
-    if (!isNormalize && !isDirector && !isDirectorV2) {
+    const isEmbellish = request.method === "POST" && url.pathname === "/v1/lyrics/embellish";
+    if (!isNormalize && !isDirector && !isDirectorV2 && !isEmbellish) {
       return json({ error: "not_found" }, 404);
     }
     if (!env.API_KEY || request.headers.get("authorization") !== `Bearer ${env.API_KEY}`) {
@@ -73,10 +85,13 @@ export default {
     }
 
     const contentLength = Number(request.headers.get("content-length") || 0);
-    if (contentLength > (isDirector || isDirectorV2 ? (isDirectorV2 ? 98_304 : 65_536) : 8_192)) {
+    if (contentLength > (isDirector || isDirectorV2 || isEmbellish ? 98_304 : 8_192)) {
       return json({ error: "payload_too_large" }, 413);
     }
 
+    if (isEmbellish) {
+      return handleLyricEmbellishment(request, env, context);
+    }
     if (isDirectorV2) {
       return handleLyricDirectionV2(request, env, context);
     }
@@ -284,6 +299,62 @@ async function handleLyricDirectionV2(request, env, context) {
 
   if (env.METADATA_CACHE && !response.degraded && !response.partial) {
     await env.METADATA_CACHE.put(cacheKey, JSON.stringify(response), { expirationTtl: 2_592_000 });
+  }
+  return json(response);
+}
+
+async function handleLyricEmbellishment(request, env, context) {
+  let raw;
+  try {
+    raw = await request.json();
+  } catch {
+    return json({ error: "invalid_request", message: "请求格式错误" }, 400);
+  }
+  let input;
+  try {
+    input = sanitizeEmbellisherInput(raw);
+  } catch (error) {
+    return json({ error: "invalid_request", message: error instanceof Error ? error.message : "请求格式错误" }, 400);
+  }
+
+  const cacheKey = await digest(`embellish:${env.PROMPT_VERSION}:${JSON.stringify(input)}`);
+  const cached = env.METADATA_CACHE ? await env.METADATA_CACHE.get(cacheKey, "json") : null;
+  if (cached) return json({ ...cached, cache: "hit" });
+
+  let response;
+  try {
+    const compactInput = {
+      track: [input.title, input.artist, input.duration],
+      lines: input.lines.map((l) => [l.index, l.text, l.words.map((w) => [w.index, w.text])]),
+    };
+    const result = await callOpenAICompatible(
+      env,
+      EMBELLISHER_PROMPT,
+      compactInput,
+      { maxCompletionTokens: 1_200, timeoutMilliseconds: 15_000 }
+    );
+    const score = finalizeEmbellisherOutput(result.value, input);
+    response = {
+      ...score,
+      provider: "openai-compatible",
+      model: env.MODEL,
+      upstreamProtocol: result.protocol,
+      degraded: false,
+      cache: "miss",
+    };
+  } catch (error) {
+    response = {
+      ...deterministicFallbackEmbellishment(input),
+      provider: "openai-compatible",
+      model: env.MODEL,
+      degraded: true,
+      degradedReason: safeDegradedReason(error),
+      cache: "miss",
+    };
+  }
+
+  if (env.METADATA_CACHE && !response.degraded) {
+    context.waitUntil(env.METADATA_CACHE.put(cacheKey, JSON.stringify(response), { expirationTtl: 2_592_000 }));
   }
   return json(response);
 }

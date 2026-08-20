@@ -404,6 +404,18 @@ struct PlayerInlineLyricsPreview: View {
                 .frame(maxWidth: 340, alignment: snapshot.cue.alignment.frameAlignment)
                 .fixedSize(horizontal: false, vertical: true)
             } else {
+                let aiScore = LyricEmbellishmentStore.shared.score(
+                    for: engine.current?.key.description ?? "",
+                    lyricsHash: LyricPerformanceFingerprint.lyricsHash(engine.lyrics)
+                )
+                let lineStyle = visibleLine.isCurrent
+                    ? LyricEmbellishmentDirector.embellishment(
+                        forLine: visibleLine.line.text,
+                        lineIndex: visibleLine.index,
+                        isSecondary: visibleLine.line.voiceRole.isSecondary,
+                        aiScore: aiScore
+                    )
+                    : .none
                 Text(visibleLine.line.text)
                     .font(.system(
                         size: visibleLine.isCurrent
@@ -417,6 +429,11 @@ struct PlayerInlineLyricsPreview: View {
                     .foregroundStyle(visibleLine.isCurrent
                         ? PlayerSurface.textPrimary.opacity(activeOpacity(for: visibleLine, upcoming: snapshot.isUpcoming))
                         : PlayerSurface.textSecondary.opacity(0.62))
+                    .lyricEmbellishment(
+                        style: lineStyle,
+                        state: visibleLine.isCurrent ? .current(progress: 0.5) : .unsung,
+                        reduceMotion: reduceMotion
+                    )
                     .fixedSize(horizontal: false, vertical: true)
             }
         }

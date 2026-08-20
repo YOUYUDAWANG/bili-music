@@ -84,6 +84,7 @@ struct PlayerLyricsPage: View {
                     ForEach(Array(engine.lyrics.enumerated()), id: \.element.id) { index, line in
                         lyricRow(
                             line,
+                            index: index,
                             isActive: activeIndices.contains(index),
                             time: time)
                             .id(line.id)
@@ -139,12 +140,12 @@ struct PlayerLyricsPage: View {
         }
     }
 
-    private func lyricRow(_ line: PlayerEngine.LyricLine, isActive: Bool, time: Double) -> some View {
+    private func lyricRow(_ line: PlayerEngine.LyricLine, index: Int, isActive: Bool, time: Double) -> some View {
         Button {
             engine.seek(to: line)
         } label: {
             VStack(alignment: .leading, spacing: 7) {
-                lineText(line, isActive: isActive, time: time)
+                lineText(line, index: index, isActive: isActive, time: time)
                     .font(.system(
                         size: line.voiceRole.isSecondary ? 20 : 26,
                         weight: line.voiceRole.isSecondary ? .semibold : .bold))
@@ -175,17 +176,32 @@ struct PlayerLyricsPage: View {
     }
 
     @ViewBuilder
-    private func lineText(_ line: PlayerEngine.LyricLine, isActive: Bool, time: Double) -> some View {
+    private func lineText(_ line: PlayerEngine.LyricLine, index: Int, isActive: Bool, time: Double) -> some View {
         if isActive, !line.words.isEmpty {
             let states = LyricHighlightModel.wordStates(of: line, at: time)
             let words = line.words.sorted { lhs, rhs in
                 if lhs.from == rhs.from { return lhs.to < rhs.to }
                 return lhs.from < rhs.from
             }
-            KaraokeWordLine(words: words, states: states)
+            KaraokeWordLine(lineIndex: index, lineText: line.text, words: words, states: states)
         } else {
+            let aiScore = LyricEmbellishmentStore.shared.score(
+                for: engine.current?.key.description ?? "",
+                lyricsHash: LyricPerformanceFingerprint.lyricsHash(engine.lyrics)
+            )
+            let style = isActive ? LyricEmbellishmentDirector.embellishment(
+                forLine: line.text,
+                lineIndex: index,
+                isSecondary: line.voiceRole.isSecondary,
+                aiScore: aiScore
+            ) : .none
             Text(line.text)
                 .foregroundStyle(PlayerSurface.textPrimary)
+                .lyricEmbellishment(
+                    style: style,
+                    state: isActive ? .current(progress: 0.5) : .unsung,
+                    reduceMotion: reduceMotion
+                )
         }
     }
 
@@ -240,13 +256,35 @@ struct PlayerLyricsPage: View {
 }
 
 private struct KaraokeWordLine: View {
+    let lineIndex: Int
+    let lineText: String
     let words: [PlayerEngine.LyricWord]
     let states: [LyricWordState]
+    @Environment(PlayerEngine.self) private var engine
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        let aiScore = LyricEmbellishmentStore.shared.score(
+            for: engine.current?.key.description ?? "",
+            lyricsHash: LyricPerformanceFingerprint.lyricsHash(engine.lyrics)
+        )
         LyricWordWrapLayout(alignment: .leading) {
             ForEach(Array(zip(words, states).enumerated()), id: \.offset) { item in
-                KaraokeWordToken(text: item.element.0.text, state: item.element.1)
+                let word = item.element.0
+                let state = item.element.1
+                let style = LyricEmbellishmentDirector.embellishment(
+                    forWord: word.text,
+                    lineIndex: lineIndex,
+                    wordIndex: item.offset,
+                    lineText: lineText,
+                    aiScore: aiScore
+                )
+                KaraokeWordToken(
+                    text: word.text,
+                    state: state,
+                    style: style,
+                    reduceMotion: reduceMotion
+                )
             }
         }
         .accessibilityRepresentation {
@@ -259,6 +297,8 @@ private struct KaraokeWordLine: View {
 private struct KaraokeWordToken: View {
     let text: String
     let state: LyricWordState
+    let style: LyricEmbellishmentStyle
+    let reduceMotion: Bool
 
     var body: some View {
         Text(text)
@@ -277,6 +317,7 @@ private struct KaraokeWordToken: View {
                         }
                 }
             }
+            .lyricEmbellishment(style: style, state: state, reduceMotion: reduceMotion)
             .shadow(
                 color: isCurrent ? PlayerSurface.textPrimary.opacity(0.22) : .clear,
                 radius: isCurrent ? 5 : 0)
@@ -312,6 +353,28 @@ struct PlayerLyricsOverflowMenu: View {
 
             Button("歌词校准") {
                 showOffset = true
+            }
+
+            Divider()
+
+            Button("✨ 露娜智能装帧（微巧思）") {
+                Task {
+                    guard let track = engine.current, !engine.lyrics.isEmpty else { return }
+                    if let score = try? await LyricEmbellishmentClient.shared.embellish(track: track, lines: engine.lyrics) {
+                        LyricEmbellishmentStore.shared.save(score)
+                    }
+                }
+            }
+
+            if LyricEmbellishmentStore.shared.score(
+                for: engine.current?.key.description ?? "",
+                lyricsHash: LyricPerformanceFingerprint.lyricsHash(engine.lyrics)
+            ) != nil {
+                Button("恢复本地规则微巧思") {
+                    if let trackID = engine.current?.key.description {
+                        LyricEmbellishmentStore.shared.remove(for: trackID)
+                    }
+                }
             }
 
             Divider()

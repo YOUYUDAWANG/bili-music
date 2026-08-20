@@ -440,15 +440,12 @@ struct NowPlayingView: View {
                                 }
                                 .transition(.opacity.combined(with: .scale(scale: 0.96)))
                             default:
-                                PlayerInlineLyricsPreview(
-                                    isMotionEnabled: isPresented,
-                                    performanceScore: lyricPerformanceScore
-                                ) {
+                                NowPlayingLyricStageView(isActive: isPresented) {
                                     setPlayerPage(.lyrics)
                                 }
                             }
                         }
-                        .padding(.horizontal, 30)
+                        .padding(.horizontal, 20)
                     }
                     .frame(maxHeight: .infinity)
                     .frame(minHeight: mainFlexibleMinimum)
