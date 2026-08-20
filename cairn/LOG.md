@@ -2,17 +2,10 @@
 
 本文件按反向时间顺序记录实质进展——最新记录放在本行下方最顶部。每条记录保持简短，只写摘要与指针；稳定结论沉淀到 `cairn/<topic>.md`。
 
-## 2026-08-20 · 电影级歌词光场舞台与露娜 AI 艺术总监四大场景全面落地
+## 2026-08-20 · 优化歌词视觉体验：全面移除突兀歌词光点
 
-- **四大场景动态编舞语法（Cinematic Motion Grammar）**：
-  - `assemble`（叙事段落字级弹性吸附聚拢、散焦到聚焦）；
-  - `gravity`（高潮段落重力下坠落地微震、冲击波光环）；
-  - `duet`（主副唱声部立体左右排布与双向对话）；
-  - `cosmicDrift`（慢歌长音/尾奏正弦双轴浮游与星尘漫游）。
-- **字级微观力学与粒子增强**：引入 0.08s 预备后撤（Anticipation）与 1.06x 爆发弹跳、八芒钻石星芒、烈焰升腾余烬；为普通 LRC 歌词实现羽化流光遮罩与流动光针（Traveling Light Head）。
-- **封面三元流体极光（Tri-Lobe Fluid Aurora）**：提取封面 Top / Middle / Bottom 三主色，随音乐能量呈现呼吸弥散。
-- **全自动直连露娜 AI**：切歌后台自动分析，顶部呈现 `✨ Luna · [情绪标签]`，点亮全曲高光。
-- 单测与全套工程验证 18/18 全通，当前真相见 `cairn/lyric-performance-director.md`。
+- 彻底移除 `LyricVFXWordToken`（逐字流光光斑）与 `LyricVFXLineView`（整行推进光针）中的附加移动圆点，保持纯净高级的羽化流光扫亮（Liquid Mask Sweep）与字级物理呼吸，视觉更加优雅沉浸。
+- `NowPlayingLyricStageTests` 6/6 与 `LyricEmbellishmentTests` 12/12 单测全通。当前真相见 `cairn/lyric-performance-director.md`。
 
 ## 2026-08-20 · 歌词微巧思扩充至 12 种风格与露娜 AI 智能装帧
 
