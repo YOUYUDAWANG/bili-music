@@ -17,6 +17,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Discovery Reliability and Music-Only Results** - Search and recommendations stay scoped, stable, paginated, and music-only. (completed 2026-06-27)
 - [x] **Phase 3: Player Interaction and Regression Coverage** - Player gestures, layout density, and targeted regression checks protect the daily playback experience. (completed 2026-06-27)
 - [x] **Phase 4: Interface Cohesion and Search Polish** - Daily UI surfaces use a calmer blue-cyan accent, search focuses into history/suggestions without mode clutter, rows are easier to tap, player toolbar spacing is rebalanced, and list-title cleaning is conservative. (completed 2026-06-27)
+- [x] **Phase 5: Native Feel and Lyrics** - Native player/lyrics slices were implemented; remaining device feel and LDDC checks stay as residual UAT rather than blocking the next architecture milestone. (implemented 2026-08-19)
+- [ ] **Phase 6: LyricStage Platform and Web Reference** - Extract provider-neutral contracts, build a fullscreen Web Stage, and validate YouTube Music Companion as the first bounded online playback adapter. (started 2026-08-21)
 
 ## Phase Details
 
@@ -110,6 +112,38 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **UI hint**: yes
 
+### Phase 5: Native Feel and Lyrics
+
+**Goal**: Integrate native player/lyrics surfaces, progressively timed lyrics, high-precision sources, audio structure, and bounded Luna staging without changing the Release playback path.
+**Mode:** implementation complete, residual UAT tracked
+**Depends on**: Phase 4
+**Verification**: See `05-00-DESIGN.md`, `cairn/lyrics-architecture.md`, and `cairn/lyric-stage-v4-scene-recipe.md`.
+
+### Phase 6: LyricStage Platform and Web Reference
+
+**Goal**: Prove that the lyric-performance core can run without SwiftUI or Bilibili identity by building shared schemas/fixtures, a local-audio fullscreen Web Stage, and a provider-bounded YouTube Music clock bridge.
+**Mode:** platform foundation
+**Depends on**: Phase 5 reference checkpoint
+**Requirements**: CORE-01, CORE-02, CORE-03, CORE-04, CORE-05, WEB-01, WEB-02, WEB-03, WEB-04, WEB-05, WEB-06, WEB-07, WEB-08, WEB-09, WEB-10, TEST-06, TEST-07
+**Success Criteria**:
+
+  1. Swift and TypeScript validate the same provider-neutral lyric/director fixtures without requiring bvid/cid.
+  2. A user can import local audio plus line- or word-timed lyrics, play, pause, seek, and enter a 16:9 fullscreen Canvas stage without network access.
+  3. Lyrics remain complete and static-first; line-only input never invents word timing, and seek/pause/restart restore deterministically from the media clock.
+  4. The first supported fullscreen families use cross-frame space rather than a scaled phone column and meet the focused 1080p frame budget.
+  5. YouTube Music can drive the same Stage through an extension-owned snapshot contract without exposing cookies/media or replacing the local fallback; Bilibili, Luna, PWA, and multi-window Show Mode remain non-prerequisites.
+
+**Plans**: 0/6 complete
+
+- [ ] 06-01-PLAN.md — Provider-neutral schemas and golden fixtures
+- [ ] 06-02-PLAN.md — Single-window fullscreen Stage Alpha plus YouTube Music Companion v0
+- [ ] 06-03-PLAN.md — Audio structure and full fullscreen grammar
+- [ ] 06-04-PLAN.md — Luna rehearsal, cache, and `.lyricstage` package
+- [ ] 06-05-PLAN.md — Second-screen Show Mode
+- [ ] 06-06-PLAN.md — Stage-first Now Playing, AMLL boundary, Performance Direction Skill, typed evidence grammar, and real visual UAT
+
+**UI hint**: yes
+
 ## Coverage Validation
 
 - v1 requirements mapped: 28/28
@@ -120,7 +154,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -128,3 +162,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 | 2. Discovery Reliability and Music-Only Results | 1/1 | Complete    | 2026-06-27 |
 | 3. Player Interaction and Regression Coverage | 3/3 | Complete    | 2026-06-27 |
 | 4. Interface Cohesion and Search Polish | 1/1 | Complete    | 2026-06-27 |
+| 5. Native Feel and Lyrics | 5/5 slices | Implemented; residual UAT | 2026-08-19 |
+| 6. LyricStage Platform and Web Reference | 0/6 | In progress | - |

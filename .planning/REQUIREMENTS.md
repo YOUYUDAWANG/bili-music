@@ -1,7 +1,7 @@
 # Requirements: Bilibili Music
 
 **Defined:** 2026-06-26  
-**Core Value:** 让音乐尽快、稳定地响起来；当功能冲突时，播放启动速度和不中断播放优先于推荐、歌词、MV、UI 动效和其他增强体验。
+**Core Value:** 让音乐尽快、稳定地响起来；LyricStage 的演出可携带、可回退，并且永远不能阻塞播放或改写歌词时间真相。
 
 ## v1 Requirements
 
@@ -85,6 +85,34 @@ Deferred items are important, but they should not block v1 stabilization.
 - **UI-02**: Lyrics unavailable, MV unavailable/loading, favorite, cache, download failure, and auth-expired states have distinct UI affordances.
 - **UI-03**: Queue and related recommendation pages are polished as left/right player pages with stable empty/loading/error states.
 
+## LyricStage Foundation Requirements
+
+### Provider-Neutral Core
+
+- [ ] **CORE-01**: Swift and TypeScript validate the same versioned `RecordingIdentityV0`, `LyricDocumentV0`, audio-structure, and director-recipe schemas.
+- [ ] **CORE-02**: Lyrics exclusively own complete text, line/word timing, voice roles, and overlap; audio and Luna cannot alter reveal timing.
+- [ ] **CORE-03**: Provider references are optional and Bilibili bvid/cid are not required by the performance core.
+- [ ] **CORE-04**: Invalid or unsupported scenes degrade locally while a complete deterministic fallback remains available.
+- [ ] **CORE-05**: Semantic plan identity is distinct from renderer/capability/font/viewport-specific prepared layout identity.
+
+### Web Stage Alpha
+
+- [ ] **WEB-01**: User can import local MP3/M4A/WAV plus LRC or canonical word-timed lyrics without uploading audio.
+- [ ] **WEB-02**: User can rehearse and enter a clean `fullscreen16x9` Stage that uses cross-frame composition rather than a scaled phone column.
+- [ ] **WEB-03**: `<audio>` is the single playback clock; pause freezes and seek/restart restore the correct scene within the defined event-based tolerance.
+- [ ] **WEB-04**: Long text, CJK/Latin mixtures, and overlapping voices remain complete, wrapped, readable, and free of ellipsis or clipping.
+- [ ] **WEB-05**: Body text is static-first; continuous environment motion cannot cause continuous lyric jumping.
+- [ ] **WEB-06**: A Chrome/Edge companion can make YouTube Music the first online source by forwarding only track metadata and authoritative playback snapshots; track changes invalidate mismatched lyrics, while cookies, media URLs, audio, and transport ownership remain in the host tab.
+- [ ] **WEB-07**: YouTube Music track changes trigger a cancellable cache-first lyrics lookup; a synchronized cover recording that passes title, performer, and ≤4s duration gates loads first. When no cover recording exists, an exact-title, ≤15s, unambiguous original-artist result may load as an explicitly surfaced original fallback; ambiguous candidates require selection and manual import remains available.
+- [ ] **WEB-08**: User can open and close LyricStage inside the existing YouTube Music page without creating a second Stage tab or a second media clock; the embedded canvas and candidate fallback remain isolated from host DOM styles.
+- [ ] **WEB-09**: Fullscreen presents a stable stage-first Now Playing surface with real cover art, readable three-level lyrics, persistent progress, only authoritative transport controls, and no top/bottom floating chrome or audience debug.
+- [ ] **WEB-10**: Strong fullscreen effects use a versioned typed grammar, cite song/section/line evidence, remain open to novel compositions of registered primitives, obey motion/readability budgets, and degrade to a complete deterministic Reading state.
+
+### Cross-Runtime Verification
+
+- [ ] **TEST-06**: Shared fixtures cover line-only, word-timed, mixed-script, long-line, repeated-hook, duet/overlap, and long-song cases across Swift and TypeScript.
+- [ ] **TEST-07**: Fullscreen visual/runtime gates cover cover identity, AMLL ownership, Reading/Hero/Duet/Aperture states, evidence validation, random seek, reduce-motion, GPU failure, and real YTM songs across distinct structures.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -92,7 +120,7 @@ Deferred items are important, but they should not block v1 stabilization.
 | App Store release | This is a personal sideload app; public distribution is not part of the current project. |
 | Full Bilibili client | Comments, danmaku, social feed, profiles, uploads, live, and community features are outside the music-first product. |
 | Public multi-user backend | Private metadata, LDDC lyrics, and precision-host services are bounded personal infrastructure; a public account/data backend remains outside scope. |
-| Cross-platform clients | Android, macOS, Web, and CarPlay are not part of the current roadmap. |
+| Full cross-platform music clients | Android/macOS native clients and a complete Bilibili Web music library remain outside this milestone; the standalone Web LyricStage reference is now in Phase 06. |
 | Social playlist sharing | Reuse Bilibili folders/collections and local queue/cache before adding any social model. |
 | Bypassing Bilibili access limits | The app may use what the user's account can access, but will not promise to bypass membership, region, or rights restrictions. |
 | Heavy onboarding or marketing UI | App should open into usable music surfaces, not a landing page. |
@@ -132,6 +160,23 @@ Roadmap mapping is filled during roadmap creation.
 | TEST-04 | Phase 1 | Complete |
 | TEST-05 | Phase 3 | Complete |
 | UI-01 | Phase 4 | Partial |
+| CORE-01 | Phase 6 | Active |
+| CORE-02 | Phase 6 | Active |
+| CORE-03 | Phase 6 | Active |
+| CORE-04 | Phase 6 | Active |
+| CORE-05 | Phase 6 | Active |
+| WEB-01 | Phase 6 | Active |
+| WEB-02 | Phase 6 | Active |
+| WEB-03 | Phase 6 | Active |
+| WEB-04 | Phase 6 | Active |
+| WEB-05 | Phase 6 | Active |
+| WEB-06 | Phase 6 | Active |
+| WEB-07 | Phase 6 | Active |
+| WEB-08 | Phase 6 | Active |
+| WEB-09 | Phase 6 | Active |
+| WEB-10 | Phase 6 | Active |
+| TEST-06 | Phase 6 | Active |
+| TEST-07 | Phase 6 | Active |
 
 **Coverage:**
 

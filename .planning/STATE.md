@@ -1,20 +1,20 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-current_phase: 5
-current_phase_name: Native Feel and Lyrics
+milestone: v2.0
+milestone_name: LyricStage Foundation
+current_phase: 6
+current_phase_name: LyricStage Platform and Web Reference
 status: in_progress
-stopped_at: Executed 05-00-DESIGN.md slices 05-01 through 05-05
-last_updated: "2026-08-19T00:00:00Z"
-last_activity: 2026-08-20
-last_activity_desc: LDDC manual selection now survives overlapping searches and can refetch a missing verified document by provider ID; signed app installed
+stopped_at: Director client auth and real-song AI takeover are live; conflict-free native Lyrics and five-class subjective UAT remain
+last_updated: "2026-08-21T19:26:00Z"
+last_activity: 2026-08-22
+last_activity_desc: Persisted Director auth in Chrome and verified real-song AI takeover with uninterrupted tab audio
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 10
-  completed_plans: 10
-  percent: 100
+  total_phases: 6
+  completed_phases: 5
+  total_plans: 20
+  completed_plans: 15
+  percent: 75
 ---
 
 # Project State
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-27)
 
 **Core value:** 让音乐尽快、稳定地响起来；当功能冲突时，播放启动速度和不中断播放优先于推荐、歌词、MV、UI 动效和其他增强体验。
-**Current focus:** Confirm the installed LDDC candidate-selection fix on device, then validate exact-cover, original-reference, and fallback paths; continue Windows GPU precision and Phase 05 feel checks
+**Current focus:** Execute 06-06 from baseline and Bridge capability audit through stable Now Playing, AMLL ADR, typed effect grammar, Director Skill, production runtime, and five-class real YTM visual UAT.
 
 ## Current Position
 
-Phase: 4 — Interface Cohesion and Search Polish
-Plan: 1 of 1 — 04-01
-Status: Complete
-Last activity: 2026-08-19 — Split music identity, session, and local library out of the Bilibili API shapes; device confirmation and remaining xcodebuild verification are pending
+Phase: 6 — LyricStage Platform and Web Reference
+Plan: 06-06 Reading, MusicMapV1 capture, Gemini 3.7 cloud deployment and client AI takeover complete; conflict-free native Lyrics and five-class subjective UAT pending
+Status: In progress
+Last activity: 2026-08-22 — configured the Chrome Director client; real YTM showed AI queued then active while tab audio continued playing
 
-Progress: [##########] 100%
+Progress: [#######---] 75%
 
 ## Post-Milestone Deep Review — 2026-07-25
 

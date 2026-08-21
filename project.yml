@@ -85,7 +85,10 @@ targets:
   BiliMusicTests:
     type: bundle.unit-test
     platform: iOS
-    sources: [BiliMusicTests]
+    sources:
+      - path: BiliMusicTests
+      - path: web/packages/contracts/fixtures
+        buildPhase: resources
     configFiles:
       Debug: Local.xcconfig
       Release: Local.xcconfig

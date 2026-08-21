@@ -1,12 +1,18 @@
 # Bilibili Music 路线图
 
-**当前焦点**：LDDC 私有逐字歌词后端已在 Mac mini Tailscale 私网常驻，签名 App 已覆盖安装；下一步在 App 内实际搜索验收「逐字」候选，同时继续 Windows GPU 高精度来源的多曲结构验证。整机接手见 `cairn/handoff.md`。
+**当前焦点**：Phase 06 的 06-06 已完成实现、自动门与 Director v2 部署：Stage-first Now Playing、真实封面/进度/权威运输控制、三层 Reading、稀疏 Hero/Duet/Aperture、Performance Direction Skill 与双端 EffectRecipe 验证均已落地。最新 `extension-dist` 已在 Chrome 重载，并修复 YTM 复用媒体内部轴导致的混合时钟；仍需关闭真实歌曲视觉/seek/换歌门。iOS 日用路径与 LDDC/高精度歌词只保留剩余真机 UAT。指针见 `06-06-DESIGN.md`、`06-06-AMLL-ADR.md` 与 `cairn/lyricstage-platform-architecture.md`。
 
 > 本文件只提供跨会话的精简导航；执行阶段、完整范围和需求追踪以 `.planning/ROADMAP.md`、`.planning/STATE.md` 与 `.planning/REQUIREMENTS.md` 为准。
 
 ## 里程碑
 
 - [x] 完成 v1 四个阶段的自动化稳定性与界面收口工作。
+- [x] 确认并启动 Phase 06：冻结来源无关合同与 golden fixtures，建立本地音频 + 时间轴歌词的全屏 Web Stage；不先复制完整 BiliMusic Web 客户端。
+- [ ] 完成 06-01/06-02 剩余门禁：AudioStructure schema、真实本地音频/LRC、20 次 seek、1080p 大屏视觉与整段 rAF 性能。
+- [ ] 关闭 06-06 最后真实 Chrome 门；实现、自动测试、性能预算、AGPL/NOTICE 与 OCI Director 1.2.0 部署已完成。
+- [x] 在真实 Chrome 验证原生 Lyrics direct Shadow Column：无自定义 tab/overlay、React ready 后接管、切出恢复、切回唯一 host，且新版无 LyricStage 运行错误。
+- [ ] 继续 YTM 真实验收：严格自动歌词/候选、全屏进出、暂停、seek、换歌撤词、多标签择主与关闭来源断连。
+- [ ] 重新加载扩展后确认《You & 合図》同版本自动装入，以花譜《修羅》确认 `by` 清洗/原唱回退，并以存流《泥中に咲く》确认「歌名 - 原唱 covered by 翻唱者」拆解与翻唱同版本优先；同时复验缓存恢复、歧义候选手选、失败手动导入，以及 LDDC 优先和关闭后的 LRCLIB/酷狗回退。
 - [ ] 在用户自己的 iPhone 上完成首播、搜索、推荐、图片内存、播放器手势和布局的最终日常路径确认。
 - [ ] 在真实收藏夹与长标题场景确认纯海报瀑布流的浏览密度，以及播放器双色光场在音乐/MV 两态的稳定性。
 - [ ] 在真机确认首页点击直接打开 LNPopup、mini/full 跟手开合和长时间跨 Tab 使用时的内存/流畅度。
@@ -34,8 +40,9 @@
 
 ## 开放问题
 
-1. 用真实 Hi-Res 曲目验证 MIME、解码和音质标识；将尚未解析的 `dash.dolby` 作为独立功能接入并验证。
-2. 最终真机使用是否还存在其他会阻断日常听歌路径的 v1 问题？
-3. 若进入 v2，API/认证、缓存可靠性和音乐功能中哪一项应最先启动？
-4. App 切换自建服务后，BM 是否完全移除，还是只保留为关闭默认的诊断回退？
-5. 原生感收敛与歌词重构（Phase 05）已按 05-01…05-05 落地；真机确认歌词页、队列往返和浅色首页顶部后关闭。
+1. Stage Alpha 的 Rail Handoff / Chorus Memory 是否真正使用了整块画幅，而不是形成新的桌面窄列？
+2. 用真实 Hi-Res 曲目验证 MIME、解码和音质标识；将尚未解析的 `dash.dolby` 作为独立功能接入并验证。
+3. 最终真机使用是否还存在其他会阻断日常听歌路径的 v1 问题？
+4. 若继续 iOS backlog，API/认证、缓存可靠性和音乐功能中哪一项应最先启动？
+5. App 切换自建服务后，BM 是否完全移除，还是只保留为关闭默认的诊断回退？
+6. 原生感收敛与歌词重构（Phase 05）已按 05-01…05-05 落地；真机确认歌词页、队列往返和浅色首页顶部后关闭。

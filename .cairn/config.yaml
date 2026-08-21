@@ -1,7 +1,7 @@
 version: 0.1
 project:
   name: "Bilibili Music"
-  summary: "面向个人自用的 SwiftUI iPhone 音乐客户端，以接近 Apple Music 的体验快速、稳定地播放和管理 B 站音乐内容。"
+  summary: "以 BiliMusic iPhone 客户端为参考实现，孵化来源无关的全屏 LyricStage；Web 支持本地音频，并以 YouTube Music Companion 作为首个在线播放桥接。"
 cairn:
   knowledge_dir: "cairn"
   skill_spec_date: "2026-08-05"

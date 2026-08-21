@@ -4,7 +4,7 @@
 
 ## 项目一句话
 
-面向个人自用的 SwiftUI iPhone 音乐客户端：沿用 Apple Music 式系统交互，使用 B 站 16:9 封面驱动的“横版影像唱片机”视觉，快速、稳定地播放和管理音乐内容。
+以 BiliMusic iPhone 客户端为第一个参考实现、正在孵化来源无关 LyricStage 的音乐项目：iOS 继续快速稳定地播放和管理 B 站音乐，Web 则验证本地音频驱动的全屏歌词演出与跨运行时合同。
 
 > Project Cairn 已按本项目自身定位和 provider 配置初始化；其他项目不得直接复制本配置，应分别初始化。
 
@@ -65,7 +65,7 @@
 
 ## 项目上下文与工作流
 
-- 当前状态：v1 的四个阶段已经完成；下一步是最终真机确认，再决定是否进入 v2 的 API、认证、缓存与音乐功能打磨。
+- 当前状态：v1 与 Phase 05 代码切片已完成，iOS 剩余真机/LDDC UAT继续保留；Phase 06 已由用户启动，来源无关合同、单窗口全屏 Web Stage Alpha 与 YouTube Music Companion v0 已进入实现验证。
 - 核心价值：让音乐尽快、稳定地响起来。播放启动速度和不中断播放优先于歌词、推荐、MV、图片、缓存工作和 UI 润色。
 - `.planning/ROADMAP.md` 与 `.planning/REQUIREMENTS.md` 是范围和追踪的权威来源；维护路线图或范围时必须保留需求可追踪性。
 
@@ -108,6 +108,7 @@ graph TD
     A --> O["BiliMusicTests"];
     A --> P["Support"];
     A --> Q["BiliMusicUITests"];
+    A --> R["web · LyricStage Reference"];
 
     click B "./BiliMusic/App/CLAUDE.md" "App"
     click C "./BiliMusic/API/CLAUDE.md" "API"
@@ -142,6 +143,7 @@ graph TD
 | UI 测试支持 | `BiliMusic/Support/` | `UITestFixtures.swift` |
 | 单元测试 | `BiliMusicTests/` | 各领域 XCTest 文件 |
 | UI 回归测试 | `BiliMusicUITests/` | `PlayerChromeUITests.swift` |
+| LyricStage Web | `web/` | `apps/stage/src/App.tsx`、`packages/contracts`、`packages/core`、`packages/renderer` |
 
 ## 构建与运行
 
@@ -172,9 +174,24 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 
 `project.yml` 定义了 `BiliMusicTests` 与 `BiliMusicUITests` target；稳定性回归可在模拟器运行，日常播放路径仍需通过 AltStore 在用户自己的 iPhone 上做最终确认（免费开发者账号，签名 7 天有效需续签）。
 
+Web Alpha：
+
+```bash
+cd web
+npm install
+npm test
+npm run build
+npm run build:extension
+npm run dev
+```
+
+Web 的 React 只管理排练控制与资源生命周期；逐帧时钟、采样和 Canvas 绘制留在 renderer runtime，不进入 React state。本地 `<audio>` 保留为离线参考时钟；YouTube Music 首版通过 Manifest V3 companion 只同步当前曲目与权威时钟，不读取 Cookie、下载音频或调用内部接口。Luna/Bilibili Provider 仍不接入，也不部署公开服务。
+
 ## 架构
 
 单 Module 的 SwiftUI app，iOS 26.0+（部署目标有意保持 26.0），`@Observable` MVVM。网络和播放层只用 URLSession + AVPlayer。首页封面、mini player 与全屏播放器的展开、跟手下滑和收回统一使用项目内 vendored 的 MIT 依赖 LNPopupUI/LNPopupController。
+
+`web/` 是独立 TypeScript/Vite 参考运行时：JSON Schema 约束来源无关歌词/导演合同，Canvas 2D prepared runtime 负责全屏演出。本地模式由唯一 `<audio>` 拥有时钟；YouTube Music 模式由宿主播放器快照拥有时间真相，Stage 只在两次权威快照间平滑采样。Swift 与 Web 共享语义 fixture，不共享字体像素几何或手机布局。
 
 ### 全局状态
 
@@ -265,11 +282,16 @@ B 站视频可以有多个分 P（cid），缓存和去重不能只按 bvid。`T
 - **搜索默认只显示音乐内容** —— 不暴露模式 scope；`.expanded` 只作为内部“更多结果”回退策略。
 - **不用 B 站字幕当歌词** —— 口白和错歌会污染匹配；来源为网易云 / QQ / 酷狗、LRCLIB、AMLL、VocaDB 和本地导入。不用 LRCLIB 评分。加载时丢弃已缓存的 B 站字幕条目。原唱歌词套到翻唱上时不得静默当成精确同步。
 - **歌词搜索用原文歌名** —— 日文歌用清洗后的假名原名检索；中文译名只作匹配别名，不拿去搜曲库。
+- **Web 不是放大的 iPhone 播放器** —— `fullscreen16x9` 单独编译跨画幅布局；正文 static-first、完整换行，手机 340pt 几何和播放器 chrome 不进入 Web 舞台。
+- **Web 播放时钟唯一** —— 本地模式由 `<audio>.currentTime` 拥有播放位置；YouTube Music 模式由宿主播放器的权威快照拥有位置，Stage 只能在快照间按 playbackRate 外推并持续重校准，不能建立第二个独立时钟。无逐字输入不得伪造 word timing。
+- **Provider 不倒灌核心** —— YouTube Music Companion 只传 provider ref、展示元数据与播放快照，Cookie、音频 URL 和媒体数据不离开宿主标签页；Bilibili Provider、Luna 与第二屏 Show Mode 仍按后续计划接入。
 
 ## 变更记录 (Changelog)
 
 | 日期 | 变更 |
 |------|------|
+| 2026-08-21 | 新增 YouTube Music Companion v0：Manifest V3 扩展把当前曲目与权威播放快照送入全屏 Stage，本地音频继续作为离线回退；切歌会撤下旧歌词，首版播放控制仍留在 YouTube Music。 |
+| 2026-08-21 | 启动 Phase 06：新增来源无关 JSON Schema/六组共享 fixtures、Swift conformance 测试，以及本地音频/LRC/规范歌词驱动的单窗口全屏 Web Stage Alpha。 |
 | 2026-08-20 | LDDC 手动搜索允许显示时长不符候选，但只有时长兼容的逐字词获得可靠优先；修复并发搜索丢文档与候选选择恢复，Bearer 改由独立签名资源注入。 |
 | 2026-08-19 | 真机 MLX Metal SIGABRT 后停用本机逐字生成；逐字生成统一走有质量门禁的 Windows 主机。 |
 | 2026-08-19 | 独立 GPL LDDC 私有歌词服务与 Swift 客户端已接入并部署到 Mac mini Tailscale 私网；聚合优先、双重门禁、直连回退。 |

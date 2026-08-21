@@ -4,11 +4,13 @@
 
 Bilibili Music 是一个个人自用的 iPhone 音乐客户端，从 B 站收藏夹和内容里提取适合听歌的音频、MV 与合集。系统交互沿用 Apple Music 的成熟模型，内容视觉由 B 站 16:9 封面驱动。它不是完整的 B 站第三方客户端，也不把薄弱的推荐算法作为主体验；打开 app 后直接进入纯粹的私人海报瀑布流，重点是听歌、本地缓存、搜索、收藏、歌词和队列。
 
+从 Phase 06 起，仓库同时孵化来源无关的 LyricStage：BiliMusic iOS 保留为第一个参考客户端，Web 成为第二个运行时和全屏旗舰舞台。两端共享歌词事实、音频结构与导演意图，不共享手机像素布局；本地音频先证明核心解耦，YouTube Music Companion 作为第一个在线来源，只桥接宿主曲目与播放时钟，不先复制完整在线音乐客户端。
+
 当前代码已经是一个可运行的 SwiftUI iOS app，接入了 Bilibili 私有 Web API、AVPlayer、本地缓存、收藏夹、歌词和播放器 UI。v1 稳定化已经覆盖首播、搜索、推荐刷新、图片内存、播放器滑动动画和主要手势冲突；Phase 4 又完成了一轮窄范围 UI 收口，让搜索、列表、播放器工具栏和品牌色更统一。下一步应先做最终真机确认，再决定是否进入 v2 的 API/auth/cache/音乐功能打磨。
 
 ## Core Value
 
-让音乐尽快、稳定地响起来；当功能冲突时，播放启动速度和不中断播放优先于推荐、歌词、MV、UI 动效和其他增强体验。
+让音乐尽快、稳定地响起来；当功能冲突时，播放启动速度和不中断播放优先于推荐、歌词、MV、UI 动效和其他增强体验。LyricStage 的新增能力必须可携带、可回退，并且永远不能阻塞或改写播放与歌词时间真相。
 
 ## Requirements
 
@@ -53,6 +55,12 @@ Bilibili Music 是一个个人自用的 iPhone 音乐客户端，从 B 站收藏
 
 ### Active
 
+- [ ] Phase 06 来源无关合同：Swift 与 TypeScript 使用同一套版本化 schema、canonical identity 与无版权 fixtures。
+- [ ] Phase 06 Web Stage Alpha：本地音频 + LRC/规范歌词可在单窗口排练并进入 `fullscreen16x9` Canvas 舞台。
+- [ ] Phase 06 YouTube Music Companion：Chrome/Edge 扩展只同步当前曲目和权威播放时钟；Cookie、音频与播放控制继续由 YouTube Music 拥有。
+- [ ] YouTube Music 内嵌舞台：用户可从 YTM 页面按钮或扩展弹窗打开同页全屏覆盖层，不需要另开 Stage 标签页；关闭后宿主播放继续。
+- [ ] Phase 06 YouTube Music 自动歌词：扩展后台以公开只读歌词源按标题、歌手、时长严格匹配，缓存命中直接恢复；歧义结果不得静默采用。
+- [ ] Web 舞台必须完整显示正文、static-first、以媒体绝对时间采样，并在 seek/pause/restart 后确定性恢复。
 - [ ] 稳定播放与性能：首播要尽快出声，避免启动播放时被推荐刷新、歌词、MV、图片、预加载或历史写入阻塞。
 - [ ] 搜索交互性能：第一次点搜索框不能卡顿，后续需要继续做真实设备交互体验验证。
 - [ ] 最终真机确认：v1 的首播、搜索、推荐稳定性、图片内存、播放器手势和布局已过自动化验证，但仍需要用户自己的 iPhone 做一轮日常路径确认。
@@ -71,7 +79,7 @@ Bilibili Music 是一个个人自用的 iPhone 音乐客户端，从 B 站收藏
 - 面向公众的常驻后端服务 — 仅保留用户自有 Cloudflare Worker 与 Tailscale Windows 精修主机，不扩展为公共服务。
 - 复杂社交歌单系统 — 优先复用 B 站收藏夹、合集和本地队列，不做公开分享生态。
 - 完整无损/大会员能力承诺 — 可以支持账号可访问的最高音质，但不承诺绕过 B 站限制。
-- Android、macOS、Web 版本 — 当前只面向用户自己的 iPhone。
+- Android/macOS 原生完整客户端 — 当前不重写；Web 只先实现独立 LyricStage 参考舞台，不承诺完整跨平台音乐客户端。
 - 视觉营销页或落地页 — app 打开后应直接进入可用的音乐体验。
 
 ## Context
@@ -90,8 +98,8 @@ Bilibili Music 是一个个人自用的 iPhone 音乐客户端，从 B 站收藏
 
 ## Constraints
 
-- **Tech stack**: SwiftUI + Swift 5.10 + iOS app target；继续沿用现有工程，不引入不必要的第三方依赖。
-- **Platform**: 面向用户自己的 iPhone；安装方式围绕 sideload/AltStore，而不是 App Store 审核。
+- **Tech stack**: iOS 保持 SwiftUI + Swift 5.10；Web 使用独立 TypeScript/Vite/React 控制壳与 Canvas runtime，不把 React 放进逐帧循环。
+- **Platform**: BiliMusic 面向用户自己的 iPhone；LyricStage Web v0 面向 macOS Chrome 与 Windows Edge 的桌面全屏舞台。
 - **Playback priority**: 播放启动必须先于歌词、推荐、图片预热、MV 切换、自动缓存等增强任务。
 - **API dependency**: Bilibili 私有 API 和 WBI 签名可能变化；所有 endpoint 变化应隔离在 API 边界。
 - **Auth**: Cookie 存 Keychain；任何 401/失效状态都应转换成清晰的重新登录路径。
@@ -114,6 +122,8 @@ Bilibili Music 是一个个人自用的 iPhone 音乐客户端，从 B 站收藏
 | 音频质量和下载质量分开 | 在线播放和缓存占用的用户需求不同 | Implemented, needs UI/verification |
 | 推荐必须音乐化 | B 站默认推荐容易混入非音乐内容，不符合产品目标 | Active |
 | 首页退出推荐竞争，改为收藏封面墙 | 推荐质量不可控，而用户自己的音乐收藏夹稳定、可解释，也更适合本地播放器式体验 | Implemented |
+| Web 先做来源无关全屏 Stage，不先做 BiliMusic Web 客户端 | 先证明歌词演出合同能离开 SwiftUI/BVID 独立运行；在线音源在核心成立后作为 Provider 接入 | Phase 06 active |
+| 共享导演语义，分别编译手机与全屏布局 | 大屏需要跨画幅构图和更高预算，但正文与时间所有权必须与 iOS 一致 | Phase 06 active |
 
 ## Evolution
 
@@ -133,4 +143,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state.
 
 ---
-*Last updated: 2026-08-14 after preserving the approved UI and repairing the cover-transition architecture*
+*Last updated: 2026-08-21 after activating Phase 06 LyricStage platform and Web reference work*

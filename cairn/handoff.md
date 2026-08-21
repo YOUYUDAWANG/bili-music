@@ -5,8 +5,8 @@ summary: "Bilibili Music 整机接手手册：当前真相、禁止事项、密�
 tags: [handoff, operations, lyrics, worker, playback]
 contains: [procedure, decision, deployment-boundary]
 created: "2026-08-20"
-updated: "2026-08-20"
-related: ["CLAUDE.md", "cairn/ROADMAP.md", "cairn/lyric-performance-director.md", "cairn/lyrics-architecture.md", "cairn/playback-startup.md", "cairn/home-discovery.md"]
+updated: "2026-08-22"
+related: ["CLAUDE.md", "cairn/ROADMAP.md", "cairn/lyric-performance-director.md", "cairn/lyricstage-platform-architecture.md", "cairn/lyrics-architecture.md", "cairn/playback-startup.md", "cairn/home-discovery.md"]
 authoring_mode: ai_generated
 ---
 # Bilibili Music 接手手册
@@ -21,7 +21,7 @@ authoring_mode: ai_generated
 
 **核心价值：让音乐尽快、稳定地响起来。** 起播和不中断播放优先于歌词、推荐、MV、缓存和 UI。
 
-v1 四个阶段已完成。当前是 Phase 05 原生感与歌词，以及几条已上线的私有服务。产品默认路径仍是「能听、能找、能收藏」；歌词舞台和 Luna 都是 Debug 实验，**Release 不得自动生成演出**。
+v1 四个阶段已完成，Phase 05 代码切片已执行但剩余真机 UAT 未关闭。产品默认路径仍是「能听、能找、能收藏」；歌词舞台和 Luna 都是 Debug 实验，**iOS Release 不得自动生成演出**。Phase 06 的 Web Performance 0.2.1、Stage-first Now Playing、真实封面/三层歌词、AMLL 单 renderer ADR、typed effect grammar 与生产 Runtime 已实现。2026-08-22 已完成 song-wide AI world、20 个 primitive / 17 张 effect card、统一 leading axis Reading、`MusicMapV1` 的 `tabCapture + offscreen` 本地分析，以及 OCI Director 1.3.4 部署。当前 Chrome 已安全配置 Director Bearer，真实 YTM 已从“下一段接管”进入“已接管”，捕获期间播放继续前进且未静音。当前剩余门是五类歌曲整首主观 A/B，以及不改变用户其他扩展设置的原生 Lyrics 冲突隔离；不要把单曲闭环或 canary 扩大成全类别视觉验收。无 AI 的本地完整演出仍不可削弱。先读 `06-06-DESIGN.md`、`06-06-PLAN.md` 与 `cairn/lyricstage-platform-architecture.md`。
 
 | 面 | 默认 | 现状 |
 |---|---|---|
@@ -231,16 +231,16 @@ LDDC：Mac mini `~/Library/Application Support/BiliMusic/LDDCLyricsBackend`，�
 
 ## 11. 下一步（按优先级）
 
-这些是未完成的产品验收，不是新功能清单。
+当前是双轨：Web 在不改生产 Column 的前提下推进独立 Performance Lab，并继续关闭 YouTube Music Companion v0 剩余门禁；iOS 只做剩余产品验收，不再继续堆新的 V5.x 效果。
 
-1. **真机再点一次「生成 V5.1」**。Worker 已并行，旧包 45s 窗口现在通常够用。确认 toast、中央画布持续换行、重开 App 仍读 `lyric-stage-v2.json`。
-2. **四首固定样本 A/B**：本地规则 vs V5 vs V5.1（必要时加 V5.3）。只有 V5.1 明显更好才讨论改默认。
-3. **V5.2 vs V5.3** 整首听感。V5.3 不要为「You＆合図」加专用分支。
-4. App 内验收 LDDC：翻唱同版本、原唱参考、直连回退。
+1. `web/extension-dist` 是最新 0.2.1 上线候选：Stage-first 真实封面/进度/权威控制、三层 Reading、Hero/Duet/Aperture、typed EffectRecipe、单时钟 Runtime、Column 手动搜索与 LDDC 原生逐字均已落地。Chrome 已重载；真实 `Flowering` 返回 5 个手动候选，鹿乃《心拍数#0822》返回 50 行/481 word 并连续扫亮，line-only `You & 合図` 未伪造逐字。发布门为歌词聚焦 28/28、逐字增量 26/26、9 个视觉相关 Web 文件 74/74、Director 9/9、typecheck、MV3 双构建/CSP。仍需关闭实际 `data-palette-source=artwork`、seek、暂停、换歌、AI handoff 和整首主观视觉最后一门，不能把逐字/手动搜索验收当成全屏 UAT。
+2. 独立 Fullscreen Director 1.3.4 运行在 OCI `127.0.0.1:8092`，只经 `director.hachi-mi.uk` Tunnel 暴露；Performance Direction Skill + schema-constrained `gemini-3.7-flash` 返回 `lyricstage-fullscreen-director-v2`，并已接收不含原始音频的 `MusicMapV1`。当前容器镜像 `f40e48…92797`，旧 1.3.3 镜像和 Quadlet/env 备份保留；public/loopback health、401 与授权 MusicMap canary 已关闭。同一服务的 `/v1/music/identity` 继续保持 grounding、角色和置信度 ≥0.65 门。当前 Chrome 的扩展客户端 Bearer 已经用户授权写入本机存储，真实《non-reflection (Cover Live)》已显示 AI 从排队到接管且音频不中断。部署继续保持 loopback/Tunnel、不得改防火墙；密钥不得写入仓库、bundle 或笔记。
+3. iOS App 内验收 LDDC：翻唱同版本、原唱参考、直连回退。
+4. 用固定真实样本做本地规则/V4 整首 A/B，只用于冻结 cross-runtime fixtures 与体验基线，不新增专曲分支。
 5. 高精度主机至少再验两首不同结构；并行声部继续拒绝覆盖。
 6. 日常听歌真机：首播、搜索、首页混排、LNPopup 开合、长时间跨 Tab。
 
-不要在上述验收完成前继续堆舞台引擎功能。
+不要继续在 iOS 里堆新的舞台版本或持续正文动效。用户确认 Phase 06 后，允许抽合同与实现独立 Web reference；这不等于改 iOS 默认舞台。
 
 ## 12. 已知陷阱
 

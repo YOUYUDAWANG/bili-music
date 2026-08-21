@@ -2,6 +2,250 @@
 
 本文件按反向时间顺序记录实质进展——最新记录放在本行下方最顶部。每条记录保持简短，只写摘要与指针；稳定结论沉淀到 `cairn/<topic>.md`。
 
+## 2026-08-22 · 轻量逐字加入本地人声感知节奏修正
+
+- 纯文本估算在日语连续字符上容易近似匀速；现新增滚动 `VocalTimingMapV1`，在宿主标签页本地约 20Hz 提取中置人声存在度、起音与置信度，用有界时间扭曲修正 Column 的 `estimated` 逐字。低覆盖或低置信度会逐点精确回退原估算，原生 word timing 始终优先且不受影响。
+- Column 波形按钮显式启停该能力；Chrome 要求当前页先由用户调用扩展，故首次启动失败会给出 15 秒授权提示，打开 LyricStage popup 后自动续接。只保留最长约 20 秒、最多 640 个归一化样本，不保存或发送 PCM、频谱、媒体 URL，也不把估算轴发送给 Director 或 Fullscreen。
+- 聚焦测试 42/42、typecheck、extension 双构建与 MV3 CSP 通过。扩展已重载；真实 Chrome 中首次提示、popup“人声增强已启动”、Column“人声增强”三步闭环成立，播放按钮持续为“一時停止”（正在播放）。稳定边界见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-22 · Chrome AI Director 客户端闭环
+
+- 经用户明确授权，现有 OCI Director Bearer 已写入 LyricStage 当前 Chrome 配置；值只保存在扩展本地存储，未进入仓库、构建产物、命令输出或项目笔记，注入时使用的临时内存副本已清除。
+- 真实 YTM《non-reflection (Cover Live)》从 Column 的“AI 导演 · 下一段接管”进入全屏后显示“AI 导演 · 已接管”；Chrome 同时保持 `Audio playing`，播放时钟继续前进，证明语义导演接管与 tabCapture 回接音频可共存。退出全屏后 Column 仍保持 AI 计划状态；MusicMap 增强仍按既有覆盖门槛与下一 section 边界接管，不上传或落盘原始音频。
+- 扩展配置页明确显示“已启用；歌曲稳定后后台生成，下一结构段接管”。本轮只关闭客户端认证和真实接管门，未修改其他扩展、Tunnel、防火墙或 OCI 服务配置；多扩展并存导致的原生 side panel 偶发 loading 仍需单独隔离验收。
+
+## 2026-08-22 · 全屏切歌改为持续舞台过渡
+
+- 旧实现虽然不再退出浏览器 Fullscreen，但会整棵卸载 `StageCanvas`、换成独立的居中加载页，再装回 30/70 舞台；一次切歌仍产生两次明显的几何跳变。
+- Fullscreen host 现常驻同构的 Stage-first 30/70 过渡底层：新曲封面、标题、艺人、进度和左右分栏保持原位，只撤掉上一首歌词事实；右侧歌词区显示轻量匹配状态，新 `StageCanvas` 在同一区域以 380ms 淡入覆盖。候选等待、未命中和错误仍不会保留旧歌词或退出全屏。
+- 聚焦测试 11/11、typecheck、extension 双构建与 MV3 CSP 通过，本机扩展已重载。真实 YTM 从《non-reflection (Cover Live)》全屏切到《奏（かなで） (Cover Live)》，切歌瞬间仍在全屏并保留同一左右结构，状态明确为“舞台保持中 / 正在匹配歌词”；稳定边界见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-22 · 本地音频 MusicMap 与 Gemini 3.7 Director 1.3.4 上线
+
+- 扩展新增用户手势触发的 `tabCapture + offscreen` 分析：捕获流立即重新接回音频输出，约 30Hz 特征只在本机编译为有界 `MusicMapV1`，不上传/落盘 PCM、视频或媒体 URL。AI 先按歌词生成，覆盖达到门槛后带 MusicMap 二次生成，仍只在下一 section 边界接管。
+- YTM 新播放器布局不再要求旧 `ytmusic-player-bar` 内必须有标题；曲目信息分层回退到 MediaSession/页面，同时保留播放器栏权威时钟。真实 Chrome popup 从“先播放歌曲”恢复为正确曲名/艺人，全屏播放继续前进且未静音，封面和三层歌词完整落在安全区。当前同时启用的其他歌词增强扩展会令原生 side panel 偶发 loading，未擅自停用。
+- Web 聚焦 6 文件 74/74、typecheck、extension 双构建/MV3 CSP 与 Director 13/13 通过。OCI Director 1.3.4 已在原 `127.0.0.1:8092` + 既有 Tunnel 原位部署，镜像 `f40e48…92797`；旧 1.3.3 镜像、Quadlet/env 备份保留，密钥/缓存/Tunnel/防火墙未改。loopback/public health 为 `gemini-3.7-flash / musicmap-v5`，无认证 401；MusicMap canary 非降级返回 2 sections、4 directives、1 grounded effect，公网复打 cache hit。
+
+## 2026-08-22 · Column 逐字高亮取消提前漏光
+
+- 截图中的“未到字先变白一点”不是时间轴提前，而是 CSS 在进度头部额外绘制了向前 0.28em 的白色光带，已完成 token 的白色 `drop-shadow` 和活动行白色 text-shadow 又会溢到相邻未到字。
+- 逐字层现只保留严格停在 `--word-progress` 的白/暗硬边界，native 与 estimated token 均取消白色外溢；活动逐字行覆盖为仅黑色基线阴影，未到字在进度进入前保持同一暗色。
+- `timedLineText` 聚焦测试 8/8、typecheck、extension 双构建与 MV3 CSP 通过；本机扩展已重载。真实 YTM 在《感情グラス》暂停并跳到 0:24 行首后，整行未到字保持统一暗色，随后已恢复播放。稳定边界见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-22 · 全屏切歌不再退出舞台
+
+- 根因是曲目 identity 变化时旧歌词会先失效，旧门禁把 `hasMatchingLyrics=false` 直接解释为退出条件并主动调用 `document.exitFullscreen()`；对应测试也固化了该错误生命周期。
+- 浏览器 Fullscreen 现由用户退出动作独占 ownership：切歌只在稳定的 fullscreen host 内把 StageCanvas 暂时换成带新曲封面/标题的“正在切换舞台”状态，匹配完成后原位装入新舞台；未命中或候选待选也保持全屏并提供显式退出按钮。
+- 聚焦测试 3/3、typecheck、extension 双构建与 MV3 CSP 通过；Chrome 已重载。真实 YTM 从《夏祭り》全屏点下一首到《私論理(いよわ Remix)》，过渡态与新歌词舞台均保持浏览器全屏，最后以 Esc 正常回到 Column。稳定边界见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-22 · 估算逐字接入 Director 低置信上下文
+
+- Column 与 Director 请求现复用同一个 `estimateWordTimingV1`，避免屏幕扫亮和导演看到两套估算。真实逐字继续放在 `words + timingPrecision=word`；line-only 估算单独放在 `estimatedWords + timingPrecision=estimated`，旧服务会忽略独立字段，不能误当真实轴。
+- 新服务合同分别校验 native/estimated cues，拒绝两者并存、空 precision、越界/倒序/超量；Director prompt 会收到完整 compact cues、`estimatedWordTiming=true` 和低置信声明。Skill/system prompt 明确估算只用于词组级视觉 pacing，不能作为精确 reveal、beat/onset 或结构证据；fallback 的估算 glyph stagger 也低于真实逐字。
+- Web 聚焦 37/37、Director 13/13、typecheck、extension 双构建与 MV3 CSP 通过；本机扩展已重载。经用户授权，OCI Director 1.3.3 已在原 `127.0.0.1:8092` + 既有 Tunnel 原位部署：新镜像 `b25ffd…3667` 运行中，1.3.2 镜像与旧 Quadlet 备份保留，未改 env/Tunnel/防火墙。loopback/public health 正常、公网未授权 401；新容器合同探针为 `estimated=true / real=false`，授权 canary 经 loopback 与公网均 200、`degraded=false`、4 directives、1 effect。稳定边界见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-22 · Column 加入零模型轻量逐字试验
+
+- 普通逐行歌词在 Column 渲染边界使用浏览器 `Intl.Segmenter` 做日语词组切分，并按假名/促音/长音、拉丁元音、数字、空白和标点权重在可信行区间内分配连续扫亮；保留一小段行尾呼吸，不下载模型、不读取音频、不改写 `LyricDocument`。
+- 原生 LDDC/QRC/KRC word timing 继续标为 `native` 且绝对优先；估算节点只标为 `estimated`，只存在于 Column 预计算结果，不缓存、不发送给 Director、不进入 Fullscreen 的字符出现时刻。短于 400ms、空白、无法安全切分或异常长的行保持 plain。
+- 聚焦测试 8/8、typecheck、extension 双构建和 MV3 CSP 通过；Chrome 已重载。真实《Re:Re: (Live Cover)》54 行 line-only 生成 318 个估算词组，Column 显示“轻量逐字”，同一活动行观测到 `んで` 3.9% 后继续推进到 `を` 43.1%，新脚本挂载后无新增 LyricStage 错误。稳定边界见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-22 · 默认 Reading 改为流动歌词栈并建立 MusicMapV1
+
+- 默认三层 Reading 从三个居中漂浮标题块改为统一 9% leading axis：上一句/当前句/下一句沿同一阅读轴，以 0.23/1/0.35 的稳定层级显示；换句是 760ms 可任意 seek 的整栈上移，唱词期间 `settle` 不再散字、缩放或漂移，reduce-motion 直接落稳。日文本地基线固定 `jpGothic + monument + leading`，明朝体与破轴构图只留给有证据的 AI 段落。
+- 预排版新增短 CJK/短 Latin 单行优先：在换行前按真实浏览器字体测量缩字，避免 `11+2` 或单字孤行；长句仍走完整安全区换行，不裁切正文。1920×1080 真实浏览器关闭稳定帧和换句中间帧，短日文三层均完整单行、无重叠。
+- 新增 `MusicMapV1` 严格合同与确定性 compiler：最多 96 个压缩段、256 个地标，保存归一化 energy/bass/mid/treble/brightness/flux/onsetDensity/stereoWidth、节拍可信度与结构地标；30Hz feature frame 可编译为该地图。客户端和 Director 双端拒绝越界、倒序和不可信字段，并剥离 raw audio/未知字段；Web 聚焦 40/40、Director 12/12、typecheck、extension 双构建与 MV3 CSP 通过。尚未增加 `tabCapture/offscreen` 权限，真实音频接入是下一切片。
+
+## 2026-08-22 · YouTube Music 单曲权威时钟改由播放器栏拥有
+
+- 真实截图中宿主为 `0:50 / 4:19`，LyricStage 却为 `3:13 / 4:42`；现场 DOM 又证明 YTM 会让唯一活动 `<video>` 处于 `6:41 / 7:52`，同时播放器栏显示另一首歌的 `0:43 / 3:31`。因此媒体元素不是可靠的单曲绝对轴，旧实现把当前 player-bar 元数据与复用媒体的时间拼成了混合快照。
+- Content script 现从 `ytmusic-player-bar .time-info` 取得单曲绝对时间与总时长；媒体元素仅提供播放/暂停、倍速和两个整秒锚点间的亚秒增量。大幅 seek、换媒体或轴不一致会重建锚点，不能再让媒体内部总时长覆盖宿主单曲时长。
+- 生命周期聚焦测试 25/25、TypeScript、extension 双构建与 MV3 CSP 通过；`extension-dist/content.js` 与源文件 SHA-256 一致。Chrome 已重载 LyricStage 并刷新现有 YTM，content marker 正常、无 LyricStage error/warn；原复现曲的再次播放听感仍由用户确认。稳定边界见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-22 · 全屏 AI 世界与整曲导演协议首个垂直切片
+
+- `DirectorPlanV1` 新增 song-wide `world`：空间模式、运动法则、封面角色、材质与四个连续物理参数；Stage 不再把 AI 仅当逐行行为列表，而会切换全屏构图、封面角色和环境运动。Effect Grammar 从 13 个 primitive / 12 张 card 扩为 20 / 17，新增 ribbon、prism、rain、orbit、memory trail、cover portal 与 bloom，并继续受 evidence、cost、conflict、Hero budget 和 reduce-motion 门禁约束。
+- 导演请求对精确 11 位 YTM video ID 附带公开 YouTube URL；本地服务使用 Gemini 3.7 Flash 的整曲视频上下文读取结构、能量、音色、情绪与歌词—音频关系，失败时安全回退到纯文本请求，不上传 PCM、Cookie 或私有媒体地址。AI 成功门提高为完整连续 section、足量 line directive、有效 world 和至少一个有证据的 effect；空导演稿不得显示“已接管”。
+- 真实本地浏览器在 1920×1080 关闭 `cinematic / flow / portal / mist` world、`field.ribbon` 与完整歌词安全区；CSS 连续参数改为 React 预计算，避免不受支持的 CSS 乘法导致静止。Web 聚焦 35/35、Director 11/11、typecheck、extension 双构建和 MV3 CSP 通过；只生成本地 `extension-dist`，OCI 协议尚未部署，真实 YTM 整曲 UAT 与后续 tabCapture `MusicMapV1` 仍待继续。
+
+## 2026-08-22 · Web 直接消费 LDDC 原生逐字轴
+
+- `LyricsCandidateV0` 新增受合同校验的 `timingKind` 与可选 `wordTimedDocument`；LDDC adapter 不再把 `lyricLines[].words` 压成普通 LRC，真实 QRC/KRC/YRC 行/字毫秒轴可直接进入 Column 与 Fullscreen。普通 LRC 继续保留作兼容回退；逐字越界、倒退、空值、单行 >300 或总量 >12000 会拒绝，不平均分字、不增加音频上传/Forced Aligner。
+- 歌词缓存升到 `lyricstage-youtube-music-lyrics-v8`，避免复用开发中间态和旧 line-only 命中；LDDC Bearer 从 macOS 钥匙串恢复到本机扩展存储，临时凭据文件已删除。聚焦 6 文件 26/26、typecheck、extension 双构建与 MV3 CSP 通过。
+- 真实 Chrome 闭环：鹿乃《心拍数#0822》由酷狗/QQ 返回 50 行、481 个逐字时间点，Column 实际生成 481 个 timed nodes，并观测到单字 69.17% / 96.93% 连续扫亮中间态；同轮 `You & 合図` 当前只返回 line timing，页面保持逐行，证明未伪造逐字。稳定边界见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-22 · 手动歌词搜索与联网原唱后备已部署
+
+- Column 工具栏新增手动搜索：可改歌名、歌手可留空，后台绕过旧自动缓存重跑 LDDC/LRCLIB/酷狗；结果无论是否精确命中都只作为最多 5 个候选，显示来源/艺人/时长，用户选择后才绑定当前 track 并写入缓存。Chrome 已重载当前 `extension-dist`，真实 YTM `Flowering / 理芽 with Misumi` 手动请求返回 5 个候选；输入限长、响应合同、候选签发、换歌失效和本地导入边界保持不变。
+- Google Cloud 已启用 Gemini API，并新建只允许 Gemini API 的独立 key；原 Vertex/Agent Platform key 未扩大权限，key 值只保存在 OCI 0600 env。Gemma 4 主请求当前明确返回 `RESOURCE_EXHAUSTED: prepayment credits are depleted`，因此 Director 1.3.2 仅在主请求不可用时切到现有 Vertex `gemini-3.5-flash`，仍强制 Google Search、结构化角色和 grounding 门；Gemma 通道与模型名保留，补充预付余额后会自动恢复为主路由。
+- 手动搜索/歌词聚焦 5 文件 28/28、Director 9/9、typecheck、extension build/MV3 CSP 通过。OCI 1.3.2 已在原 `127.0.0.1:8092` + 既有 Tunnel 原位部署；loopback/public health 正常，公网授权 200、未授权 401。《死別》正式 canary grounded 为明石繆 → シャノン，《春を告げる》grounded 为鹿乃 → yama；两者均返回搜索查询与 grounding entry point，未改 Tunnel/防火墙。稳定边界见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-22 · 全屏舞台完成减法视觉审计与封面智能取色
+
+- 删除截图中两个大面积对称空面板及其重复 Environment 结构层；普通 Reading 不再默认画汇聚射线、网格、轨道、满屏旋转卡片或科技粒子汤。`monoImpact` 只保留低对比局部光场，`paperCut` 改为少量材质弧线，`editorialKinetic` 只做封面色洗；环境层仅在 Director 明确选择 rail 方向时显示轨道。
+- 新增浏览器本地 32×32 中心采样与 OKLCH 色板编译，封面、背景、歌词 ink、环境光和效果几何共享可读颜色关系；YouTube maxres 封面实查允许跨域采样，失败仍有中性 fallback。9 个 Web 文件 74/74、typecheck、0.2.1 extension build/MV3 CSP 通过，固定 fixture 实图已无大面板与默认科技结构。
+- Performance Direction Skill 升级 v3，明确封面/歌词/排版为锚点，拒绝无证据的对称空面板、持续网格/轨道、扫描线、汇聚射线和 particle soup。OCI 已在原 loopback/Tunnel 路径原位升级 Director 1.3.1；真实安静歌曲 canary `degraded=false`、强度 0.3、无 effects，未改 Tunnel、防火墙或 token。最新扩展仍待 Chrome 手动 reload 做实际封面取色与整首用户视觉门。
+
+## 2026-08-22 · 更正：翻唱标题改为通用角色语法，不再按候选猜原唱
+
+- 用户指出把鹿乃格式称为“特例”本身就是错误；现把清洗重构为 cover marker → 翻唱者 credit → 版本包装 → 明确原唱 credit → 规范歌名的角色顺序，统一支持 `【/〖歌ってみた】歌名 / covered by 歌手`、`Cover:`、`Vocal:`、`歌名（原唱）/ acoustic cover`、`歌名 / 原唱 - covered by 歌手` 与全半角分隔符，不增加单曲分支。
+- 删除“原唱未知时按歌词候选多数艺人自动回退”的不安全逻辑。真实《死別》LRCLIB 候选全部是 `saewool` 的另一翻唱，旧逻辑可能误标原唱；现在标题未写原唱时必须等待 Gemma 4 搜索证据，否则只列候选。无明确原唱的 cover 会并行启动 AI 身份解析与首轮歌词查询，减少串行等待。
+- 真实视频 `ztU-ROG3d9E` 元数据为 `【歌ってみた】死別 / covered by 明石繆`、214 秒；公开 credit 确认 Lyrics & Music 为シャノン、Vocal 为明石繆。新本地解析输出 `死別 / 明石繆 / 原唱未知` 且不自动采用 saewool；注入有来源的 `シャノン` 身份后，真实酷狗查询返回 `match / originalFallback / シャノン / 214s`。歌词聚焦 22/22、typecheck、extension build/MV3 CSP 通过，缓存升到 `lyrics-v6`；稳定边界见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-22 · 鹿乃《春を告げる》括号原唱 credit 修正
+
+- 真实标题 `春を告げる（yama）/ acoustic cover.` 暴露括号 credit 盲区：旧清洗保留 `（yama）` 在歌名中，又可能把 `/ acoustic cover` 当成艺人段，导致规范曲名与原唱查询均错误。现将紧邻 cover 包装的括号内容提取为原唱提示，并把 acoustic/piano cover 只当版本包装；输出固定为歌名 `春を告げる`、翻唱者 `鹿乃`、原唱 `yama`。
+- 公开视频 `X8ZKPqsAvAc` 与说明确认 Music 为 yama、Vocal 为鹿乃、时长 2:58；LRCLIB 实查鹿乃精确候选为空，但 yama 有多条同步歌词。修正后用同一真实 track metadata 完整跑 LRCLIB/酷狗，6.1 秒返回 `match / originalFallback / yama / 春を告げる`；歌词聚焦 18/18、typecheck、extension build/MV3 CSP 通过。缓存升到 `lyrics-v5` 淘汰旧 miss，最新产物仍需 Chrome reload。稳定边界见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-22 · 歌词身份解析升级为 Gemma 4 联网原唱确认
+
+- 确定性标题清洗降级为不可信搜索提示：首轮未命中当前录音时，新 `/v1/music/identity` 使用 `gemma-4-26b-a4b-it` minimal thinking + Google Search，结构化区分当前演唱者、原唱与词曲/制作角色；服务端只从 grounding metadata 取引用，无来源、低于 0.65、演唱者不一致、角色混淆或翻唱无原唱均拒绝进入歌词检索。
+- 扩展复用本机 Director Bearer，AI 结果过本地合同后用标准曲名/别名/当前翻唱者/原唱重跑 LDDC、LRCLIB 与酷狗，翻唱同录音仍优先、原唱仍次选；缓存升到 `lyrics-v4`，配置 Bearer 时主动清旧 miss。服务端 8/8、歌词聚焦 8/8、typecheck、0.2.1 extension build/MV3 CSP 通过。
+- 当前公网 health 仍报告 Director 1.2.0 且仅列 `/v1/fullscreen/direct`；1.3.0 代码和产物已就绪但尚未写入 OCI，也未验证真实 Gemma API Key/线上样例。部署前需显式授权，并保持 loopback + 现有 Tunnel、无防火墙变更。稳定边界见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-22 · 翻唱标题模板从单点修正扩为原唱 credit 拆解
+
+- 用户 reload 后以 `【歌ってみた】泥中に咲く - ウォルピスカーター covered by 存流` 复现仍 miss；现场身份输出证明旧清洗只去掉 `covered by 存流`，却把「泥中に咲く - ウォルピスカーター」整体当歌名。现统一拆解 `歌名 - 原唱 covered by 翻唱者`、斜线变体、日中英 Cover 标记与 `歌唱/Vocal` 尾注，保留规范标题、原唱提示和翻唱者三层身份。
+- 查询顺序扩为 LDDC 翻唱 → LRCLIB 翻唱/原唱/标题 → LDDC 原唱补查 → 酷狗标题/翻唱/原唱；翻唱同版本门仍优先，原唱只作为既有显式次选。歌词缓存升到 `lyrics-v3`，主动淘汰 reload 后产生的旧 miss。
+- 真实公开源闭环：存流《泥中に咲く》命中酷狗同版本 288s，原唱候选同时保留；《鏡面の波》270s、《残響散歌》185s 也均命中存流同版本。歌词聚焦 5 文件 24/24、typecheck、0.2.1 extension build/MV3 CSP 通过；因当前 YTM 标签被另一浏览器控制会话占用，最新产物仍需再次手动 reload 做页面内确认。稳定边界见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-22 · 06-06 Stage-first Runtime 与 Director Skill v2 已落地
+
+- 全屏改为真实封面锚定的 30/70 Now Playing：标题/艺人、常驻细进度和 YTM Bridge 权威运输控制留在封面列，顶部/底部无浮动 chrome；唯一 Canvas glyph owner 实现三层 Reading、单句窗口 Hero 缩岛、Duet、Aperture 和按词换行的长 Latin。AMLL 0.5.2 spike 选择算法原则 + 单 renderer，ADR、根 AGPL-3.0-only 与第三方 NOTICE 已补齐。
+- `web/packages/performance` 新增 13 个 typed primitives、12 张 effect cards、三层 evidence、成本/互斥/reduce-motion grammar；`services/lyricstage-director/skills/performance-direction-v1` 与 v2 JSON Schema 直接约束 Gemini。服务端用 repetition/gap/overlap/voice/density/final 事实验证，扩展再次验证并在下一 section handoff；未知代码/primitive、低证据 Hero 与坏身份 fail closed。
+- OCI Director 1.2.0 已在原 `127.0.0.1:8092` 原位部署，公网 v2 health/401、生产 Gemini `degraded=false` canary 和 duet/final EffectRecipe 通过；未改 Tunnel/防火墙，1.1.0 镜像与 Quadlet/env 备份保留。Web 发布门 9 文件 70/70、typecheck、extension build/CSP、Director 5/5；浏览器 240 帧 P95/P99 0.30ms。最新扩展仍待 Chrome 手动 reload 后关闭真实 YTM 最后一门。稳定边界见 `cairn/lyricstage-platform-architecture.md` 与 `06-06-AMLL-ADR.md`。
+
+## 2026-08-21 · 批准 06-06 专业 UI / Motion 方案与 Director Skill
+
+- 用户要求代理不机械接受外行意见，而以 UI 与动效负责人标准明确赞成、修改和否决。新 `06-06-DESIGN.md` 冻结 Stage-first Now Playing：28–32% 真实封面锚点、三层常态歌词、常驻细进度、仅 Bridge 权威运输控制、无顶部/底部浮动 chrome；Hero Line 稀疏使用，封面每幕可申请缩岛但必须通过结构证据和稳定门禁。
+- Performance Direction Skill 被定义为版本化知识包而非特效清单：小而稳定的 typed primitives、首批 12 个 evidence-bearing effect cards、开放组合路径和本地能力/预算/可读性编译；每个强效果必须具备 song motif / section / line 三层证据，未知新原语只进 Performance Lab 建议，不允许模型输出任意代码。
+- AMLL AGPL-3.0 已获用户接受，06-06 先做双 renderer 与单 glyph renderer spike，默认倾向复用 AMLL 算法/解析/背景而保持单一 LyricStage renderer；`react-full` 不接管外壳、YTM Bridge、AI 分幕或 fallback。新增 `WEB-09/10`、`TEST-07`、六项实施计划与真实五类歌曲 UAT；本轮只写方案，未修改运行代码、后端或部署。见 `.planning/phases/06-lyricstage-platform-and-web-reference/06-06-DESIGN.md` 与 `06-06-PLAN.md`。
+
+## 2026-08-21 · YTM 翻唱清洗升级为翻唱优先、原唱次选
+
+- `web/packages/lyrics` 现在会把 `【歌ってみた】修羅 by 花譜` 清为「修羅」并保留花譜为翻唱者；`by / covered by / sung by / 歌唱 / vocal` 尾注与更多包装可确定性移除。候选先过标题与 30 秒时长相关性门，酷狗不再把《邂逅》等花譜其他歌曲送进选择器。
+- 自动采用固定为同标题/翻唱者/≤4 秒的翻唱录音优先；翻唱缺失时，精确标题、≤15 秒且唯一或多数一致的原唱可作为显式 `originalFallback` 次选，界面说明使用了原唱；同名艺人平票继续手选。缓存 namespace 升到 `lyrics-v2`，旧错候选不会复用。
+- 花譜《修羅》真实多源请求已返回 `match / originalFallback / ヨルシカ / 236s`，DOES 同名异曲因时长门被排除。歌词聚焦 4 文件 16/16、typecheck、0.2.1 extension build 与 MV3 CSP 通过；最新 `extension-dist` 仍需 Chrome 手动 reload 后做页面内确认。稳定边界见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-21 · Fullscreen 前端不再降维 AI 导演稿
+
+- 保留独立 Director 1.1.0 与完整 `DirectorPlanV1` 不动；`StageCanvas` 删除 `directorPlanToRecipeV0 -> PerformancePlanV0` 的生产降维路径，改由新 `PreparedDirectedStageV1` 直接消费每个 section 与每行 directive。旧 V0 renderer 仅作兼容，不再决定全屏视觉。
+- 全屏现按五层绘制：Pixi environment、六种 section structural field、九种 directive 主歌词动作、前句/Hook/重叠声部 memory-counterpoint、section transition veil；layout、typography、paletteIndex、alignment、direction、intensity、fontScale、glyphStagger、paletteRole 均有独立可见作用，12 套色板随 section 切换。真实 word/line reveal 仍只由歌词轴决定，reduced-motion 保留构图与色板但关闭位移动作。
+- 本地浏览器 16:9 实图确认新路径已显示分栏网格、环境粒子/轨道、主句、Hook 残影与切幕层，观众 Canvas 不再绘制 recordingID/time debug；typecheck、renderer/director 聚焦 9/9 与 0.2.1 extension build/MV3 CSP 通过。最新 `web/extension-dist` 仍需 Chrome 手动 reload 后关闭真实 YTM 云端导演视觉门。见 `cairn/lyricstage-platform-architecture.md` 与 `web/apps/youtube-music-companion/RELEASE-CANDIDATE.md`。
+
+## 2026-08-21 · 独立 Fullscreen Director 切到官方 Vertex 并关闭真实接管门
+
+- 用户否决复用手机端 Luna/Metadata Worker 合同；新增 `services/lyricstage-director`，只为 16:9 Web Performance Runtime 输出 `lyricstage-fullscreen-director-v1`：song-specific concept/motif/intensity arc、连续 section 的 art/layout/typography/palette 和每行完整 directive。服务端严格限制 enum/range/连续覆盖/45% 高动作预算，响应不回传歌词正文；坏输出标记 degraded，扩展继续本地完整 plan。
+- OCI `oci-macmini-services` 以 Podman Quadlet 运行 `localhost/lyricstage-director:1.1.0`，仅监听 `127.0.0.1:8092`，持久缓存位于 `/var/lib/lyricstage-director`；现有 `hachi-mi-oci` Tunnel 暴露 `director.hachi-mi.uk`，未开放 OCI 防火墙端口。客户端 Bearer 只存 macOS Keychain/扩展本地存储，Google Key 只在 OCI 0600 环境文件，值不入仓库、构建层或笔记。
+- 上游已按用户要求从 CPA 切到 Google 官方 Vertex AI Express Mode，使用 `gemini-3.5-flash` 的 `generateContent`、`application/json` 与 response JSON Schema。官方-key 四行 canary 6.4 秒返回 `degraded=false`；真实 YTM `Hew46pJkFW0` 方案进入有效磁盘缓存，Chrome 全屏从 `LS / LOCAL` 在下一结构段无中断切到 `LS / DIRECTED`。Web 18 文件 93/93、Director 4/4、typecheck、0.2.1 extension build/MV3 既有门保持通过。见 `cairn/lyricstage-platform-architecture.md` 与 `web/apps/youtube-music-companion/RELEASE-CANDIDATE.md`。
+
+## 2026-08-21 · LyricStage Web Performance 0.2.0 上线候选
+
+- Performance Lab 语义正式进入生产全屏但不进入 Column：新增严格 `DirectorPlanV1`、完整本地 fallback、按歌词空隙/六行上限划分 section、重复 Hook/二重唱导演、受控字体/布局/调色与 Legacy `/v1/lyrics/direct` 适配；AI degraded、partial、身份错误、越界或末段无后续边界时均保持本地计划。
+- `StageCanvas` 现以 PixiJS WebGL 环境 + Canvas2D CJK/逐字正文双层渲染，封面不再直接显示；标题/歌手仅开场短暂出现。AI 计划只在下一 section 起点接管；GPU init/draw/context-loss 失败只降级环境，不撤掉歌词。轻量/reduced-motion 优先于显式个人 VJ 模式。
+- 后台新增固定 Metadata Worker 自动导演、70 秒 timeout、同请求去重、30 天/100 首严格身份缓存和本机 Bearer 配置。请求只含标题/歌手/时长/完整歌词与行词时轴，不含音频、封面、媒体 URL；超过 180 行或 90KB fail closed。Worker health 当前在线且无令牌 `/v1/lyrics/direct` 保持 401，未部署或修改云端。
+- 真实 Chrome 以 2226×1252 backing store 连续运行 WebGL + Canvas 240 帧，Canvas draw P95 0.70ms、无 console issue。12 个相关测试文件 76/76、typecheck、0.2.0 extension 双构建、CSP、无音频捕获/DEV Studio、1.2MB content runtime 上限和源码产物一致性门通过；`content-ui.js` 814KB。用户 reload 后的真实 YTM UAT 已关闭：Column/Related/Lyrics 单实例恢复、按钮与 `F` 入场、`Esc` 回 Column、GPU 本地舞台、点击歌词双向 seek、暂停冻结/恢复、换歌清旧态、页面重连与 VJ 偏好持久化均通过，且无新版 console warning/error。AI Director Bearer 实测仍是可选门，不阻塞本地完整演出候选。见 `web/apps/youtube-music-companion/RELEASE-CANDIDATE.md`。
+
+## 2026-08-21 · Performance Lab 接入 PixiJS GPU 环境与 Theatre authoring
+
+- `web/packages/performance` 新增 `EnvironmentSceneV1`：按 recordingID 确定性编译调色板、42 粒子、7 rail 与 4 orb，任意 seek 均可重采样；结构能量和受控 intensity/bloom/drift/railOpacity 只影响环境，不修改歌词几何或同步。
+- Lab 以 PixiJS 8.20.0 WebGL 渲染环境层，DOM/CJK 正文保持独立；Theatre.js 0.7.2 只在 `import.meta.env.DEV` 动态接入，可实时编排四项环境参数、跟随毫秒 playhead、显隐 Studio 并导出 project state。production bundle 静态确认不含 Theatre/Studio。
+- 真实浏览器捕获并修复了 Pixi 异步 init 遇到 React StrictMode 提前 destroy，以及 Theatre CJS default/初始化与重复 object config 竞态。最终 680×383 CSS 画布以 1360×766 WebGL backing store 渲染；切到二重唱 15000ms 后双声部、seed `972918288` 与 authoring 联动均正确，修复后无运行错误（隐藏 Studio 会产生其官方提示 warning）。
+- 聚焦测试扩为 9/9，typecheck、独立 production build、package-lock JSON 与 Theatre 生产排除门通过。Pixi 当前令 Lab 主 chunk 约 739KB min / 210KB gzip，正式 Stage 集成前需做按层 lazy loading/裁剪；仍未实现 Director Plan、AI cache、结构边界热切换或 YTM 全屏接入。见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-21 · LyricStage Performance Lab 第一切片
+
+- 新增完全独立于 YouTube Music 产品路径的 `web/apps/performance-lab` 与 `web/packages/performance`：`TimedTextIndexV1` 提供 phrase / word / character 时间层级、重叠声部、O(log n) 任意时刻采样和 seek 前后差分；无逐字轴时不伪造 word/character timing。
+- 新增可确定性任意时间采样的 `MotionClipV1`，首批包含 editorial rise、rail cut、memory bloom；Lab 可切六组既有 fixture/clip，以毫秒、滑杆或单帧步进排练 16:9 全屏构图，并查看时间索引与动作参数。
+- 真实 Chrome 验证：逐字混排在 2900ms 正确命中 `trace` 及其字符；重叠二重唱在 15000ms 同时显示日英两声部且不编造词级时轴；控制台无 warn/error。聚焦测试 5/5、typecheck、`build:performance` 均通过。
+- 此切片尚未接入 YTM、AI 导演、PixiJS 或 Theatre.js，也未改变现有 Column/Fullscreen；下一切片才建立 GPU 环境层与开发期关键帧编排。稳定边界见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-21 · YTM 自动歌词升级为身份清洗与分层多源
+
+- Companion 不再把 YTM 原始标题/首个歌手直接锁死在一次 LRCLIB 查询：新增 Topic/Official/Cover 等包装清洗、原文标题/别名、翻唱者/原唱分层；LRCLIB 严格查询失败后按标题与别名做无歌手回退。
+- 新增酷狗公开只读搜索→候选→LRC 完整链；单源失败不阻塞其他来源。旧单源 miss 通过 `lyrics-v1` cache namespace 失效。
+- 现有 Mac mini LDDC 可从扩展弹窗显式配置；Bearer 只保存在本机扩展 storage，bundle/源码不含密钥，optional host 只限当前 Tailscale 服务。翻唱命中原唱仍只列候选。
+- 聚焦 10 个测试文件 28/28、歌词包 16/16、typecheck 与 extension 双构建/CSP 通过；已实时验证酷狗 HTTP 搜索与 LRC 下载。Chrome 内部扩展页不可由浏览器控制接管，真实 reload、LDDC 配置和 YTM 命中仍为人工门。见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-21 · YTM 原生 Lyrics direct Shadow Column 真实验收
+
+- 真实 Chrome 证明 extension iframe 即使资源可读也无法在 YTM 内完成 ready；改为 production IIFE `content-ui.js` 直接挂入 Shadow DOM，两个隔离脚本通过 DOM marker 与 attempt-scoped ready/error/dispose 事件握手。
+- 接管改为事务：React ready 前原生歌词保持可见；runtime 缺失、渲染错误、超时、tab/renderer 切换或迟到 ready 均恢复/保留原生节点。renderer 只认自身 `page-type`；tab 歧义只由真实点击消歧。
+- 修复 React bundle 残留 `process.env.NODE_ENV` 的启动崩溃，并把 `process.env`、bundle 加载顺序、资源存在与源码/产物一致性加入构建门禁。
+- Chrome 实测 direct Column 可见；Up next 时 host=0 且原生恢复；切回 Lyrics 时 host=1 且无新版 LyricStage error/warn。旧 Errors 面板的 `allowfullscreen` 是已删除 iframe 版本的历史条目。
+- 聚焦 4 文件 25/25、typecheck、extension 双构建、CSP/语法/产物一致性通过。自动命中歌词、全屏与 seek/换歌/多标签继续保留为后续门。见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-21 · YouTube Music Companion 改造为增强原生歌词
+
+- 原生 Lyrics 是唯一入口：新增 MAIN-world `page-bridge.js` 从 Polymer data 识别 `MUSIC_PAGE_TYPE_TRACK_LYRICS` 并写入 DOM marker；隔离世界 `content.js` 只消费 marker，在原生 Lyrics 激活时挂载于原生 renderer 内部；删除自定义 `LYRICSTAGE` 标签与 sibling panel；原生歌词节点仅隐藏（精确保存与恢复 display/hidden/aria-hidden/inert）。
+- 宿主替换与异步激活：切换新 renderer 时清理旧 host、旧 probe 并恢复旧节点；Popup/Open 激活增加有界异步重试与响应通道。
+- Column 视觉重做：iframe / body / Column 根背景透明融入 YTM 面板，采用 YouTube Sans / Roboto 自适应字号、柔和临近行、连续渐变逐字扫亮与紧凑工具栏（状态/版本/导入/全屏）。
+- 键盘与错误边界：Column `Esc` 不切走标签，全屏 `Esc` 只回退侧栏，`F` 触发全屏（带修饰键/输入框保护）；新增 React 根级 `ColumnErrorBoundary` 与静态 boot 联动避免纯黑面板。
+- 源码实现与自动检查完成；真实 Chrome 运行验收待完成。见 `cairn/lyricstage-platform-architecture.md`、`web/apps/youtube-music-companion/README.md`。
+
+## 2026-08-21 · 终审返修：完整正文 / iframe Esc / error 导入 / 版本保留
+
+- BLOCKER：word-timed 行以 `line.text` 为唯一正文，words 只锚定时间；对齐失败回退整行。Column Esc 经校验 `event.source === iframe.contentWindow` 的 `lyricstage-request-hide` 通知父脚本隐藏；全屏 Esc 仍先回 Column。
+- MEDIUM：error 与 miss 同样提供 LRC/JSON 导入；footer「版本」在 singing 也可打开候选面板，选择后保留完整候选集，换歌清空。
+- 新增 `timedLineText` 与 content hide 源校验测试。真实 Chrome 门未关。见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-21 · 返修 Column Stage 五项运行风险
+
+- 更正：Fullscreen API 必须在按钮/`F` 用户手势栈内 `requestFullscreen`，成功后才切 `presentation`；失败留在 Column，侧栏不再挂 StageCanvas/demo 预览。无逐字时 active 行整行高亮，不做 line-duration mask。content.js 在 stop/重挂时清理 readyWatcher 与 2s timeout。自动滚动仅在 active line key 变化时触发。
+- Vitest / typecheck / build:extension / CSP 需继续通过；真实 Chrome reload 验收仍开放。见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-21 · YTM Column Stage + Fullscreen 双模式落地
+
+- 按 V1.0 规格：同级 LyricStage tab 保留；侧栏改为 React DOM `ColumnStageView`（header/stream/footer/state-card），不再把 `StageCanvas` 塞进窄栏；全屏按钮/`F` 挂载现有 Canvas，`Esc` 回 Column。
+- 去黑：`stage.html` 静态 boot、扩展 `base:'./'` 相对资源、iframe ready 探测与资源故障条（区别于 miss）；生命周期状态可见。
+- 复用既有 YTM 桥/时钟/歌词 resolve；contracts 未改。Vitest 28、typecheck、`build:extension`、CSP 通过。真实浏览器 reload 验收仍为人工门。见 `cairn/lyricstage-platform-architecture.md`、`web/apps/youtube-music-companion/README.md`。
+
+## 2026-08-21 · LyricStage 进入 YouTube Music 原生同级标签区
+
+- 用户要求不再使用额外页面或全屏覆盖层。YTM content script 现把 `LyricStage` 作为 Up next / Lyrics / Comments / Related 的 peer tab 注入原生 tablist，并把隔离的 extension Stage iframe 作为 `ytmusic-tab-renderer` 的 sibling panel；原生歌词 DOM 与播放链路不删除、不接管。
+- 进入 LyricStage 时才取得原生 renderer 所有权并精确快照 inline display 与 `aria-hidden`；点击任一原生 tab、按 `Esc` 或停止脚本时恢复一次，隐藏态 heartbeat 不再改写宿主。Polymer 重绘由幂等挂载、MutationObserver、`yt-navigate-finish` 与 500ms 心跳兜底，extension context 失效时会清理并恢复宿主。
+- companion 聚焦测试 7/7、TypeScript typecheck、extension build 与 MV3 CSP 门通过；源码与生成 content script 字节一致，旧 overlay/launcher 静态命中为 0。Manifest 只保留 `storage` 权限，YTM tab 定位改为 host-permission 范围内的 URL query。最终窄审计无残留代码问题；真实扩展 reload 后的同级标签、响应式布局与切入/切回仍是人工验收门。当前真相见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-21 · LyricStage 改为 YouTube Music 页内舞台
+
+- 用户明确不想另开 Stage 标签页。YTM content script 现以 Shadow DOM 注入 `LYRIC STAGE` 按钮与同页全屏覆盖层；覆盖层加载 extension-origin 的 `embedded=1` Stage，只显示整屏 Canvas。扩展弹窗也改为唤起当前权威 YTM 标签页里的同一覆盖层。
+- `Esc` 与右上角关闭按钮只撤下视觉层，YouTube Music 继续拥有音频、播放控制和唯一时钟。歧义歌词候选与搜索错误可在嵌入层内处理；严格自动命中时状态层自动消失。
+- Manifest 只额外公开 Stage HTML/构建资产给 `music.youtube.com`，没有扩大到任意站点。content script reload 终止时会一并移除注入根、runtime listener 与键盘监听。
+- Vitest 25/25、TypeScript typecheck、extension build、CSP 与三份脚本语法检查通过；真实 YTM 页内覆盖层仍需用户 reload/刷新后确认。当前真相见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-21 · YouTube Music 自动歌词第一版
+
+- 用户明确要求 Web Stage 像手机端一样自动搜索歌词。YTM 换歌现以 `videoID + 标题 + 歌手 + 时长` 触发独立歌词任务：先查扩展本地缓存，再由 Service Worker 请求公开 LRCLIB；歌词请求不读取 Cookie/音频，也不进入宿主播放链路。
+- 只有标题、歌手匹配、时长差 ≤4 秒且含同步轴的结果才自动装入 `LyricDocumentV0`。最多 5 个歧义候选显示在 Stage 供显式选择；miss/错误继续保留手动 LRC/JSON。换歌、切本地或手动导入都会拒绝旧任务回写。
+- 缓存按 YTM track ID + 当前元数据指纹隔离：match 30 天、candidate 1 天、miss 6 小时，最多 100 首。Manifest 新增 `storage` 与 `https://lrclib.net/*`，没有新增服务密钥。
+- 真实 LRCLIB `/api/get` 已用《You & 合図》验证：`35193797` / 音乃瀬奏 / 159 秒 / 非纯音乐 / 41 条时间戳，与当前 YTM 159 秒录音严格一致。Vitest 25/25、TypeScript typecheck、extension build、CSP 与脚本语法检查通过；真实扩展自动显示仍需用户 reload 后确认。当前真相见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-21 · 修复 YouTube Music 扩展 Stage 白屏
+
+- 真实 YTM 验收已播放《You & 合図》（`ZmCRFGcON-I`，159 秒）并成功打开扩展 Stage；随后用户确认 Stage 整页空白。根因不是安装或 YTM 连接，而是合同层在扩展页面启动时用 Ajv 动态生成校验函数，触发 Manifest V3 CSP 拦截。
+- 合同 validator 现由构建脚本预生成静态 ESM；扩展产物新增 CSP 门禁，出现 `eval`、`new Function` 或 CommonJS `require` 会直接令构建失败。运行时仍保留同一 schema 与业务门禁，不放宽歌词合同。
+- 重新加载扩展后，原 YTM 标签页里的旧 content script 会失去 extension context；旧实现仍按 500ms 心跳调用 `sendMessage`，因此刷出 `Extension context invalidated`。脚本现会捕获同步失效、撤销媒体监听/MutationObserver/定时器并静默停止；刷新 YTM 后由 Chrome 注入新版。
+- Web Vitest 21/21、普通 Web build、extension build、脚本语法与 `git diff --check` 通过；扩展产物 CSP 扫描通过。用户仍需在 `chrome://extensions` 重新加载、刷新 YTM 并复看真实 Stage，才能关闭端到端 UI 验收。当前真相见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-21 · YouTube Music 成为首个 Web 在线来源
+
+- 新增 `web/apps/youtube-music-companion` Manifest V3 扩展：YTM content script 只读取当前页面展示元数据与 HTMLMediaElement 播放快照，Service Worker 把单一权威来源送给独立 Stage；不读取 Cookie、不保存媒体 URL、不下载或转发音频。
+- Web Stage 新增 `PlaybackClockV0` 与版本化 companion contract。本地模式仍由唯一 `<audio>` 拥有时钟；YTM 模式在两次权威快照间按 playbackRate 平滑采样并持续重校准。暂停冻结、过期快照拒绝、多标签择主和来源断连都有纯逻辑门禁。
+- Stage 默认从扩展打开时选择 YouTube Music，普通网页仍默认本地音频；切歌立即撤下旧歌词，避免错词继续演出。第一版播放/暂停/seek 仍由 YTM 标签页拥有，Stage 只提供返回入口。
+- TypeScript typecheck、19 项 Vitest、普通 Web build、extension build、Manifest/脚本静态检查均通过；本地 Stage HTTP 200 并已打开预览。真实加载扩展后的 YTM 页面验收尚未执行。当前真相见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-21 · Phase 06 启动并落地全屏 Web Stage Alpha
+
+- 新增独立 `web/` TypeScript/Vite 工程：React 只管理排练控制，本地 `<audio>` 拥有唯一时钟；Canvas 2D prepared runtime 支持完整换行、逐行/真实逐字 reveal、双声部、static-first fallback、Rail Handoff 与 Chorus Memory，并可进入单窗口 Fullscreen。
+- 来源无关合同已有 Recording/Lyric/Director/Manifest JSON Schema、Ajv 双层门禁与六组无版权 fixtures；本地 LRC 不伪造逐字。Swift 测试 target 直接打包同一 fixtures，iPhone 17 Pro / iOS 27 聚焦 3/3；TypeScript/Vitest 14/14，typecheck 与生产 build 通过，本地 preview HTTP 200。
+- 当前只完成实现与自动检查，未做浏览器视觉/交互 QA、真实音频/LRC 的 20 次 seek、1080p 整段 rAF 性能或 Windows Edge 验收；AudioStructure schema 也仍待补。没有修改 iOS 播放路径、Worker 或线上服务，没有部署。当前真相见 `cairn/lyricstage-platform-architecture.md`。
+
+## 2026-08-21 · 写出来源无关 LyricStage 与全屏 Web Stage 第一版计划
+
+- 用户把长期目标从单一 Bilibili iPhone 客户端扩展为可承接 Bilibili、YouTube Music、其他播放器与本地音频的歌词可视化演出生态，并明确 Web 应使用整个屏幕，而不是受手机小窗口限制；第二屏/投影是本计划提出的 v0 形态。
+- 新 Phase 06 草案把 v0 建议定义为「本地音频 + 时间轴歌词 -> 排练/可选 Luna -> 第二屏 1080p 全屏 -> 断网完整演出」。共享歌词/音频结构/Recipe 语义，布局和预算按 `fullscreen16x9` 单独编译；正文继续 static-first。
+- 计划分 M0 基线、M1 合同/fixtures、M2 全屏本地 Stage、M3 音频事实、M4 Luna/演出包、M5 Show Mode；建议确认后只先启动 M0–M2。当前仅文档草案，未创建 Web 工程、未改变 `.planning/STATE.md`、未改 iOS/Worker/线上服务。见 `.planning/phases/06-lyricstage-platform-and-web-reference/` 与 `cairn/lyricstage-platform-architecture.md`。
+
 ## 2026-08-21 · V4 音频结构导演与四种 Scene Recipe 上线
 
 - 新增独立 V4 链路：已缓存音频编成有界 `AudioStructureScoreV4`，Gemini 只返回 typed motif 与 sparse Scene Recipe，本地继续拥有歌词正文、逐行/逐字 reveal、精确音频地标和完整 V5.3 fallback。首发 Rail Handoff、Semantic Lens、Chorus Memory、Silence Aperture；结构时钟与歌词 offset 分离，未揭示文字严格不可见，长句完整换行。
