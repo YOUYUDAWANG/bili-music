@@ -38,6 +38,16 @@ final class PlayerChromeUITests: XCTestCase {
             app.launchEnvironment["BILIMUSIC_UITEST_YOU_AIZU"] = "1"
             app.launchEnvironment["BILIMUSIC_LYRIC_STAGE_V53"] = "1"
         }
+        if name.contains("StageRecipeV4Performance") {
+            app.launchEnvironment["BILIMUSIC_UITEST_LYRICS"] = "1"
+            app.launchEnvironment["BILIMUSIC_UITEST_YOU_AIZU"] = "1"
+            app.launchEnvironment["BILIMUSIC_LYRIC_STAGE_V53"] = "1"
+            app.launchEnvironment["BILIMUSIC_UITEST_STAGE_V4_PERF"] = "1"
+            app.launchEnvironment["BILIMUSIC_UITEST_PLAYING"] = "1"
+            app.launchEnvironment["BILIMUSIC_UITEST_PLAYBACK_TIME"] = "60.9"
+            app.launchEnvironment["BILIMUSIC_V53_PERF_SIGNPOSTS"] = "1"
+            app.launchEnvironment["BILIMUSIC_UITEST_OPEN_FULL_PLAYER"] = "1"
+        }
         app.launch()
     }
 
@@ -246,6 +256,17 @@ final class PlayerChromeUITests: XCTestCase {
     }
 
     @MainActor
+    func testStageRecipeV4PerformanceRecordsDoubleResidueHookBaseline() throws {
+        let stage = element("lyricStageV53")
+        XCTAssertTrue(stage.waitForExistence(timeout: 4))
+        XCTAssertEqual(stage.value as? String, "v4:chorusMemory")
+        XCTAssertTrue(element("nowPlayingView").exists)
+        XCTAssertTrue(element("nowPlayingProgress").exists)
+        Thread.sleep(forTimeInterval: 5.5)
+        XCTAssertTrue(stage.exists)
+    }
+
+    @MainActor
     func testQueueButtonOpensDedicatedQueuePage() throws {
         try openFullPlayerFromMini()
         try openAppleMusicQueuePage()
@@ -336,8 +357,13 @@ final class PlayerChromeUITests: XCTestCase {
     func testInlineLyricsPreviewOpensLyricsPage() throws {
         try openFullPlayerFromMini()
 
-        let preview = element("playerInlineLyricsPreview")
-        XCTAssertTrue(preview.waitForExistence(timeout: 3), "Synchronized lyrics should fill the flexible space on the artwork page.")
+        let preview = element("nowPlayingLyricStageView")
+        let previewExists = preview.waitForExistence(timeout: 3)
+        let initialScreenshot = XCTAttachment(screenshot: app.screenshot())
+        initialScreenshot.name = "Inline lyrics preview before assertion"
+        initialScreenshot.lifetime = .keepAlways
+        add(initialScreenshot)
+        XCTAssertTrue(previewExists, "Synchronized lyrics should fill the flexible space on the artwork page.")
         XCTAssertTrue(
             preview.label.contains("Electric night begins while every signal crosses the skyline without losing a single word"),
             "The inline stage must expose the complete long lyric instead of an ellipsis."

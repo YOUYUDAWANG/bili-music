@@ -17,6 +17,79 @@ enum UITestFixtures {
         ProcessInfo.processInfo.environment["BILIMUSIC_UITEST_YOU_AIZU"] == "1"
     }
 
+    static var startsPlaying: Bool {
+        ProcessInfo.processInfo.environment["BILIMUSIC_UITEST_PLAYING"] == "1"
+    }
+
+#if DEBUG
+    static var usesStageV4PerformanceFixture: Bool {
+        ProcessInfo.processInfo.environment["BILIMUSIC_UITEST_STAGE_V4_PERF"] == "1"
+    }
+
+    static func makeStageV4PerformancePlan(
+        track: Track,
+        lines: [PlayerEngine.LyricLine]
+    ) -> LyricStagePlanV4? {
+        guard usesStageV4PerformanceFixture, lines.count >= 14 else { return nil }
+        let empty = AudioStructureScoreBuilderV4.make(
+            map: nil,
+            lines: lines,
+            availability: .missingCache)
+        let score = AudioStructureScoreV4(
+            version: LyricStagePlanV4Version.audioScore,
+            availability: .ready,
+            semantics: .localAnalyzer,
+            confidence: empty.confidence,
+            durationMilliseconds: empty.durationMilliseconds,
+            tempoSegments: [],
+            sections: [],
+            lineFacts: empty.lineFacts,
+            lineDetails: [],
+            moments: [])
+        guard score.validated(lineCount: lines.count) != nil else { return nil }
+
+        let hookIndices = [10, 11, 12, 13]
+        let scenes = hookIndices.map { lineIndex in
+            LyricStageSceneRecipeV4(
+                lineIndex: lineIndex,
+                family: .chorusMemory,
+                topology: .stack,
+                entrance: .interleave,
+                focus: .wholeLine,
+                tokenRange: nil,
+                sustain: .echo,
+                continuity: .accumulate,
+                driver: .lyricReveal,
+                landmarkIDs: [],
+                companionLineIndices: hookIndices.filter { $0 != lineIndex },
+                motifPhase: lineIndex == hookIndices.last ? .resolve : .transform,
+                intensity: 1)
+        }
+        let direction = LyricStageDirectionV4(
+            directorVersion: "bilimusic-v4-ui-performance-fixture",
+            trackID: track.key.description,
+            lyricsHash: LyricPerformanceFingerprint.lyricsHash(lines),
+            lineCount: lines.count,
+            audioScoreHash: score.fingerprint,
+            stageBible: LyricStageBibleV4(
+                concept: "Bounded double-residue Chorus Memory",
+                intensityArc: "accumulate then resolve",
+                primaryMotif: LyricStageMotifV4(
+                    signature: .echo,
+                    axis: .horizontal,
+                    cadence: .downbeat),
+                secondaryMotif: nil),
+            scenes: scenes)
+        let resolved = LyricStageDirectorV4.resolve(
+            trackID: track.key.description,
+            lines: lines,
+            audioMap: nil,
+            audioScore: score,
+            direction: direction)
+        return resolved.source == .gemini ? resolved : nil
+    }
+#endif
+
     private static let defaultKaraokeLyrics = """
     [0,5000]<0,350,0>Electric<350,350,0> night<700,350,0> begins<1050,350,0> while<1400,350,0> every<1750,350,0> signal<2100,350,0> crosses<2450,350,0> the<2800,350,0> skyline<3150,350,0> without<3500,350,0> losing<3850,350,0> a<4200,350,0> single<4550,450,0> word
     [5000,5000]<0,1250,0>Signals<1250,1250,0> cross<2500,1250,0> the<3750,1250,0> skyline

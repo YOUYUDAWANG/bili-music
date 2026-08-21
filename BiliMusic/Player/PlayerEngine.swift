@@ -1760,7 +1760,8 @@ final class PlayerEngine {
         manualPlaybackModeOverride = nil
         playbackMode = .music
         queueMode = .sequential
-        state = tracks.isEmpty ? .idle : .paused
+        state = tracks.isEmpty ? .idle : (UITestFixtures.startsPlaying ? .playing : .paused)
+        wantsPlayback = UITestFixtures.startsPlaying && !tracks.isEmpty
         currentTime = UITestFixtures.initialPlaybackTime
         isScrubbing = false
         scrubTrackKey = nil

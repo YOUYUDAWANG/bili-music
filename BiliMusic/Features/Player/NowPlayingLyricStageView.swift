@@ -8,7 +8,8 @@ struct NowPlayingLyricStageView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var lunaMood: String? = nil
-    @State private var isLunaLoading: Bool = false
+    @State private var cachedLunaScore: LyricEmbellishmentScore?
+    @State private var wordOrderCache = WordOrderCache()
 
     let isActive: Bool
     let action: () -> Void
@@ -27,7 +28,7 @@ struct NowPlayingLyricStageView: View {
         }
         .buttonStyle(.plain)
         .task(id: trackLyricsFingerprint) {
-            await fetchLunaEmbellishmentsIfNeeded()
+            loadCachedLunaEmbellishments()
         }
         .accessibilityLabel(snapshot(at: currentLyricTime)?.current?.text ?? "当前暂无歌词")
         .accessibilityHint("打开完整歌词")
@@ -43,7 +44,7 @@ struct NowPlayingLyricStageView: View {
     @ViewBuilder
     private func stageContainer(snapshot: StageSnapshot?, interlude: Bool, time: Double) -> some View {
         ZStack {
-            // 1. 动态封面三元流体极光 (Top / Middle / Bottom 呼吸共鸣)
+            // 1. 静态封面三元色场；正文稳定时背景也保持安静。
             if isActive, engine.state == .playing, !reduceMotion {
                 LyricStageLightField(
                     palette: engine.currentArtworkPalette,
@@ -85,32 +86,24 @@ struct NowPlayingLyricStageView: View {
         reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.76)
     }
 
-    // MARK: - Luna Auto Fetch
+    // MARK: - Luna Cache
 
-    private func fetchLunaEmbellishmentsIfNeeded() async {
+    /// Playback and presentation must never trigger a director request. Luna is
+    /// an explicit authoring action; the default stage may only consume a score
+    /// that the user has already generated and cached.
+    private func loadCachedLunaEmbellishments() {
         guard let track = engine.current, !engine.lyrics.isEmpty else {
             lunaMood = nil
+            cachedLunaScore = nil
+            wordOrderCache.reset()
             return
         }
         let trackID = track.key.description
         let lyricsHash = LyricPerformanceFingerprint.lyricsHash(engine.lyrics)
-
-        // 1. 先查本地缓存
-        if let existing = LyricEmbellishmentStore.shared.score(for: trackID, lyricsHash: lyricsHash) {
-            lunaMood = existing.mood
-            return
-        }
-
-        // 2. 自动在后台向 Luna 发送轻量装帧请求
-        isLunaLoading = true
-        do {
-            let score = try await LyricEmbellishmentClient.shared.embellish(track: track, lines: engine.lyrics)
-            LyricEmbellishmentStore.shared.save(score)
-            lunaMood = score.mood
-        } catch {
-            lunaMood = nil
-        }
-        isLunaLoading = false
+        let score = LyricEmbellishmentStore.shared.score(for: trackID, lyricsHash: lyricsHash)
+        cachedLunaScore = score
+        lunaMood = score?.mood
+        wordOrderCache.reset()
     }
 
     // MARK: - Stage Content Layout
@@ -141,7 +134,6 @@ struct NowPlayingLyricStageView: View {
                     .foregroundStyle(PlayerSurface.textSecondary)
                     .opacity(0.35)
                     .blur(radius: 0.8)
-                    .lineLimit(1)
                     .frame(maxWidth: 340, alignment: .leading)
             }
 
@@ -155,7 +147,6 @@ struct NowPlayingLyricStageView: View {
                     .font(.system(size: 24, weight: .bold))
                     .foregroundStyle(PlayerSurface.textPrimary)
                     .opacity(0.65)
-                    .lineLimit(2)
                     .frame(maxWidth: 340, alignment: .leading)
             }
 
@@ -165,7 +156,6 @@ struct NowPlayingLyricStageView: View {
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(PlayerSurface.textSecondary)
                     .opacity(0.48)
-                    .lineLimit(1)
                     .frame(maxWidth: 340, alignment: .leading)
             }
         }
@@ -179,10 +169,7 @@ struct NowPlayingLyricStageView: View {
 
     @ViewBuilder
     private func heroCurrentLine(_ line: PlayerEngine.LyricLine, index: Int, time: Double) -> some View {
-        let aiScore = LyricEmbellishmentStore.shared.score(
-            for: engine.current?.key.description ?? "",
-            lyricsHash: LyricPerformanceFingerprint.lyricsHash(engine.lyrics)
-        )
+        let aiScore = cachedLunaScore
         let fontSize = heroFontSize(for: line.text)
         let elapsed = max(0, time - line.from)
         let sceneMode = LyricCinematicSceneMode.resolve(
@@ -265,12 +252,33 @@ struct NowPlayingLyricStageView: View {
     }
 
     private func buildWordItems(for line: PlayerEngine.LyricLine, at time: Double) -> [WordItem] {
-        let states = LyricHighlightModel.wordStates(of: line, at: time)
-        let words = line.words.sorted { lhs, rhs in
-            lhs.from == rhs.from ? lhs.to < rhs.to : lhs.from < rhs.from
+        wordOrderCache.words(for: line).enumerated().map { index, word in
+            WordItem(id: index, index: index, word: word, state: wordState(word, at: time))
         }
-        return zip(words, states).enumerated().map { index, pair in
-            WordItem(id: index, index: index, word: pair.0, state: pair.1)
+    }
+
+    private func wordState(_ word: PlayerEngine.LyricWord, at time: Double) -> LyricWordState {
+        if time >= word.to { return .sung }
+        guard time >= word.from else { return .unsung }
+        let duration = max(word.to - word.from, 0.0001)
+        return .current(progress: ((time - word.from) / duration).clamped(to: 0...1))
+    }
+
+    @MainActor
+    private final class WordOrderCache {
+        private var values: [UUID: [PlayerEngine.LyricWord]] = [:]
+
+        func words(for line: PlayerEngine.LyricLine) -> [PlayerEngine.LyricWord] {
+            if let cached = values[line.id] { return cached }
+            let ordered = line.words.sorted { lhs, rhs in
+                lhs.from == rhs.from ? lhs.to < rhs.to : lhs.from < rhs.from
+            }
+            values[line.id] = ordered
+            return ordered
+        }
+
+        func reset() {
+            values.removeAll(keepingCapacity: true)
         }
     }
 
@@ -439,9 +447,12 @@ private struct StaggeredWordToken: View {
             )
 
         case .cosmicDrift:
-            // 星海浮游模式：轻柔双轴起伏微浮游
-            let driftX = CGFloat(sin(elapsed * 1.4 + Double(wordIndex) * 0.6) * 1.6)
-            let driftY = CGFloat(cos(elapsed * 1.8 + Double(wordIndex) * 0.8) * 1.8)
+            // 星海模式只负责一次柔和入场；落稳后不再永久漂移。
+            let remaining = LyricStageCalmMotion.settlingRemainder(settleProgress)
+            let driftX = CGFloat(
+                sin(elapsed * 1.4 + Double(wordIndex) * 0.6) * 1.6 * remaining)
+            let driftY = CGFloat(
+                cos(elapsed * 1.8 + Double(wordIndex) * 0.8) * 1.8 * remaining)
             let scale: CGFloat = 0.92 + 0.08 * CGFloat(backOut(settleProgress))
             return WordDynamics(
                 scale: scale,
@@ -501,63 +512,55 @@ private struct StaggeredWordToken: View {
     }
 }
 
-// MARK: - Triple-Lobe Fluid Aurora Ambient Light Field
+// MARK: - Stable Triple-Lobe Artwork Light Field
 
 private struct LyricStageLightField: View {
     let palette: PlayerArtworkPalette
     let isCurrentActive: Bool
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
-            let phase = timeline.date.timeIntervalSinceReferenceDate
-            let pulse = sin(phase * 1.6) * 0.06
-            let drift = cos(phase * 1.2) * 10
-            ZStack {
-                // 1. 封面 Top 色流体光斑 (左上方极光)
-                RadialGradient(
-                    colors: [
-                        Color(uiColor: palette.top).opacity(isCurrentActive ? (0.28 + pulse) : 0.08),
-                        Color(uiColor: palette.top).opacity(0.06),
-                        Color.clear
-                    ],
-                    center: .topLeading,
-                    startRadius: 20,
-                    endRadius: 200
-                )
-                .frame(maxWidth: 360, maxHeight: 220)
-                .offset(x: -drift, y: drift * 0.5)
-                .blur(radius: 28)
+        ZStack {
+            RadialGradient(
+                colors: [
+                    Color(uiColor: palette.top).opacity(isCurrentActive ? 0.20 : 0.07),
+                    Color(uiColor: palette.top).opacity(0.04),
+                    Color.clear
+                ],
+                center: .topLeading,
+                startRadius: 20,
+                endRadius: 200
+            )
+            .frame(maxWidth: 360, maxHeight: 220)
+            .offset(x: -6, y: 4)
+            .blur(radius: 28)
 
-                // 2. 封面 Middle 色流体光斑 (中心呼吸极光)
-                RadialGradient(
-                    colors: [
-                        Color(uiColor: palette.middle).opacity(isCurrentActive ? (0.20 + pulse * 0.8) : 0.05),
-                        Color.clear
-                    ],
-                    center: .center,
-                    startRadius: 30,
-                    endRadius: 180
-                )
-                .frame(maxWidth: 320, maxHeight: 180)
-                .blur(radius: 26)
+            RadialGradient(
+                colors: [
+                    Color(uiColor: palette.middle).opacity(isCurrentActive ? 0.14 : 0.05),
+                    Color.clear
+                ],
+                center: .center,
+                startRadius: 30,
+                endRadius: 180
+            )
+            .frame(maxWidth: 320, maxHeight: 180)
+            .blur(radius: 26)
 
-                // 3. 封面 Bottom 色流体光斑 (右下方极光)
-                RadialGradient(
-                    colors: [
-                        Color(uiColor: palette.bottom).opacity(isCurrentActive ? (0.22 + pulse * 0.7) : 0.06),
-                        Color.clear
-                    ],
-                    center: .bottomTrailing,
-                    startRadius: 30,
-                    endRadius: 220
-                )
-                .frame(maxWidth: 360, maxHeight: 220)
-                .offset(x: drift, y: -drift * 0.5)
-                .blur(radius: 32)
-            }
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
+            RadialGradient(
+                colors: [
+                    Color(uiColor: palette.bottom).opacity(isCurrentActive ? 0.16 : 0.06),
+                    Color.clear
+                ],
+                center: .bottomTrailing,
+                startRadius: 30,
+                endRadius: 220
+            )
+            .frame(maxWidth: 360, maxHeight: 220)
+            .offset(x: 6, y: -4)
+            .blur(radius: 32)
         }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
@@ -571,13 +574,11 @@ struct LyricInterludePulseView: View {
             let time = timeline.date.timeIntervalSinceReferenceDate
             HStack(spacing: 8) {
                 ForEach(0..<3, id: \.self) { index in
-                    let phase = sin((time * 2.2) - Double(index) * 0.75)
-                    let scale = reduceMotion ? 1.0 : (0.8 + max(0, phase) * 0.45)
-                    let opacity = reduceMotion ? 0.6 : (0.3 + max(0, phase) * 0.65)
+                    let phase = sin((time * 1.1) - Double(index) * 0.75)
+                    let opacity = reduceMotion ? 0.55 : (0.34 + max(0, phase) * 0.20)
                     Circle()
                         .fill(Color.white.opacity(opacity))
                         .frame(width: 7, height: 7)
-                        .scaleEffect(scale)
                 }
             }
             .padding(.horizontal, 16)

@@ -9,7 +9,7 @@ const STAGE_BEHAVIORS = new Set([
 ]);
 const STAGE_PALETTE_ROLES = new Set(["primary", "accent", "warm", "secondary"]);
 
-export function sanitizeDirectorInput(raw) {
+export function sanitizeDirectorInput(raw, options = {}) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("body must be an object");
   const trackID = cleanText(raw.trackID, 160);
   const title = cleanText(raw.title, 300);
@@ -26,8 +26,12 @@ export function sanitizeDirectorInput(raw) {
     const index = integer(line.index, -1);
     const from = finiteNumber(line.from, -1);
     const to = finiteNumber(line.to, -1);
-    const text = cleanText(line.text, 500);
-    if (index < 0 || seen.has(index) || from < 0 || to <= from || !text) throw new Error("invalid lyric line");
+    const text = options.preserveCompleteLineText === true && typeof line.text === "string"
+      ? line.text
+      : cleanText(line.text, 500);
+    if (index < 0 || seen.has(index) || from < 0 || to <= from || !text.trim()) {
+      throw new Error("invalid lyric line");
+    }
     seen.add(index);
     const words = Array.isArray(line.words) ? line.words.map((word) => {
       if (!word || typeof word !== "object") throw new Error("invalid lyric word");

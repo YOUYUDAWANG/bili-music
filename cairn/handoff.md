@@ -98,7 +98,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 | LDDC Bearer | `BiliMusic` / `com.youyudawang.BiliMusic.lddc-lyrics-api` | 独立 `BiliMusicLDDCLyrics.plist` |
 | 高精度主机 Bearer | `BiliMusic` / `com.youyudawang.BiliMusic.precision-lyrics-host` | 独立 `BiliMusicPrecisionLyricsHost.plist` |
 
-Cloudflare Worker 密钥：`API_KEY`（对外 Bearer）、`UPSTREAM_API_KEY`（Luna 上游）。vars：`UPSTREAM_BASE_URL`、`MODEL=gpt-5.6-luna`、`PROMPT_VERSION=music-metadata-v7-layered-identity`、`LYRIC_DIRECTOR_VERSION`、`LYRIC_DIRECTOR_V2_VERSION`。
+Cloudflare Worker 密钥：`API_KEY`（对外 Bearer）、`CPA_UPSTREAM_API_KEY`（当前 Gemini 上游）、`UPSTREAM_API_KEY`（旧上游回滚）。vars 当前为 `UPSTREAM_BASE_URL=https://cpa.hachi-mi.uk`、`MODEL=gemini-3.7-flash-high`，并分别版本化 normalize、V1、V2、V3、V4；值不写进仓库或笔记。
 
 读取钥匙串（不要打印到聊天或提交）：
 
@@ -109,7 +109,7 @@ security find-generic-password -a BiliMusic -s com.youyudawang.BiliMusic.metadat
 `Local.xcconfig` 里的 URL：
 
 - Metadata：`https://bilimusic-metadata.mercari-email-sale-worker.workers.dev/v1/music/normalize`
-- `BILIMUSIC_LYRIC_DIRECTOR_API_URL` 可留空；App 会从 metadata URL 推导 `/v1/lyrics/direct` 或 `/v2/lyrics/direct`
+- `BILIMUSIC_LYRIC_DIRECTOR_API_URL` 可留空；App 会从 metadata URL 推导 `/v1`、`/v2`、`/v3` 或 `/v4/lyrics/direct`
 - LDDC：Tailscale `100.108.23.60:8788`（常驻 Mac mini）
 - 高精度主机：Tailscale 优先，失败走局域网 `192.168.10.129:8765`
 
@@ -121,10 +121,15 @@ security find-generic-password -a BiliMusic -s com.youyudawang.BiliMusic.metadat
 |---|---|---|---|---|
 | 本地规则 | `LyricMotionDirector` 逐行克制动效 | 本地 | 无独立舞台缓存 | 默认 |
 | V5 行级 | `LyricStageScore` + `LyricStageView` | 本地规则或 Luna `/v1` | `Documents/lyric-performances.json` | Debug |
-| V5.1 Event | StyleSheet / Section / Scene / Actor / Event → 预编译 glyph 轨 → 60fps Canvas `sample(at:)` | 本地安静基线，或 Luna `/v2` | `Documents/lyric-stage-v2.json` | Debug；首次选择会自动请求线上 `/v2` |
+| V5.1 Event | StyleSheet / Section / Scene / Actor / Event → 预编译 glyph 轨 → 60fps Canvas `sample(at:)` | 本地安静基线，或显式 Luna `/v2` | `Documents/lyric-stage-v2.json` | Debug；切换本身不联网 |
 | V5.2 | 「You＆合図」专曲全曲音频舞台 | 离线手工 + `AudioPerformanceMap` | 不写 V2 缓存 | 仅 `BV1XWdrBVEn3` 且歌词 ≥ 14 行 |
-| V5.3 | 通用全曲编舞，无 BVID/标题/绝对秒分支 | 本地规划器 | 不调用 Luna | 任意同步歌词；Debug 会 seek 到 0 并播放 |
+| V5.3 | 通用全曲编舞，无 BVID/标题/绝对秒分支 | 本地规划器，或显式 Luna `/v3` 构图 | `Documents/lyric-stage-v3.json` | 任意同步歌词；切换本身不联网 |
+| V4 Scene Recipe | `AudioStructureScoreV4` + typed motif + 四种正交演出，叠到完整 V5.3 fallback | 已缓存音频事实 + 显式 Gemini `/v4` | `Documents/lyric-stage-v4.json` | Debug；生成、摘要、清除均显式 |
 | 样片 | 18 秒四幕 motion study | 本地硬编码 | 不请求、不写盘 | Debug |
+
+默认歌词和 V4 都遵守 static-first：普通词最多只在落点后短暂缩放 1.5%，36% 进度后归零；永久 tracking breath / cosmic drift、普通 beat/onset 正文缩放均已移除。Impact、Heartbeat 和结构交接仍是允许的稀疏强调。
+
+V4 模拟器性能基线：iPhone 17 Pro / iOS 27 的专用 UI fixture 会断言 `v4:chorusMemory` 后采样双 residue 短 Hook（约 14 次文字绘制，不是理论 96-draw 极限）；最新 240 帧 Canvas draw p50 / p95 / p99 / max 为 0.93 / 3.30 / 5.56 / 12.01ms，0 帧超过 16.67ms。此基线只衡量 Canvas CPU 区间，不等同整帧或 GPU 性能。
 
 硬规则：
 
@@ -141,14 +146,17 @@ security find-generic-password -a BiliMusic -s com.youyudawang.BiliMusic.metadat
 
 生产：`https://bilimusic-metadata.mercari-email-sale-worker.workers.dev`  
 目录：`services/metadata-worker/`  
-当前版本（2026-08-20）：`c593e5b3-eb9e-4360-9a1e-8dd1a58ad723`
+当前版本（2026-08-21）：`79c3d38c-363f-4c5d-b76b-625c16b3bdf1`。上一 V4 版本：`14834316-d27d-4c15-8bbb-435c3e7fae5c`；V4 上线前版本：`52cc64da-2efd-4ce6-84ad-df1472b9e692`。
 
 | 方法 | 路径 | 合同 |
 |---|---|---|
-| GET | `/health` | 必须列出 normalize、`/v1/lyrics/direct`、`/v2/lyrics/direct` |
-| POST | `/v1/music/normalize` | `music-metadata-v7-layered-identity` |
+| GET | `/health` | 必须列出 normalize、V1、V2、V3、V4、embellish，并报告 V3/V4 switch |
+| POST | `/v1/music/normalize` | `music-metadata-v8-gemini-3.7-flash` |
 | POST | `/v1/lyrics/direct` | `lyric-performance-v4` + v5 stage；版本 `luna-lyric-director-v5-stage-preview` |
 | POST | `/v2/lyrics/direct` | `lyric-stage-v2-events`；版本 `luna-lyric-director-v2-events` |
+| POST | `/v3/lyrics/direct` | `lyric-stage-v3-choreography`；完整本地 V5.3 + 稀疏线上构图 |
+| POST | `/v4/lyrics/direct` | `lyric-stage-v4-scene-recipe` / `scene-recipe-grammar-v1`；有界音频结构 + typed recipe |
+| POST | `/v1/lyrics/embellish` | 有界语义微巧思 |
 
 鉴权：`Authorization: Bearer <API_KEY>`。无密钥 → 401。Python 默认 UA 会被 Cloudflare 1010 拦截，探测时用 `User-Agent: BiliMusic/iOS-Director-V2`。
 
@@ -169,9 +177,9 @@ npx wrangler deploy --message "……"
 npx wrangler deployments list --name bilimusic-metadata
 ```
 
-部署后最低验收：health 三个端点、V2 无 Bearer=401、normalize 日文翻唱非降级、V1 回归、V2 返回 `lyric-stage-v2-events`、相同请求复打 `cache=hit`。不要默认把 V5.1 设成 App 默认舞台。
+部署后最低验收：health 六个端点、旧路由与 V4 无 Bearer=401、被修改链路一次 non-degraded 冷请求、相同请求 `cache=hit`、未修改路由回归。V3/V4 有独立 kill switch；不要默认启用任何联网舞台。
 
-Worker 单测：`cd services/metadata-worker && node --test`（当前 26）。
+Worker 单测：`cd services/metadata-worker && node --test`（当前 53）。
 
 ## 8. 歌词从哪来
 

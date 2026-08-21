@@ -18,6 +18,22 @@ import {
   STAGE_V2_SCENE_PROMPT,
 } from "./director-v2.js";
 import {
+  compactStageV3PromptInput,
+  finalizeStagePlanV3,
+  isUsableStageV3Output,
+  sanitizeDirectorV3Input,
+  STAGE_V3_GRAMMAR_VERSION,
+  STAGE_V3_PROMPT,
+} from "./director-v3.js";
+import {
+  compactStageV4PromptInput,
+  finalizeStagePlanV4,
+  isUsableStageV4Output,
+  sanitizeDirectorV4Input,
+  STAGE_V4_GRAMMAR_VERSION,
+  STAGE_V4_PROMPT,
+} from "./director-v4.js";
+import {
   EMBELLISHER_PROMPT,
   sanitizeEmbellisherInput,
   finalizeEmbellisherOutput,
@@ -69,39 +85,73 @@ export default {
           "POST /v1/music/normalize",
           "POST /v1/lyrics/direct",
           "POST /v2/lyrics/direct",
+          "POST /v3/lyrics/direct",
+          "POST /v4/lyrics/direct",
           "POST /v1/lyrics/embellish",
         ],
+        features: {
+          lyricDirectorV3: {
+            enabled: enabledFlag(env.LYRIC_DIRECTOR_V3_ENABLED),
+            version: env.LYRIC_DIRECTOR_V3_VERSION || "luna-lyric-director-v3-whole-song",
+          },
+          lyricDirectorV4: {
+            enabled: enabledFlag(env.LYRIC_DIRECTOR_V4_ENABLED),
+            version: env.LYRIC_DIRECTOR_V4_VERSION || "luna-lyric-director-v4-scene-recipe",
+            grammarVersion: STAGE_V4_GRAMMAR_VERSION,
+          },
+        },
       });
     }
     const isNormalize = request.method === "POST" && url.pathname === "/v1/music/normalize";
     const isDirector = request.method === "POST" && url.pathname === "/v1/lyrics/direct";
     const isDirectorV2 = request.method === "POST" && url.pathname === "/v2/lyrics/direct";
+    const isDirectorV3 = request.method === "POST" && url.pathname === "/v3/lyrics/direct";
+    const isDirectorV4 = request.method === "POST" && url.pathname === "/v4/lyrics/direct";
     const isEmbellish = request.method === "POST" && url.pathname === "/v1/lyrics/embellish";
-    if (!isNormalize && !isDirector && !isDirectorV2 && !isEmbellish) {
+    if (!isNormalize && !isDirector && !isDirectorV2 && !isDirectorV3 && !isDirectorV4 && !isEmbellish) {
       return json({ error: "not_found" }, 404);
     }
     if (!env.API_KEY || request.headers.get("authorization") !== `Bearer ${env.API_KEY}`) {
       return json({ error: "unauthorized" }, 401);
     }
 
-    const contentLength = Number(request.headers.get("content-length") || 0);
-    if (contentLength > (isDirector || isDirectorV2 || isEmbellish ? 98_304 : 8_192)) {
-      return json({ error: "payload_too_large" }, 413);
+    if (isDirectorV3 && !enabledFlag(env.LYRIC_DIRECTOR_V3_ENABLED)) {
+      return json({ error: "temporarily_disabled" }, 503);
+    }
+    if (isDirectorV4 && !enabledFlag(env.LYRIC_DIRECTOR_V4_ENABLED)) {
+      return json({ error: "temporarily_disabled" }, 503);
+    }
+
+    let raw;
+    try {
+      raw = await readJSONBody(
+        request,
+        isDirector || isDirectorV2 || isDirectorV3 || isDirectorV4 || isEmbellish ? 98_304 : 8_192,
+      );
+    } catch (error) {
+      if (error instanceof PayloadTooLargeError) return json({ error: "payload_too_large" }, 413);
+      return json({ error: "invalid_request", message: "请求格式错误" }, 400);
     }
 
     if (isEmbellish) {
-      return handleLyricEmbellishment(request, env, context);
+      return handleLyricEmbellishment(raw, env, context);
+    }
+    if (isDirectorV4) {
+      return handleLyricDirectionV4(raw, env);
+    }
+    if (isDirectorV3) {
+      return handleLyricDirectionV3(raw, env);
     }
     if (isDirectorV2) {
-      return handleLyricDirectionV2(request, env, context);
+      return handleLyricDirectionV2(raw, env, context);
     }
     if (isDirector) {
-      return handleLyricDirection(request, env, context);
+      return handleLyricDirection(raw, env, context);
     }
 
     let input;
     try {
-      input = sanitizeInput(await request.json());
+      input = sanitizeInput(raw);
     } catch (error) {
       return json({ error: "invalid_request", message: error instanceof Error ? error.message : "请求格式错误" }, 400);
     }
@@ -144,10 +194,10 @@ export default {
   },
 };
 
-async function handleLyricDirection(request, env, context) {
+async function handleLyricDirection(raw, env, context) {
   let input;
   try {
-    input = sanitizeDirectorInput(await request.json());
+    input = sanitizeDirectorInput(raw);
   } catch (error) {
     return json({ error: "invalid_request", message: error instanceof Error ? error.message : "请求格式错误" }, 400);
   }
@@ -227,13 +277,7 @@ async function handleLyricDirection(request, env, context) {
   return json(response);
 }
 
-async function handleLyricDirectionV2(request, env, context) {
-  let raw;
-  try {
-    raw = await request.json();
-  } catch {
-    return json({ error: "invalid_request", message: "请求格式错误" }, 400);
-  }
+async function handleLyricDirectionV2(raw, env, context) {
   let input;
   try {
     input = sanitizeDirectorInput(raw);
@@ -303,13 +347,140 @@ async function handleLyricDirectionV2(request, env, context) {
   return json(response);
 }
 
-async function handleLyricEmbellishment(request, env, context) {
-  let raw;
+async function handleLyricDirectionV3(raw, env) {
+  let input;
   try {
-    raw = await request.json();
-  } catch {
-    return json({ error: "invalid_request", message: "请求格式错误" }, 400);
+    input = sanitizeDirectorV3Input(raw);
+  } catch (error) {
+    return json({ error: "invalid_request", message: error instanceof Error ? error.message : "请求格式错误" }, 400);
   }
+
+  const directorVersion = env.LYRIC_DIRECTOR_V3_VERSION || "luna-lyric-director-v3-whole-song";
+  const audioSummaryHash = input.audioSummaryHash || await digest(`audio-summary:${JSON.stringify(input.audioSummary)}`);
+  const cacheKey = await digest(
+    `director-v3:${directorVersion}:${STAGE_V3_GRAMMAR_VERSION}:${audioSummaryHash}:${JSON.stringify(input)}`,
+  );
+  const cached = env.METADATA_CACHE ? await env.METADATA_CACHE.get(cacheKey, "json") : null;
+  if (cached) return json({ ...cached, cache: "hit" });
+
+  let response;
+  try {
+    const upstream = await callOpenAICompatible(
+      env,
+      STAGE_V3_PROMPT,
+      compactStageV3PromptInput(input),
+      {
+        maxCompletionTokens: 3_000,
+        timeoutMilliseconds: 55_000,
+        totalTimeoutMilliseconds: 60_000,
+      },
+    );
+    const score = finalizeStagePlanV3(
+      input,
+      upstream.value,
+      directorVersion,
+      audioSummaryHash,
+    );
+    const degraded = !isUsableStageV3Output(upstream.value, score);
+    response = {
+      ...score,
+      provider: "openai-compatible",
+      model: env.MODEL,
+      upstreamProtocol: upstream.protocol,
+      degraded,
+      ...(degraded ? { degradedReason: "empty_or_invalid_scenes" } : {}),
+      partial: false,
+      cache: "miss",
+    };
+  } catch (error) {
+    response = {
+      ...finalizeStagePlanV3(input, {}, directorVersion, audioSummaryHash),
+      provider: "openai-compatible",
+      model: env.MODEL,
+      degraded: true,
+      degradedReason: safeDegradedReason(error),
+      partial: false,
+      cache: "miss",
+    };
+  }
+
+  if (env.METADATA_CACHE && !response.degraded) {
+    await env.METADATA_CACHE.put(cacheKey, JSON.stringify(response), { expirationTtl: 2_592_000 });
+  }
+  return json(response);
+}
+
+async function handleLyricDirectionV4(raw, env) {
+  let input;
+  try {
+    input = sanitizeDirectorV4Input(raw);
+  } catch (error) {
+    return json({ error: "invalid_request", message: error instanceof Error ? error.message : "请求格式错误" }, 400);
+  }
+
+  const directorVersion = env.LYRIC_DIRECTOR_V4_VERSION || "luna-lyric-director-v4-scene-recipe";
+  const cacheAudioDigest = await digest(`audio-structure-v4:${JSON.stringify(input.audioScore)}`);
+  const cacheKey = await digest(
+    `director-v4:${directorVersion}:${STAGE_V4_GRAMMAR_VERSION}:${input.trackID}:${input.lyricsHash}:${input.audioScoreHash}:${cacheAudioDigest}`,
+  );
+  const cached = env.METADATA_CACHE ? await env.METADATA_CACHE.get(cacheKey, "json") : null;
+  if (cached) return json({ ...cached, cache: "hit" });
+
+  if (input.audioScore.availability !== "ready") {
+    return json({
+      ...finalizeStagePlanV4(input, {}, directorVersion, input.audioScoreHash),
+      provider: "openai-compatible",
+      model: env.MODEL,
+      degraded: true,
+      degradedReason: "audio_score_unavailable",
+      partial: false,
+      cache: "miss",
+    });
+  }
+
+  let response;
+  try {
+    const upstream = await callOpenAICompatible(
+      env,
+      STAGE_V4_PROMPT,
+      compactStageV4PromptInput(input),
+      {
+        maxCompletionTokens: 4_000,
+        timeoutMilliseconds: 55_000,
+        totalTimeoutMilliseconds: 60_000,
+      },
+    );
+    const score = finalizeStagePlanV4(input, upstream.value, directorVersion, input.audioScoreHash);
+    const degraded = !isUsableStageV4Output(upstream.value, score, input);
+    response = {
+      ...score,
+      provider: "openai-compatible",
+      model: env.MODEL,
+      upstreamProtocol: upstream.protocol,
+      degraded,
+      ...(degraded ? { degradedReason: "empty_or_invalid_scenes" } : {}),
+      partial: false,
+      cache: "miss",
+    };
+  } catch (error) {
+    response = {
+      ...finalizeStagePlanV4(input, {}, directorVersion, input.audioScoreHash),
+      provider: "openai-compatible",
+      model: env.MODEL,
+      degraded: true,
+      degradedReason: safeDegradedReason(error),
+      partial: false,
+      cache: "miss",
+    };
+  }
+
+  if (env.METADATA_CACHE && !response.degraded) {
+    await env.METADATA_CACHE.put(cacheKey, JSON.stringify(response), { expirationTtl: 2_592_000 });
+  }
+  return json(response);
+}
+
+async function handleLyricEmbellishment(raw, env, context) {
   let input;
   try {
     input = sanitizeEmbellisherInput(raw);
@@ -357,6 +528,39 @@ async function handleLyricEmbellishment(request, env, context) {
     context.waitUntil(env.METADATA_CACHE.put(cacheKey, JSON.stringify(response), { expirationTtl: 2_592_000 }));
   }
   return json(response);
+}
+
+class PayloadTooLargeError extends Error {}
+
+async function readJSONBody(request, maximumBytes) {
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maximumBytes) throw new PayloadTooLargeError();
+  if (!request.body) throw new SyntaxError("missing body");
+
+  const reader = request.body.getReader();
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maximumBytes) {
+      try { await reader.cancel(); } catch { /* The size result remains authoritative. */ }
+      throw new PayloadTooLargeError();
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+}
+
+function enabledFlag(value) {
+  return /^(?:1|true|yes|on)$/iu.test(String(value || ""));
 }
 
 function safeDegradedReason(error) {

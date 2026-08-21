@@ -2,6 +2,22 @@
 
 本文件按反向时间顺序记录实质进展——最新记录放在本行下方最顶部。每条记录保持简短，只写摘要与指针；稳定结论沉淀到 `cairn/<topic>.md`。
 
+## 2026-08-21 · V4 音频结构导演与四种 Scene Recipe 上线
+
+- 新增独立 V4 链路：已缓存音频编成有界 `AudioStructureScoreV4`，Gemini 只返回 typed motif 与 sparse Scene Recipe，本地继续拥有歌词正文、逐行/逐字 reveal、精确音频地标和完整 V5.3 fallback。首发 Rail Handoff、Semantic Lens、Chorus Memory、Silence Aperture；结构时钟与歌词 offset 分离，未揭示文字严格不可见，长句完整换行。
+- Debug Now Playing 已有显式 V4 生成、摘要、清除和缓存恢复；请求以 88KiB 软预算确定性减少细节，绝不截歌词。V4 独立 App store、Worker KV、grammar/director version 与 kill switch，不覆盖 V1–V3。
+- 用户指出默认歌词持续跳动后，运动 ownership 收口为「静止是常态」：普通词只在落点后短暂 1.5% 轻触，36% 进度后严格归零；Cosmic Drift 与 tracking breath 都变成一次性入场；普通 beat/onset 不再缩放 V3/V4 正文，只允许强事件点亮段落装饰。明确的 Impact、Heartbeat 与结构转场保留。
+- Worker `79c3d38c-363f-4c5d-b76b-625c16b3bdf1` 已启用 `/v4/lyrics/direct`，并在 98KB 门限内完整保留 V4 单行歌词，不再继承旧 500 字符静默裁剪；Worker 54/54。首个 12 行 canary 冷请求 9.10s、2 Section / 4 Recipe、非降级，复打 83ms KV hit；最终部署的新 4 行请求同样非降级并产出有效 `chorusMemory`，复打命中独立 KV，六条路由无令牌均保持 401。iPhone 17 Pro / iOS 27 模拟器 V4 24/24，默认歌词与 V4 UI 各 1/1；专用 V4 fixture 的最新 240 帧 Canvas draw p50 0.93ms、p95 3.30ms、p99 5.56ms、最大 12.01ms，0 帧超过 16.67ms。设计、回滚与证据见 `cairn/lyric-stage-v4-scene-recipe.md`、`cairn/lyric-performance-director.md`。
+
+## 2026-08-21 · V3 通用歌词舞台完成本地事实层、线上导演与模拟器性能验收
+
+- V5.3 收束为单一链路：真实歌词时轴与声部 + 已缓存音频的 `AudioPerformanceMapV2` + 可选 Luna V3，最终编译为预准备运行时；Luna 与音频都不能改歌词正文或 reveal 时间。默认播放不联网，V5.1/V5.3 生成都只存在于明确的 Debug 操作；长歌词完整换行、无省略号。
+- Cloudflare Worker 首个 V3 生产版本 `414458cf-77d5-4bc8-ba10-ff6a6aebbb6a` 已启用 `/v3/lyrics/direct`；真实线上请求 23.35s miss / 53ms hit，旧 normalize、V1、V2、embellish 回归正常。含 embellish、无 V3 的回滚基线为 `1b07471b-49e4-48cf-adb1-c3ca591db573`。
+- 用户一次真实 App 请求耗尽原 38 秒 V3 预算后，只将 V3 Luna 单次/总预算放宽到 55/60 秒并部署 `060adf92-75b7-4719-a55c-3936ce5e727e`；全新冷请求 18.22 秒非降级，复打 71.8ms hit。上一 V3 版本 `414458cf-77d5-4bc8-ba10-ff6a6aebbb6a` 保留为直接回滚点。
+- 放宽预算后用户在真实 App 完成首次约 3 分钟生成：设备缓存确认 176.47 秒音频图有效，40 行 V3 演出于 01:54:54 JST 通过本地门禁并写入，得到 7 Section / 16 Scene；首次总耗时包含本地整曲分析，后续同输入可复用两层缓存。
+- 经用户指定，normalize、V1、V2、V3、embellish 全链路切换到 CPA `gemini-3.7-flash-high`，独立 CPA Secret 与旧 Secret 并存；所有缓存/导演版本已 bump。生产 `52cc64da-2efd-4ce6-84ad-df1472b9e692` 五条冷请求均非降级，分别为 4.63 / 14.79 / 19.63 / 6.50 / 5.95 秒，V3 复打 321ms hit；Worker 44/44。
+- iPhone 17 Pro / iOS 27 模拟器聚焦测试 26/26；Worker 43/43；Python 合同 2/2。Hook、Dialogue、Final 各 240 帧的 Canvas draw 均无超过 16.67ms 的帧，最重 p99 7.04ms、最大 12.87ms；冷编译 17.18–24.01ms。当前真相与边界见 `cairn/lyric-performance-director.md`。
+
 ## 2026-08-20 · 优化歌词视觉体验：全面移除突兀歌词光点
 
 - 彻底移除 `LyricVFXWordToken`（逐字流光光斑）与 `LyricVFXLineView`（整行推进光针）中的附加移动圆点，保持纯净高级的羽化流光扫亮（Liquid Mask Sweep）与字级物理呼吸，视觉更加优雅沉浸。

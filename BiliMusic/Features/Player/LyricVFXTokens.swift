@@ -6,7 +6,7 @@ enum LyricCinematicSceneMode: String, CaseIterable, Codable, Sendable {
     case assemble    // 构筑凝聚模式 (Verse 叙事段落：单字错峰吸附、散焦到清晰聚焦)
     case gravity     // 重力下坠模式 (Chorus 副歌高潮：重力下落、冲击波与微震)
     case duet        // 多声部对唱模式 (Duet/Backing：立体左右空间排布、双向声部对话)
-    case cosmicDrift // 星海浮游模式 (Outro/慢歌长音：正弦波双轴微浮游、流光漫游)
+    case cosmicDrift // 星海浮游模式 (Outro/慢歌长音：轻柔入场后稳定停驻)
 
     static func resolve(
         for line: PlayerEngine.LyricLine,
@@ -30,6 +30,33 @@ enum LyricCinematicSceneMode: String, CaseIterable, Codable, Sendable {
         }
         // 4. 默认叙事段落采用构筑凝聚
         return .assemble
+    }
+}
+
+/// Shared calm-motion envelopes. The default lyric language settles quickly
+/// and stays still; persistent motion is reserved for explicitly directed VFX.
+enum LyricStageCalmMotion {
+    static func landingEnvelope(_ progress: Double) -> Double {
+        let value = min(max(progress, 0), 1)
+        if value < 0.12 { return value / 0.12 }
+        if value < 0.36 { return 1 - (value - 0.12) / 0.24 }
+        return 0
+    }
+
+    static func defaultScale(_ progress: Double) -> CGFloat {
+        1 + 0.015 * CGFloat(landingEnvelope(progress))
+    }
+
+    static func defaultLift(_ progress: Double) -> CGFloat {
+        -0.8 * CGFloat(landingEnvelope(progress))
+    }
+
+    static func settlingRemainder(_ progress: Double) -> Double {
+        1 - min(max(progress, 0), 1)
+    }
+
+    static func oneShotPulse(_ progress: Double) -> Double {
+        sin(.pi * min(max(progress, 0), 1))
     }
 }
 
@@ -132,7 +159,7 @@ struct LyricVFXWordToken: View {
         LyricHighlightModel.fillProgress(for: state)
     }
 
-    // MARK: - Micro Dynamics (预备后撤 + 爆发弹跳 + 悬浮生命力)
+    // MARK: - Micro Dynamics (短落点 + 显式特殊效果)
 
     private var activeScale: CGFloat {
         guard !reduceMotion, isCurrent else { return 1.0 }
@@ -148,14 +175,8 @@ struct LyricVFXWordToken: View {
             let phase2 = (p >= 0.5 && p < 0.75) ? ((p - 0.5) / 0.25) * 0.05 : (p >= 0.75 ? (1.0 - (p - 0.75) / 0.25) * 0.05 : 0)
             return 1.0 + CGFloat(phase1 + phase2)
         default:
-            // 预备微后撤 (0.96) -> 唱响弹跳 (1.06) -> 回归平稳
-            if p < 0.10 {
-                let ant = (p / 0.10) * 0.04
-                return 1.0 - CGFloat(ant)
-            } else {
-                let pop = sin((p - 0.10) / 0.90 * .pi) * 0.06
-                return 1.0 + CGFloat(pop)
-            }
+            // 普通词只在落点后的短窗口轻触一次，余下时长完全静止。
+            return LyricStageCalmMotion.defaultScale(p)
         }
     }
 
@@ -166,8 +187,7 @@ struct LyricVFXWordToken: View {
         case .floating:
             return CGFloat(sin(p * .pi * 2) * -3.2)
         default:
-            // 唱响时轻微浮起 -2.2pt，唱完平滑落回
-            return CGFloat(sin(p * .pi) * -2.2)
+            return LyricStageCalmMotion.defaultLift(p)
         }
     }
 
@@ -408,10 +428,12 @@ struct LyricVFXLineView: View {
                     }
             }
         }
-        .scaleEffect(reduceMotion ? 1.0 : (1.0 + CGFloat(sin(progress * .pi) * 0.035)), anchor: .leading)
-        .offset(y: reduceMotion ? 0 : CGFloat(sin(progress * .pi) * -2.0))
+        .scaleEffect(
+            reduceMotion ? 1.0 : LyricStageCalmMotion.defaultScale(progress),
+            anchor: .leading)
+        .offset(y: reduceMotion ? 0 : LyricStageCalmMotion.defaultLift(progress))
         .shadow(
-            color: Color.white.opacity(sin(progress * .pi) * 0.38),
+            color: Color.white.opacity(LyricStageCalmMotion.landingEnvelope(progress) * 0.18),
             radius: 8
         )
         .fixedSize(horizontal: false, vertical: true)

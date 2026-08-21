@@ -1,14 +1,16 @@
 export async function callOpenAICompatible(env, systemPrompt, input, options = {}) {
-  if (!env.UPSTREAM_API_KEY) throw new Error("missing_upstream_key");
+  const apiKey = selectedUpstreamAPIKey(env);
+  if (!apiKey) throw new Error("missing_upstream_key");
   const baseURL = String(env.UPSTREAM_BASE_URL || "").replace(/\/+$/u, "");
   if (!baseURL.startsWith("https://")) throw new Error("invalid_upstream_url");
   const timeoutMilliseconds = boundedTimeout(options.timeoutMilliseconds);
+  const deadline = totalDeadline(options.totalTimeoutMilliseconds);
 
   const jsonObjectResponse = await fetch(`${baseURL}/v1/chat/completions`, {
     method: "POST",
-    headers: upstreamHeaders(env),
+    headers: upstreamHeaders(apiKey),
     body: JSON.stringify(buildChatJSONBody(env.MODEL, systemPrompt, input, options.maxCompletionTokens)),
-    signal: AbortSignal.timeout(timeoutMilliseconds),
+    signal: deadlineSignal(timeoutMilliseconds, deadline),
   });
   if (jsonObjectResponse.ok) {
     return { value: parseChatCompletionsResponse(await jsonObjectResponse.json()), protocol: "chat-json-object" };
@@ -19,9 +21,9 @@ export async function callOpenAICompatible(env, systemPrompt, input, options = {
 
   const plainChatResponse = await fetch(`${baseURL}/v1/chat/completions`, {
     method: "POST",
-    headers: upstreamHeaders(env),
+    headers: upstreamHeaders(apiKey),
     body: JSON.stringify(buildChatPlainBody(env.MODEL, systemPrompt, input)),
-    signal: AbortSignal.timeout(timeoutMilliseconds),
+    signal: deadlineSignal(timeoutMilliseconds, deadline),
   });
   if (plainChatResponse.ok) {
     return { value: parseChatCompletionsResponse(await plainChatResponse.json()), protocol: "chat-plain-json" };
@@ -32,9 +34,9 @@ export async function callOpenAICompatible(env, systemPrompt, input, options = {
 
   const plainResponsesResponse = await fetch(`${baseURL}/v1/responses`, {
     method: "POST",
-    headers: upstreamHeaders(env),
+    headers: upstreamHeaders(apiKey),
     body: JSON.stringify(buildResponsesPlainBody(env.MODEL, systemPrompt, input)),
-    signal: AbortSignal.timeout(timeoutMilliseconds),
+    signal: deadlineSignal(timeoutMilliseconds, deadline),
   });
   if (plainResponsesResponse.ok) {
     return { value: parseResponsesResponse(await plainResponsesResponse.json()), protocol: "responses-plain-json" };
@@ -44,10 +46,23 @@ export async function callOpenAICompatible(env, systemPrompt, input, options = {
   );
 }
 
+function totalDeadline(value) {
+  const milliseconds = Number(value);
+  if (!Number.isFinite(milliseconds)) return null;
+  return Date.now() + Math.min(Math.max(Math.round(milliseconds), 5_000), 60_000);
+}
+
+function deadlineSignal(perRequestMilliseconds, deadline) {
+  const remaining = deadline === null
+    ? perRequestMilliseconds
+    : Math.min(perRequestMilliseconds, Math.max(1, deadline - Date.now()));
+  return AbortSignal.timeout(remaining);
+}
+
 function boundedTimeout(value) {
   const milliseconds = Number(value);
   if (!Number.isFinite(milliseconds)) return 25_000;
-  return Math.min(Math.max(Math.round(milliseconds), 5_000), 45_000);
+  return Math.min(Math.max(Math.round(milliseconds), 5_000), 55_000);
 }
 
 export function buildChatJSONBody(model, systemPrompt, input, maxCompletionTokens = 700) {
@@ -80,9 +95,13 @@ export function buildResponsesPlainBody(model, systemPrompt, input) {
   };
 }
 
-function upstreamHeaders(env) {
+export function selectedUpstreamAPIKey(env) {
+  return env.CPA_UPSTREAM_API_KEY || env.UPSTREAM_API_KEY || "";
+}
+
+function upstreamHeaders(apiKey) {
   return {
-    authorization: `Bearer ${env.UPSTREAM_API_KEY}`,
+    authorization: `Bearer ${apiKey}`,
     "content-type": "application/json",
   };
 }

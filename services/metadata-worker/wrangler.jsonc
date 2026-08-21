@@ -11,11 +11,15 @@
     }
   ],
   "vars": {
-    "UPSTREAM_BASE_URL": "https://sub2api.hachi-mi.uk",
-    "MODEL": "gpt-5.6-luna",
-    "PROMPT_VERSION": "music-metadata-v7-layered-identity",
-    "LYRIC_DIRECTOR_VERSION": "luna-lyric-director-v5-stage-preview",
-    "LYRIC_DIRECTOR_V2_VERSION": "luna-lyric-director-v2-events"
+    "UPSTREAM_BASE_URL": "https://cpa.hachi-mi.uk",
+    "MODEL": "gemini-3.7-flash-high",
+    "PROMPT_VERSION": "music-metadata-v8-gemini-3.7-flash",
+    "LYRIC_DIRECTOR_VERSION": "luna-lyric-director-v6-stage-gemini-3.7-flash",
+    "LYRIC_DIRECTOR_V2_VERSION": "luna-lyric-director-v2-events-gemini-3.7-flash",
+    "LYRIC_DIRECTOR_V3_VERSION": "luna-lyric-director-v3-whole-song-gemini-3.7-flash",
+    "LYRIC_DIRECTOR_V3_ENABLED": "true",
+    "LYRIC_DIRECTOR_V4_VERSION": "luna-lyric-director-v4-scene-recipe-gemini-3.7-flash",
+    "LYRIC_DIRECTOR_V4_ENABLED": "true"
   },
   "observability": {
     "enabled": true

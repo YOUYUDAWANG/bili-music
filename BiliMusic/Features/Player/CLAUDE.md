@@ -35,6 +35,7 @@
 - 竖屏封面接近屏幕边缘，标题/歌手左对齐并与封面左缘同基线；横屏信息也保持左对齐。
 - 竖屏封面与 metadata 是固定组合；progress / transport 是固定节奏控制簇。metadata 与控制簇之间的唯一弹性区支持 Rise / Impact / Drift / Breathe / Echo / Focus / Drop / Stretch / Cascade 九种逐行演出；无同步歌词时保持留白。动画只在 full player 展开、播放中且 App active 时运行。播放器不显示软件音量条，音量交给实体键，AirPlay 入口保留。
 - 当前 UI 与性能只以用户自用的 iPhone 17 Pro / iOS 27 为目标，不再为了 SE 收缩字号、位移和留白；Reduce Motion 仍必须可用。
+- 歌词舞台采用 static-first：普通词只允许落点后的短促轻触，随后必须完全静止；背景色场不持续呼吸，Cosmic Drift / tracking breath 不得永久正弦漂移，普通 beat/onset 不得缩放正文。Impact、Heartbeat 与结构交接可以作为稀疏例外。
 - Debug 菜单可显式请求 Luna 编排并缓存 `lyric-performance-v4`；逐行 composition/scene 规则不变，新增稀疏 wordCues。真实逐字歌词始终有本地 Sweep；Luna 每行至多给一个不超过 12 个字的 Sweep / Impact / Stretch / Echo Trail 范围。逐字舞台只在 full player、播放中、App active 时以局部 30fps 读取 AVPlayer 时间，不扩散刷新到 RootView/LNPopup；Reduce Motion 关闭位移、缩放和残影但保留高亮。网络失败无缝回退，该入口不得自动触发或进入 Release 播放关键路径。
 - Debug 菜单另有完全本地的 `LyricStagePrototypeView`：18 秒四幕循环验证逐字、整句与双声部二维编排。它不读取真实歌词、不调用 Luna、不写缓存，只替换中央歌词预览区域；正式 v5 前不得把这个少量 SwiftUI glyph view 原型误记为 StageScore/TextRenderer 引擎。
 - Debug 的 v5 真实歌词舞台由 `LyricStageCompiler` 将真实歌词、多声部和现有/原生 Luna directive 编成八种 behavior；真实逐字边界驱动 glyph emphasis，逐行轴只做视觉 stagger。`LyricStageView` 局部 60fps、暂停/后台/Reduce Motion 停止逐帧运动，完整文本用自定义 wrap layout。
@@ -92,6 +93,7 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-08-21 | 用户反馈持续跳动疲劳后，默认逐字/逐行落点收至最多 1.5% 且 36% 后归零；背景色场静止，移除永久漂移与 V3/V4 普通拍点正文缩放，保留明确特殊效果和结构事件。 |
 | 2026-08-20 | 完整歌词页改为消费逐字 progress 的左到右连续扫亮，保留自动换行与完整可访问文本。 |
 | 2026-08-20 | V5.2 扩为「You＆合図」176.518 秒专曲全曲舞台；精确逐字轴严格拥有 reveal，±90ms 音频事件只做 accent，不再向后吸附造成延迟；仍不是通用分析器。 |
 | 2026-08-20 | V5.3 以「You＆合図」作基准但运行时不含歌曲分支：重复 Hook 簇四阶段递进，普通段落七种通用构图；规则 19/19、十关键帧 UI 1/1，签名真机包已安装启动。 |

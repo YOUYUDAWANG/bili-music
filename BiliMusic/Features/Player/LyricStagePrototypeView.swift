@@ -1,3 +1,4 @@
+import OSLog
 import SwiftUI
 import UIKit
 
@@ -1189,180 +1190,280 @@ struct YouAizuGoldenSampleView: View {
 
 // MARK: - V5.3 generic full-song choreography
 
-enum LyricStageV53Composition: String, Equatable, Sendable {
-    case stillness
-    case leadingAnchor
-    case trailingAnchor
-    case dialogue
-    case stack
-    case arc
-    case hero
-    case hookCall
-    case hookEcho
-    case hookConverge
-    case hookLock
+enum LyricStageV4PreparedFamily: String, Equatable, Sendable {
+    case railHandoff
+    case semanticLens
+    case chorusMemory
+    case silenceAperture
 }
 
-struct LyricStageV53Scene: Equatable, Sendable {
-    let lineIndex: Int
-    let sectionIndex: Int
-    let composition: LyricStageV53Composition
-    let companionLineIndices: [Int]
-    let repetitionIndex: Int?
-    let repetitionCount: Int
-    let isSectionStart: Bool
+enum LyricStageV4PreparedDriver: String, Equatable, Sendable {
+    case lyricReveal
+    case wordReveal
+    case structuralMoment
+    case sectionEdge
 }
 
-struct LyricStageV53Plan: Equatable, Sendable {
-    let scenes: [LyricStageV53Scene]
+struct LyricStageV4PreparedBudget: Equatable, Sendable {
+    let transformedGlyphCount: Int
+    let echoLayerCount: Int
+    let estimatedTextDrawCount: Int
+    let usesWrappedFallback: Bool
+}
 
-    static func compile(lines: [PlayerEngine.LyricLine]) -> LyricStageV53Plan {
-        guard !lines.isEmpty else { return LyricStageV53Plan(scenes: []) }
+struct LyricStageV4PreparedRail: Equatable, Sendable {
+    let points: [CGPoint]
+    let entryOffset: CGSize
+}
 
-        let keys = lines.map { normalizedRepeatKey($0.text) }
-        var occurrences: [String: [Int]] = [:]
-        for (index, key) in keys.enumerated() where key.count >= 2 {
-            occurrences[key, default: []].append(index)
-        }
+struct LyricStageV4PreparedAperture: Equatable, Sendable {
+    let center: CGPoint
+    let closedHalfGap: CGFloat
+    let openHalfGap: CGFloat
+    let halfLength: CGFloat
+}
 
-        var sectionIndex = 0
-        var localIndex = 0
-        var scenes: [LyricStageV53Scene] = []
-        for index in lines.indices {
-            let previous = index > 0 ? lines[index - 1] : nil
-            let gap = previous.map { lines[index].from - $0.to } ?? .infinity
-            let repeated = (occurrences[keys[index]]?.count ?? 0) >= 2
-            let previousRepeated = index > 0 && (occurrences[keys[index - 1]]?.count ?? 0) >= 2
-            let entersHook = repeated && (index == 0 || keys[index - 1] != keys[index])
-            let leavesHook = !repeated && previousRepeated
-            let sectionStart = index == 0 || gap > 1.35 || entersHook || leavesHook
-            if index > 0, sectionStart {
-                sectionIndex += 1
-                localIndex = 0
+struct LyricStageV4PreparedTextRun: Equatable, Sendable {
+    let text: String
+    let point: CGPoint
+    let from: Double
+    let to: Double
+    let hasRealWordTiming: Bool
+}
+
+struct LyricStageV4PreparedPreludeRuntime: Sendable {
+    struct Window: Equatable, Sendable {
+        let lineIndex: Int
+        let audioFrom: Double
+        let lyricTo: Double
+    }
+
+    private let windows: [Window]
+
+    init(windows: [Window]) {
+        let sorted = windows
+            .filter { $0.lineIndex >= 0 && $0.audioFrom.isFinite && $0.lyricTo.isFinite }
+            .sorted { lhs, rhs in
+                lhs.audioFrom == rhs.audioFrom
+                    ? lhs.lineIndex < rhs.lineIndex
+                    : lhs.audioFrom < rhs.audioFrom
             }
+        self.windows = sorted
+    }
 
-            let globalRepeatedIndices = occurrences[keys[index]] ?? []
-            let localRepeatedIndices = contiguousRepeatCluster(
-                containing: index,
-                key: keys[index],
-                keys: keys,
-                lines: lines)
-            let repeatedIndices = localRepeatedIndices.count >= 2
-                ? localRepeatedIndices
-                : globalRepeatedIndices
-            let repetitionIndex = repeatedIndices.firstIndex(of: index)
-            let composition: LyricStageV53Composition
-            if let repetitionIndex, repeatedIndices.count >= 2 {
-                composition = hookComposition(
-                    occurrence: repetitionIndex,
-                    count: repeatedIndices.count)
-            } else if lines[index].overlapGroup != nil {
-                composition = .dialogue
+    /// Structural landmarks are in the raw audio clock while lyric boundaries
+    /// are in the offset lyric clock. Keeping both inputs explicit prevents a
+    /// user lyric offset from shifting beat/silence landmarks.
+    func lineIndex(lyricTime: Double, audioTime: Double) -> Int? {
+        guard lyricTime.isFinite, audioTime.isFinite, !windows.isEmpty else { return nil }
+        var lower = 0
+        var upper = windows.count
+        while lower < upper {
+            let middle = (lower + upper) / 2
+            if windows[middle].audioFrom <= audioTime {
+                lower = middle + 1
             } else {
-                let glyphCount = lines[index].text.filter { !$0.isWhitespace }.count
-                if glyphCount <= 4 {
-                    composition = .hero
-                } else if sectionStart {
-                    composition = sectionIndex.isMultiple(of: 2) ? .stack : .stillness
-                } else {
-                    let grammar: [LyricStageV53Composition] = [
-                        .leadingAnchor, .dialogue, .trailingAnchor, .arc, .stillness,
-                    ]
-                    composition = grammar[(localIndex + sectionIndex) % grammar.count]
-                }
+                upper = middle
             }
-
-            let companions = companionIndices(
-                for: index,
-                composition: composition,
-                lines: lines)
-            scenes.append(LyricStageV53Scene(
-                lineIndex: index,
-                sectionIndex: sectionIndex,
-                composition: composition,
-                companionLineIndices: companions,
-                repetitionIndex: repetitionIndex,
-                repetitionCount: repeatedIndices.count,
-                isSectionStart: sectionStart))
-            localIndex += 1
         }
-        return LyricStageV53Plan(scenes: scenes)
-    }
-
-    func scene(for lineIndex: Int) -> LyricStageV53Scene? {
-        scenes.first { $0.lineIndex == lineIndex }
-    }
-
-    func scene(at time: Double, lines: [PlayerEngine.LyricLine]) -> LyricStageV53Scene? {
-        let active = LyricHighlightModel.activeLineIndices(lines: lines, at: time)
-        if let lead = active.first(where: { lines[$0].voiceRole == .lead || lines[$0].voiceRole == .together }) {
-            return scene(for: lead)
-        }
-        if let first = active.first { return scene(for: first) }
-        if let latest = lines.indices.last(where: { lines[$0].from <= time }) {
-            return scene(for: latest)
-        }
-        return scenes.first
-    }
-
-    private static func hookComposition(occurrence: Int, count: Int) -> LyricStageV53Composition {
-        if occurrence == 0 { return .hookCall }
-        if occurrence == count - 1 { return .hookLock }
-        if occurrence == 1 { return .hookEcho }
-        return .hookConverge
-    }
-
-    private static func companionIndices(
-        for index: Int,
-        composition: LyricStageV53Composition,
-        lines: [PlayerEngine.LyricLine]
-    ) -> [Int] {
-        if let group = lines[index].overlapGroup {
-            return lines.indices.filter { $0 != index && lines[$0].overlapGroup == group }
-        }
-        switch composition {
-        case .dialogue:
-            if index > 0 { return [index - 1] }
-            return lines.indices.contains(index + 1) ? [index + 1] : []
-        case .stack:
-            return [index - 1, index + 1].filter { lines.indices.contains($0) }
-        default:
-            return []
-        }
-    }
-
-    private static func contiguousRepeatCluster(
-        containing index: Int,
-        key: String,
-        keys: [String],
-        lines: [PlayerEngine.LyricLine]
-    ) -> [Int] {
-        guard !key.isEmpty else { return [] }
-        var lower = index
-        while lower > 0,
-              keys[lower - 1] == key,
-              lines[lower].from - lines[lower - 1].to <= 1.35 {
-            lower -= 1
-        }
-        var upper = index
-        while upper + 1 < lines.count,
-              keys[upper + 1] == key,
-              lines[upper + 1].from - lines[upper].to <= 1.35 {
-            upper += 1
-        }
-        return Array(lower...upper)
-    }
-
-    private static func normalizedRepeatKey(_ text: String) -> String {
-        text.folding(
-            options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
-            locale: Locale(identifier: "en_US_POSIX"))
-            .unicodeScalars
-            .filter { CharacterSet.alphanumerics.contains($0) }
-            .map(String.init)
-            .joined()
+        guard lower > 0 else { return nil }
+        let window = windows[lower - 1]
+        return lyricTime < window.lyricTo ? window.lineIndex : nil
     }
 }
+
+/// Pure preparation helpers shared by the renderer and focused tests. Everything
+/// here runs when the prepared stage identity changes, never from the frame loop.
+enum LyricStageV4RendererPreparation {
+    static let maximumTransformedGlyphs = 48
+    static let maximumTextDraws = 96
+    static let maximumEchoLayers = 2
+
+    static func budget(
+        glyphCount: Int,
+        requestedEchoLayers: Int
+    ) -> LyricStageV4PreparedBudget {
+        let safeGlyphCount = max(0, glyphCount)
+        guard safeGlyphCount > 0 else {
+            return LyricStageV4PreparedBudget(
+                transformedGlyphCount: 0,
+                echoLayerCount: 0,
+                estimatedTextDrawCount: 0,
+                usesWrappedFallback: true)
+        }
+        guard safeGlyphCount <= maximumTransformedGlyphs else {
+            return LyricStageV4PreparedBudget(
+                transformedGlyphCount: 0,
+                echoLayerCount: 0,
+                estimatedTextDrawCount: min(safeGlyphCount, maximumTextDraws),
+                usesWrappedFallback: true)
+        }
+        let affordableEchoes = max(0, maximumTextDraws / safeGlyphCount - 1)
+        let echoes = min(max(0, requestedEchoLayers), maximumEchoLayers, affordableEchoes)
+        return LyricStageV4PreparedBudget(
+            transformedGlyphCount: safeGlyphCount,
+            echoLayerCount: echoes,
+            estimatedTextDrawCount: safeGlyphCount * (1 + echoes),
+            usesWrappedFallback: false)
+    }
+
+    static func driverClockTime(
+        driver: LyricStageV4PreparedDriver,
+        lyricTime: Double,
+        audioTime: Double
+    ) -> Double {
+        switch driver {
+        case .structuralMoment, .sectionEdge:
+            return audioTime
+        case .lyricReveal, .wordReveal:
+            return lyricTime
+        }
+    }
+
+    static func revealedTextOpacity(_ reveal: Double) -> Double {
+        min(max(reveal, 0), 1)
+    }
+
+    static func focusGlyphRange(
+        tokens: [StageToken],
+        startTokenIndex: Int,
+        endTokenIndex: Int
+    ) -> ClosedRange<Int>? {
+        guard startTokenIndex >= 0,
+              endTokenIndex >= startTokenIndex,
+              tokens.indices.contains(startTokenIndex),
+              tokens.indices.contains(endTokenIndex) else { return nil }
+        let selected = tokens[startTokenIndex...endTokenIndex]
+        guard selected.allSatisfy({ !$0.glyphRange.isEmpty }),
+              zip(selected, selected.dropFirst()).allSatisfy({ pair in
+                  pair.0.glyphRange.upperBound == pair.1.glyphRange.lowerBound
+              }) else {
+            return nil
+        }
+        let lower = selected.first?.glyphRange.lowerBound ?? 0
+        let upper = (selected.last?.glyphRange.upperBound ?? lower) - 1
+        guard upper >= lower else { return nil }
+        return lower...upper
+    }
+
+    static func semanticLensPoints(
+        points: [CGPoint],
+        widths: [CGFloat],
+        focusGlyphRange: ClosedRange<Int>,
+        scale: CGFloat = 1.12
+    ) -> [CGPoint] {
+        guard points.count == widths.count,
+              !points.isEmpty,
+              points.indices.contains(focusGlyphRange.lowerBound),
+              points.indices.contains(focusGlyphRange.upperBound) else { return points }
+        let safeScale = min(max(scale, 1), 1.18)
+        var result = points
+        var rowStart = 0
+        while rowStart < points.count {
+            var rowEnd = rowStart
+            while rowEnd + 1 < points.count,
+                  abs(points[rowEnd + 1].y - points[rowStart].y) < 0.5 {
+                rowEnd += 1
+            }
+            let rowRange = rowStart...rowEnd
+            let focused = rowRange.filter { focusGlyphRange.contains($0) }
+            let totalExtra = focused.reduce(CGFloat(0)) { partial, index in
+                partial + widths[index] * (safeScale - 1)
+            }
+            var accumulatedExtra: CGFloat = 0
+            for index in rowRange {
+                let ownExtra = focusGlyphRange.contains(index)
+                    ? widths[index] * (safeScale - 1)
+                    : 0
+                result[index].x += accumulatedExtra + ownExtra / 2 - totalExtra / 2
+                accumulatedExtra += ownExtra
+            }
+            rowStart = rowEnd + 1
+        }
+        return result
+    }
+
+    static func rail(
+        previousBounds: CGRect?,
+        currentBounds: CGRect,
+        canvasSize: CGSize
+    ) -> LyricStageV4PreparedRail {
+        let safeCurrent = currentBounds.isNull
+            ? CGRect(x: 18, y: canvasSize.height * 0.45, width: canvasSize.width - 36, height: 1)
+            : currentBounds
+        let source: CGPoint
+        if let previousBounds, !previousBounds.isNull {
+            source = CGPoint(x: previousBounds.maxX, y: previousBounds.maxY + 8)
+        } else {
+            source = CGPoint(x: 18, y: safeCurrent.minY - 20)
+        }
+        let destination = CGPoint(x: safeCurrent.minX, y: safeCurrent.maxY + 9)
+        let bend = CGPoint(x: source.x, y: destination.y)
+        return LyricStageV4PreparedRail(
+            points: [source, bend, destination, CGPoint(x: safeCurrent.maxX, y: destination.y)],
+            entryOffset: CGSize(
+                width: source.x - destination.x,
+                height: source.y - destination.y))
+    }
+
+    static func aperture(
+        textBounds: CGRect,
+        canvasSize: CGSize
+    ) -> LyricStageV4PreparedAperture {
+        let safeBounds = textBounds.isNull
+            ? CGRect(x: 18, y: canvasSize.height * 0.42, width: canvasSize.width - 36, height: 44)
+            : textBounds
+        return LyricStageV4PreparedAperture(
+            center: CGPoint(x: safeBounds.midX, y: safeBounds.maxY + 12),
+            closedHalfGap: 3,
+            openHalfGap: min(34, max(14, safeBounds.width * 0.12)),
+            halfLength: min(canvasSize.width * 0.36, max(42, safeBounds.width * 0.42)))
+    }
+}
+
+#if DEBUG
+private final class LyricStageV53PerformanceRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private let logger = Logger(
+        subsystem: "com.fubuki.BiliMusic",
+        category: "lyric-stage-v53-performance")
+    private var frameDurationsMilliseconds: [Double] = []
+    private var didReportFrames = false
+
+    func recordFrame(startNanoseconds: UInt64) {
+        let elapsed = Double(DispatchTime.now().uptimeNanoseconds - startNanoseconds) / 1_000_000
+
+        lock.lock()
+        guard !didReportFrames else {
+            lock.unlock()
+            return
+        }
+        frameDurationsMilliseconds.append(elapsed)
+        guard frameDurationsMilliseconds.count >= 240 else {
+            lock.unlock()
+            return
+        }
+
+        let sorted = frameDurationsMilliseconds.sorted()
+        didReportFrames = true
+        lock.unlock()
+
+        func percentile(_ fraction: Double) -> Double {
+            let index = min(sorted.count - 1, Int((Double(sorted.count - 1) * fraction).rounded(.up)))
+            return sorted[index]
+        }
+
+        let overBudget = sorted.filter { $0 > 16.67 }.count
+        logger.notice(
+            "V53_FRAME_SUMMARY count=\(sorted.count, privacy: .public) p50_ms=\(percentile(0.50), privacy: .public) p95_ms=\(percentile(0.95), privacy: .public) p99_ms=\(percentile(0.99), privacy: .public) max_ms=\((sorted.last ?? 0), privacy: .public) over_16_67_ms=\(overBudget, privacy: .public)")
+    }
+
+    func recordCompile(startNanoseconds: UInt64) {
+        let elapsed = Double(DispatchTime.now().uptimeNanoseconds - startNanoseconds) / 1_000_000
+        logger.notice("V53_COMPILE duration_ms=\(elapsed, privacy: .public)")
+    }
+}
+#endif
 
 /// A track-agnostic stage used to improve the reusable grammar with one stable
 /// benchmark song. It deliberately has no BVID, title, line-index, or absolute
@@ -1373,23 +1474,89 @@ struct LyricStageV53View: View {
     @Environment(\.scenePhase) private var scenePhase
 
     let isActive: Bool
+    let plan: LyricStagePlanV3
+    let audioMap: AudioPerformanceMapV2?
+    let v4Plan: LyricStagePlanV4?
     let onOpenLyrics: () -> Void
+    @State private var layoutCache = LayoutCache()
+
+    init(
+        isActive: Bool,
+        plan: LyricStagePlanV3,
+        audioMap: AudioPerformanceMapV2?,
+        v4Plan: LyricStagePlanV4? = nil,
+        onOpenLyrics: @escaping () -> Void
+    ) {
+        self.isActive = isActive
+        self.plan = plan
+        self.audioMap = audioMap
+        self.v4Plan = v4Plan
+        self.onOpenLyrics = onOpenLyrics
+    }
+
+#if DEBUG
+    private static let performanceSignposter = OSSignposter(
+        subsystem: "com.fubuki.BiliMusic",
+        category: "lyric-stage-v53-performance")
+    private static let performanceSignpostsEnabled =
+        ProcessInfo.processInfo.environment["BILIMUSIC_V53_PERF_SIGNPOSTS"] == "1"
+    private static let performanceRecorder = LyricStageV53PerformanceRecorder()
+#endif
 
     var body: some View {
         let lines = engine.lyrics
-        let plan = LyricStageV53Plan.compile(lines: lines)
-        TimelineView(.animation(minimumInterval: frameInterval, paused: scenePhase != .active)) { tick in
-            let time = playbackTime(at: tick.date)
-            GeometryReader { proxy in
+        let activeV4Plan = validatedV4Plan
+        let v4RecipesByLineIndex = activeV4Plan?.recipeByLineIndex
+        let v4Identity = activeV4Plan.map { plan in
+            [
+                plan.compilerVersion,
+                LyricStageFingerprintV3.digest(plan.recipes),
+                LyricStageFingerprintV3.digest(plan.landmarkByID),
+            ].joined(separator: "/")
+        } ?? "v3-visual"
+        GeometryReader { proxy in
+            let canvasSize = CGSize(width: min(340, proxy.size.width), height: proxy.size.height)
+            let layoutIdentity = [
+                plan.compilerVersion,
+                plan.lyricsHash,
+                LyricStageFingerprintV3.digest(plan),
+                v4Identity,
+                engine.current?.title ?? "",
+                engine.current?.artist ?? "",
+                String(format: "%.1fx%.1f", canvasSize.width, canvasSize.height),
+            ].joined(separator: "/")
+            let preparedStage = layoutCache.prepare(identity: layoutIdentity) {
+                makePreparedStage(
+                    plan: plan,
+                    lines: lines,
+                    title: engine.current?.title ?? "",
+                    artist: engine.current?.artist ?? "",
+                    size: canvasSize,
+                    v4RecipesByLineIndex: v4RecipesByLineIndex,
+                    v4LandmarkByID: activeV4Plan?.landmarkByID)
+            }
+            let resolvedPalette = LyricStagePaletteResolver.resolve(
+                strategy: .coverAnalogous,
+                cover: engine.currentArtworkPalette)
+            let primary = Color(uiColor: resolvedPalette.primary.uiColor)
+            let secondary = Color(uiColor: resolvedPalette.secondary.uiColor)
+            let accent = Color(uiColor: resolvedPalette.accent.uiColor)
+            let warm = Color(uiColor: resolvedPalette.warm.uiColor)
+            TimelineView(.animation(minimumInterval: frameInterval, paused: !shouldAnimate)) { tick in
+                let times = playbackTimes(at: tick.date)
                 Canvas { context, size in
                     draw(
-                        plan: plan,
-                        lines: lines,
+                        stage: preparedStage,
                         in: context,
                         size: size,
-                        time: time)
+                        time: times.lyric,
+                        audioTime: times.audio,
+                        primary: primary,
+                        secondary: secondary,
+                        accent: accent,
+                        warm: warm)
                 }
-                .frame(width: min(340, proxy.size.width), height: proxy.size.height)
+                .frame(width: canvasSize.width, height: canvasSize.height)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
                 .onTapGesture(perform: onOpenLyrics)
@@ -1397,7 +1564,7 @@ struct LyricStageV53View: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("V5.3 通用全曲编舞")
-        .accessibilityValue(plan.scene(at: currentPlaybackTime, lines: lines)?.composition.rawValue ?? "interlude")
+        .accessibilityValue(currentAccessibilityValue(lines: lines))
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("lyricStageV53")
     }
@@ -1407,36 +1574,96 @@ struct LyricStageV53View: View {
         return isActive ? 1.0 / 60.0 : 1.0 / 30.0
     }
 
-    private var currentPlaybackTime: Double {
-        let value = engine.avPlayer?.currentTime().seconds ?? engine.currentTime
-        return (value.isFinite ? value : engine.currentTime) + Double(engine.lyricOffsetMilliseconds) / 1_000
+    private func currentAccessibilityValue(lines: [PlayerEngine.LyricLine]) -> String {
+        guard let scene = plan.scene(at: currentPlaybackTime, lines: lines) else { return "interlude" }
+#if DEBUG
+        if UITestFixtures.usesStageV4PerformanceFixture,
+           let recipe = validatedV4Plan?.recipe(for: scene.lineIndex) {
+            return "v4:\(recipe.family.rawValue)"
+        }
+#endif
+        return scene.composition.rawValue
     }
 
-    private func playbackTime(at tickDate: Date) -> Double {
-        _ = tickDate.timeIntervalSinceReferenceDate
-        return currentPlaybackTime
+    private var validatedV4Plan: LyricStagePlanV4? {
+        guard let v4Plan,
+              v4Plan.version == LyricStagePlanV4Version.current,
+              v4Plan.grammarVersion == LyricStagePlanV4Version.grammar,
+              v4Plan.compilerVersion == LyricStagePlanV4Version.compiler,
+              v4Plan.trackID == plan.trackID,
+              v4Plan.lyricsHash == plan.lyricsHash,
+              v4Plan.basePlan == plan,
+              v4Plan.basePlan.trackID == plan.trackID,
+              v4Plan.basePlan.lyricsHash == plan.lyricsHash,
+              v4Plan.basePlan.audioSummaryHash == plan.audioSummaryHash,
+              v4Plan.audioScoreHash == v4Plan.audioScore.fingerprint,
+              v4Plan.audioScore.validated(lineCount: engine.lyrics.count) != nil else { return nil }
+        return v4Plan
+    }
+
+    private var shouldAnimate: Bool {
+        scenePhase == .active && isActive && engine.state == .playing
+    }
+
+    private var currentPlaybackTime: Double {
+        currentAudioPlaybackTime + Double(engine.lyricOffsetMilliseconds) / 1_000
+    }
+
+    private var currentAudioPlaybackTime: Double {
+        let value = engine.avPlayer?.currentTime().seconds ?? engine.currentTime
+        return value.isFinite ? value : engine.currentTime
+    }
+
+    private func playbackTimes(at tickDate: Date) -> (lyric: Double, audio: Double) {
+        var audio = currentAudioPlaybackTime
+#if DEBUG
+        // The performance fixture has no AVPlayer, so its playback time is otherwise
+        // constant and SwiftUI can legitimately reuse the Canvas. A sub-microsecond
+        // nudge keeps the selected lyric scene stable while exercising the real draw path.
+        if Self.performanceSignpostsEnabled, engine.avPlayer == nil {
+            audio += tickDate.timeIntervalSinceReferenceDate
+                .truncatingRemainder(dividingBy: 1) / 1_000_000
+        }
+#endif
+        return (audio + Double(engine.lyricOffsetMilliseconds) / 1_000, audio)
     }
 
     private func draw(
-        plan: LyricStageV53Plan,
-        lines: [PlayerEngine.LyricLine],
+        stage: PreparedStage,
         in context: GraphicsContext,
         size: CGSize,
-        time: Double
+        time: Double,
+        audioTime: Double,
+        primary: Color,
+        secondary: Color,
+        accent: Color,
+        warm: Color
     ) {
-        guard let first = lines.first, let last = lines.last else { return }
-        let palette = LyricStagePaletteResolver.resolve(
-            strategy: .coverAnalogous,
-            cover: engine.currentArtworkPalette)
-        let primary = Color(uiColor: palette.primary.uiColor)
-        let secondary = Color(uiColor: palette.secondary.uiColor)
-        let accent = Color(uiColor: palette.accent.uiColor)
-        let warm = Color(uiColor: palette.warm.uiColor)
+#if DEBUG
+        let frameStartNanoseconds = Self.performanceSignpostsEnabled
+            ? DispatchTime.now().uptimeNanoseconds
+            : nil
+        let frameInterval = Self.performanceSignpostsEnabled
+            ? Self.performanceSignposter.beginInterval("V53 Frame")
+            : nil
+        defer {
+            if let frameInterval {
+                Self.performanceSignposter.endInterval("V53 Frame", frameInterval)
+            }
+            if let frameStartNanoseconds {
+                Self.performanceRecorder.recordFrame(startNanoseconds: frameStartNanoseconds)
+            }
+        }
+#endif
+        guard let first = stage.firstLine, let last = stage.lastLine else { return }
+        let v4PreludeLineIndex = stage.v4PreludeRuntime.lineIndex(
+            lyricTime: time,
+            audioTime: audioTime)
 
-        if time < first.from {
+        if time < first.from, v4PreludeLineIndex == nil {
             drawInterlude(
-                title: engine.current?.title ?? "",
-                subtitle: engine.current?.artist ?? "",
+                layout: stage.interludeLayout,
+                subtitle: stage.artist,
                 progress: smooth(progress(
                     time,
                     start: min(1, max(0, first.from * 0.08)),
@@ -1449,7 +1676,7 @@ struct LyricStageV53View: View {
         }
         if time > last.to + 0.35 {
             drawInterlude(
-                title: engine.current?.title ?? "",
+                layout: stage.interludeLayout,
                 subtitle: "END",
                 progress: 1 - smooth(progress(time, start: last.to + 0.35, duration: 3.5)),
                 primary: primary,
@@ -1458,98 +1685,123 @@ struct LyricStageV53View: View {
                 size: size)
             return
         }
-        guard let scene = plan.scene(at: time, lines: lines),
-              lines.indices.contains(scene.lineIndex) else { return }
-        let line = lines[scene.lineIndex]
+        guard let sample = stage.runtime.sample(at: time) else { return }
+        let selectedLineIndex = v4PreludeLineIndex ?? sample.scene.lineIndex
+        guard let visual = stage.visualsByLineIndex[selectedLineIndex] else { return }
+        let scene = visual.scene
+        let line = visual.line
+        let motifPhase = sample.motifPhase
+        let audioAccent = audioAccentPulse(
+            audioTime: audioTime,
+            lyricTime: time,
+            line: line,
+            scene: scene,
+            motifPhase: motifPhase)
+        var stageContext = context
+        if !reduceMotion {
+            let entrance = time >= line.from
+                ? max(0, 1 - (time - line.from) / 0.42)
+                : 0
+            let directiveResponse = 0.006 * entrance * scene.intensity.clamped(to: 0...1)
+            let scale = 1 + CGFloat(directiveResponse)
+            stageContext.translateBy(x: size.width / 2, y: size.height / 2)
+            stageContext.scaleBy(x: scale, y: scale)
+            stageContext.translateBy(x: -size.width / 2, y: -size.height / 2)
+        }
+        if let v4 = visual.v4 {
+            drawV4(
+                visual: v4,
+                line: line,
+                primary: primary,
+                secondary: secondary,
+                accent: accent,
+                warm: warm,
+                in: stageContext,
+                size: size,
+                lyricTime: time,
+                audioTime: audioTime)
+            return
+        }
         drawSectionTransition(
             scene: scene,
             line: line,
             time: time,
             accent: accent,
-            in: context,
+            motifPhase: motifPhase,
+            audioAccent: audioAccent,
+            in: stageContext,
             size: size)
 
         switch scene.composition {
         case .stillness:
             drawAnchor(
-                line: line,
-                alignment: .center,
-                fontSize: 27,
+                prepared: visual.primary,
                 entrance: .zero,
                 primary: primary,
                 accent: accent,
-                in: context,
+                in: stageContext,
                 size: size,
                 time: time)
         case .leadingAnchor:
             drawAnchor(
-                line: line,
-                alignment: .leading,
-                fontSize: 31,
+                prepared: visual.primary,
                 entrance: CGSize(width: -46, height: 0),
                 primary: primary,
                 accent: accent,
-                in: context,
+                in: stageContext,
                 size: size,
                 time: time)
         case .trailingAnchor:
             drawAnchor(
-                line: line,
-                alignment: .trailing,
-                fontSize: 31,
+                prepared: visual.primary,
                 entrance: CGSize(width: 46, height: 0),
                 primary: primary,
                 accent: warm,
-                in: context,
+                in: stageContext,
                 size: size,
                 time: time)
         case .dialogue:
             drawDialogue(
-                scene: scene,
-                line: line,
-                lines: lines,
+                visual: visual,
                 primary: primary,
                 secondary: secondary,
                 accent: accent,
                 warm: warm,
-                in: context,
+                in: stageContext,
                 size: size,
                 time: time)
         case .stack:
             drawStack(
-                scene: scene,
-                line: line,
-                lines: lines,
+                visual: visual,
                 primary: primary,
                 secondary: secondary,
                 accent: accent,
-                in: context,
+                in: stageContext,
                 size: size,
                 time: time)
         case .arc:
             drawArc(
-                line: line,
+                visual: visual,
                 primary: primary,
                 accent: accent,
-                in: context,
+                in: stageContext,
                 size: size,
                 time: time)
         case .hero:
             drawHero(
-                line: line,
+                visual: visual,
                 primary: primary,
                 accent: warm,
-                in: context,
+                in: stageContext,
                 size: size,
                 time: time)
         case .hookCall, .hookEcho, .hookConverge, .hookLock:
             drawHook(
-                scene: scene,
-                line: line,
+                visual: visual,
                 primary: primary,
                 accent: accent,
                 warm: warm,
-                in: context,
+                in: stageContext,
                 size: size,
                 time: time)
         }
@@ -1559,18 +1811,1107 @@ struct LyricStageV53View: View {
         case leading
         case center
         case trailing
+
+        var cacheKey: String {
+            switch self {
+            case .leading: "leading"
+            case .center: "center"
+            case .trailing: "trailing"
+            }
+        }
     }
 
     private struct PositionedGlyph {
         let glyph: LyricStageGlyph
         let index: Int
         let point: CGPoint
+        let size: CGSize
+    }
+
+    private struct PreparedLineLayout {
+        let lineIndex: Int
+        let line: PlayerEngine.LyricLine
+        let fontSize: CGFloat
+        let alignment: TextAlignment
+        let canvasSize: CGSize
+        let glyphs: [LyricStageGlyph]
+        let positioned: [PositionedGlyph]
+    }
+
+    private struct PreparedArcGlyph {
+        let glyph: LyricStageGlyph
+        let index: Int
+        let point: CGPoint
+        let fontSize: CGFloat
+        let rotation: Double
+    }
+
+    private struct PreparedSceneVisual {
+        let scene: LyricStageV53Scene
+        let line: PlayerEngine.LyricLine
+        let primary: PreparedLineLayout
+        let auxiliary: [PreparedLineLayout]
+        let arcGlyphs: [PreparedArcGlyph]
+        let v4: PreparedV4SceneVisual?
+    }
+
+    private struct PreparedInterludeLayout {
+        let fontSize: CGFloat
+        let positioned: [PositionedGlyph]
+    }
+
+    private struct PreparedV4SceneVisual {
+        let family: LyricStageV4PreparedFamily
+        let driver: LyricStageV4PreparedDriver
+        let topology: String
+        let entrance: String
+        let sustain: String
+        let continuity: String
+        let motifPhase: String
+        let intensity: Double
+        let primary: PreparedLineLayout
+        let focusGlyphRange: ClosedRange<Int>?
+        let lensPoints: [CGPoint]
+        let focusRail: LyricStageV4PreparedRail?
+        let handoffRail: LyricStageV4PreparedRail?
+        let residueOffsets: [CGSize]
+        let aperture: LyricStageV4PreparedAperture?
+        let driverStartTime: Double
+        let hasRealWordTiming: Bool
+        let wrappedRuns: [LyricStageV4PreparedTextRun]
+        let budget: LyricStageV4PreparedBudget
+
+        var isHighMotion: Bool {
+            family == .chorusMemory
+                || family == .silenceAperture
+                || ["gather", "interleave", "aperture"].contains(entrance)
+        }
+    }
+
+    private struct PreparedStage {
+        let runtime: LyricStagePreparedRuntimeV3
+        let v4PreludeRuntime: LyricStageV4PreparedPreludeRuntime
+        let visualsByLineIndex: [Int: PreparedSceneVisual]
+        let firstLine: PlayerEngine.LyricLine?
+        let lastLine: PlayerEngine.LyricLine?
+        let interludeLayout: PreparedInterludeLayout
+        let artist: String
+    }
+
+    @MainActor
+    private final class LayoutCache {
+        private var identity: String?
+        private var stage: PreparedStage?
+
+        func prepare(identity: String, build: () -> PreparedStage) -> PreparedStage {
+            if self.identity == identity, let stage { return stage }
+            self.identity = identity
+            let resolved = build()
+            stage = resolved
+            return resolved
+        }
+    }
+
+    private func makePreparedStage(
+        plan: LyricStagePlanV3,
+        lines: [PlayerEngine.LyricLine],
+        title: String,
+        artist: String,
+        size: CGSize,
+        v4RecipesByLineIndex: [Int: LyricStageSceneRecipeV4]?,
+        v4LandmarkByID: [String: LyricStageResolvedLandmarkV4]?
+    ) -> PreparedStage {
+#if DEBUG
+        let compileStartNanoseconds = Self.performanceSignpostsEnabled
+            ? DispatchTime.now().uptimeNanoseconds
+            : nil
+        let compileInterval = Self.performanceSignpostsEnabled
+            ? Self.performanceSignposter.beginInterval("V53 Compile")
+            : nil
+        defer {
+            if let compileInterval {
+                Self.performanceSignposter.endInterval("V53 Compile", compileInterval)
+            }
+            if let compileStartNanoseconds {
+                Self.performanceRecorder.recordCompile(startNanoseconds: compileStartNanoseconds)
+            }
+        }
+#endif
+        var glyphsByLineID: [UUID: [LyricStageGlyph]] = [:]
+        glyphsByLineID.reserveCapacity(lines.count)
+
+        func glyphs(for line: PlayerEngine.LyricLine) -> [LyricStageGlyph] {
+            if let cached = glyphsByLineID[line.id] { return cached }
+            let compiled = LyricStageCompiler.glyphs(for: line)
+            glyphsByLineID[line.id] = compiled
+            return compiled
+        }
+
+        func preparedLayout(
+            lineIndex: Int,
+            proposedFontSize: CGFloat,
+            alignment: TextAlignment,
+            centerY: CGFloat,
+            canvasSize: CGSize
+        ) -> PreparedLineLayout {
+            let line = lines[lineIndex]
+            let compiled = glyphs(for: line)
+            let fontSize = fittedFontSize(
+                glyphCount: compiled.count,
+                proposed: proposedFontSize,
+                in: canvasSize)
+            return PreparedLineLayout(
+                lineIndex: lineIndex,
+                line: line,
+                fontSize: fontSize,
+                alignment: alignment,
+                canvasSize: canvasSize,
+                glyphs: compiled,
+                positioned: makeGlyphLayout(
+                    compiled,
+                    fontSize: fontSize,
+                    alignment: alignment,
+                    centerY: centerY,
+                    in: canvasSize))
+        }
+
+        func preparedWrappedRuns(
+            for layout: PreparedLineLayout
+        ) -> [LyricStageV4PreparedTextRun] {
+            guard !layout.positioned.isEmpty else { return [] }
+
+            func sharesTiming(_ lhs: PositionedGlyph, _ rhs: PositionedGlyph) -> Bool {
+                guard lhs.glyph.hasRealWordTiming == rhs.glyph.hasRealWordTiming else { return false }
+                guard lhs.glyph.hasRealWordTiming else { return true }
+                return abs(lhs.glyph.from - rhs.glyph.from) < 0.000_1
+                    && abs(lhs.glyph.to - rhs.glyph.to) < 0.000_1
+            }
+
+            func makeRun(
+                _ items: ArraySlice<PositionedGlyph>,
+                preserveRowBreaks: Bool = false
+            ) -> LyricStageV4PreparedTextRun {
+                let bounds = positionedBounds(Array(items))
+                let hasRealWordTiming = items.allSatisfy { $0.glyph.hasRealWordTiming }
+                var text = ""
+                var previousY: CGFloat?
+                for item in items {
+                    if preserveRowBreaks,
+                       let previousY,
+                       abs(previousY - item.point.y) >= 0.5 {
+                        text.append("\n")
+                    }
+                    text.append(contentsOf: item.glyph.text)
+                    previousY = item.point.y
+                }
+                return LyricStageV4PreparedTextRun(
+                    text: text,
+                    point: CGPoint(x: bounds.midX, y: bounds.midY),
+                    from: hasRealWordTiming ? (items.map(\.glyph.from).min() ?? layout.line.from) : layout.line.from,
+                    to: hasRealWordTiming ? (items.map(\.glyph.to).max() ?? layout.line.to) : layout.line.to,
+                    hasRealWordTiming: hasRealWordTiming)
+            }
+
+            var ranges: [Range<Int>] = []
+            var start = 0
+            for index in layout.positioned.indices.dropFirst() {
+                let previous = layout.positioned[index - 1]
+                let current = layout.positioned[index]
+                let sameRow = abs(previous.point.y - current.point.y) < 0.5
+                if !sameRow || !sharesTiming(previous, current) {
+                    ranges.append(start..<index)
+                    start = index
+                }
+            }
+            ranges.append(start..<layout.positioned.count)
+            if ranges.count <= LyricStageV4RendererPreparation.maximumTextDraws {
+                return ranges.map { makeRun(layout.positioned[$0]) }
+            }
+
+            // Pathological word-dense text falls back one step further to row
+            // transforms. The complete string remains present and draw count is
+            // bounded independently of character count.
+            ranges.removeAll(keepingCapacity: true)
+            start = 0
+            for index in layout.positioned.indices.dropFirst() {
+                if abs(layout.positioned[index - 1].point.y - layout.positioned[index].point.y) >= 0.5 {
+                    ranges.append(start..<index)
+                    start = index
+                }
+            }
+            ranges.append(start..<layout.positioned.count)
+            if ranges.count <= LyricStageV4RendererPreparation.maximumTextDraws {
+                return ranges.map { makeRun(layout.positioned[$0]) }
+            }
+
+            let rowsPerRun = Int(ceil(
+                Double(ranges.count) / Double(LyricStageV4RendererPreparation.maximumTextDraws)))
+            return stride(from: 0, to: ranges.count, by: rowsPerRun).map { rowStart in
+                let rowEnd = min(ranges.count, rowStart + rowsPerRun)
+                let glyphStart = ranges[rowStart].lowerBound
+                let glyphEnd = ranges[rowEnd - 1].upperBound
+                return makeRun(
+                    layout.positioned[glyphStart..<glyphEnd],
+                    preserveRowBreaks: true)
+            }
+        }
+
+        func preparedV4Visual(
+            recipe: LyricStageSceneRecipeV4,
+            scene: LyricStageV53Scene
+        ) -> PreparedV4SceneVisual? {
+            let lineIndex = scene.lineIndex
+            guard lines.indices.contains(lineIndex),
+                  recipe.lineIndex == lineIndex,
+                  let family = LyricStageV4PreparedFamily(rawValue: recipe.family.rawValue) else {
+                return nil
+            }
+            let topology = recipe.topology.rawValue
+            let entrance = recipe.entrance.rawValue
+            let focus = recipe.focus.rawValue
+            let sustain = recipe.sustain.rawValue
+            let continuity = recipe.continuity.rawValue
+            let requestedDriver = LyricStageV4PreparedDriver(rawValue: recipe.driver.rawValue)
+                ?? .lyricReveal
+            let line = lines[lineIndex]
+            let compiledGlyphs = glyphs(for: line)
+            let requestedEchoLayers: Int
+
+            switch family {
+            case .railHandoff:
+                guard ["anchor", "relay"].contains(topology),
+                      ["settle", "slide", "gather"].contains(entrance),
+                      focus == "wholeLine",
+                      ["none", "railTravel", "trackingBreath"].contains(sustain),
+                      ["handoff", "residue"].contains(continuity),
+                      [.lyricReveal, .structuralMoment, .sectionEdge].contains(requestedDriver) else {
+                    return nil
+                }
+                requestedEchoLayers = 0
+            case .semanticLens:
+                guard ["anchor", "lockup"].contains(topology),
+                      ["settle", "gather"].contains(entrance),
+                      focus == "tokenRange",
+                      ["weightBloom", "sweep", "trackingBreath"].contains(sustain),
+                      ["clear", "residue"].contains(continuity),
+                      [.lyricReveal, .wordReveal].contains(requestedDriver),
+                      recipe.tokenRange != nil else { return nil }
+                requestedEchoLayers = 0
+            case .chorusMemory:
+                guard ["stack", "relay", "lockup"].contains(topology),
+                      ["gather", "interleave", "settle"].contains(entrance),
+                      focus == "wholeLine",
+                      sustain == "echo",
+                      ["residue", "accumulate"].contains(continuity),
+                      [.lyricReveal, .structuralMoment, .sectionEdge].contains(requestedDriver),
+                      scene.repetitionCount >= 2 else { return nil }
+                requestedEchoLayers = continuity == "accumulate" ? 2 : 1
+            case .silenceAperture:
+                guard ["anchor", "split"].contains(topology),
+                      entrance == "aperture",
+                      focus == "wholeLine",
+                      ["none", "weightBloom"].contains(sustain),
+                      continuity == "clear",
+                      [.structuralMoment, .sectionEdge].contains(requestedDriver),
+                      !recipe.landmarkIDs.isEmpty else { return nil }
+                requestedEchoLayers = 0
+            }
+
+            let budget = LyricStageV4RendererPreparation.budget(
+                glyphCount: compiledGlyphs.count,
+                requestedEchoLayers: requestedEchoLayers)
+
+            let alignment: TextAlignment
+            let proposedFontSize: CGFloat
+            switch family {
+            case .railHandoff:
+                if topology == "relay" {
+                    alignment = scene.sectionIndex.isMultiple(of: 2) ? .leading : .trailing
+                } else {
+                    alignment = .leading
+                }
+                proposedFontSize = 31
+            case .semanticLens:
+                alignment = topology == "lockup" ? .center : .leading
+                proposedFontSize = 32
+            case .chorusMemory:
+                alignment = .center
+                proposedFontSize = compiledGlyphs.count > 14 ? 35 : 48
+            case .silenceAperture:
+                alignment = .center
+                proposedFontSize = 34
+            }
+            let primary = preparedLayout(
+                lineIndex: lineIndex,
+                proposedFontSize: proposedFontSize,
+                alignment: alignment,
+                centerY: size.height * 0.50,
+                canvasSize: size)
+            let wrappedRuns = budget.usesWrappedFallback
+                ? preparedWrappedRuns(for: primary)
+                : []
+            let resolvedBudget = budget.usesWrappedFallback
+                ? LyricStageV4PreparedBudget(
+                    transformedGlyphCount: 0,
+                    echoLayerCount: 0,
+                    estimatedTextDrawCount: wrappedRuns.count,
+                    usesWrappedFallback: true)
+                : budget
+
+            let focusGlyphRange: ClosedRange<Int>?
+            if family == .semanticLens, let tokenRange = recipe.tokenRange {
+                focusGlyphRange = LyricStageV4RendererPreparation.focusGlyphRange(
+                    tokens: LyricStageTokenizer.tokens(for: line),
+                    startTokenIndex: tokenRange.startTokenIndex,
+                    endTokenIndex: tokenRange.endTokenIndex)
+                guard let focusGlyphRange,
+                      primary.positioned.indices.contains(focusGlyphRange.lowerBound),
+                      primary.positioned.indices.contains(focusGlyphRange.upperBound) else { return nil }
+            } else {
+                focusGlyphRange = nil
+            }
+
+            let lensPoints: [CGPoint]
+            let focusRail: LyricStageV4PreparedRail?
+            if let focusGlyphRange {
+                lensPoints = LyricStageV4RendererPreparation.semanticLensPoints(
+                    points: primary.positioned.map(\.point),
+                    widths: primary.positioned.map { $0.size.width },
+                    focusGlyphRange: focusGlyphRange)
+                let focusBounds = positionedBounds(
+                    Array(primary.positioned[focusGlyphRange]))
+                let y = focusBounds.maxY + 8
+                focusRail = LyricStageV4PreparedRail(
+                    points: [
+                        CGPoint(x: focusBounds.minX, y: y),
+                        CGPoint(x: focusBounds.maxX, y: y),
+                    ],
+                    entryOffset: .zero)
+            } else {
+                lensPoints = primary.positioned.map(\.point)
+                focusRail = nil
+            }
+
+            let handoffRail: LyricStageV4PreparedRail?
+            if family == .railHandoff {
+                let candidate = recipe.companionLineIndices.first
+                    ?? (lineIndex > 0 ? lineIndex - 1 : -1)
+                let previousBounds: CGRect?
+                if lines.indices.contains(candidate) {
+                    let previous = preparedLayout(
+                        lineIndex: candidate,
+                        proposedFontSize: 19,
+                        alignment: alignment == .leading ? .trailing : .leading,
+                        centerY: size.height * 0.34,
+                        canvasSize: size)
+                    previousBounds = positionedBounds(previous.positioned)
+                } else {
+                    previousBounds = nil
+                }
+                handoffRail = LyricStageV4RendererPreparation.rail(
+                    previousBounds: previousBounds,
+                    currentBounds: positionedBounds(primary.positioned),
+                    canvasSize: size)
+            } else {
+                handoffRail = nil
+            }
+
+            var resolvedLandmark: LyricStageResolvedLandmarkV4?
+            for landmarkID in recipe.landmarkIDs {
+                guard let candidate = v4LandmarkByID?[landmarkID],
+                      candidate.confidence >= 0.20 else { continue }
+                resolvedLandmark = candidate
+                break
+            }
+            if family == .silenceAperture {
+                guard let resolvedLandmark,
+                      ["sectionStart", "silenceExit"].contains(resolvedLandmark.kind.rawValue) else {
+                    return nil
+                }
+            }
+
+            let hasRealWordTiming = !primary.glyphs.isEmpty
+                && primary.glyphs.allSatisfy { $0.hasRealWordTiming }
+            let focusHasRealWordTiming = focusGlyphRange.map { range in
+                primary.glyphs[range].allSatisfy { $0.hasRealWordTiming }
+            } ?? hasRealWordTiming
+            let driver: LyricStageV4PreparedDriver
+            let driverStartTime: Double
+            switch requestedDriver {
+            case .wordReveal where focusHasRealWordTiming:
+                driver = .wordReveal
+                if let focusGlyphRange {
+                    driverStartTime = primary.glyphs[focusGlyphRange]
+                        .map(\.from)
+                        .min() ?? line.from
+                } else {
+                    driverStartTime = line.from
+                }
+            case .structuralMoment where resolvedLandmark != nil:
+                driver = .structuralMoment
+                driverStartTime = resolvedLandmark?.from ?? line.from
+            case .sectionEdge where resolvedLandmark?.kind.rawValue == "sectionStart":
+                driver = .sectionEdge
+                driverStartTime = resolvedLandmark?.from ?? line.from
+            default:
+                if family == .silenceAperture { return nil }
+                driver = .lyricReveal
+                driverStartTime = line.from
+            }
+
+            let residueOffsets: [CGSize]
+            if family == .chorusMemory {
+                let candidates: [CGSize]
+                switch topology {
+                case "stack":
+                    candidates = [CGSize(width: 0, height: 7), CGSize(width: 0, height: 14)]
+                case "lockup":
+                    candidates = [CGSize(width: -6, height: 4), CGSize(width: 6, height: -4)]
+                default:
+                    candidates = recipe.motifPhase.rawValue == "transform"
+                        ? [CGSize(width: -10, height: 5), CGSize(width: 10, height: -4)]
+                        : [CGSize(width: 8, height: 4), CGSize(width: 15, height: 7)]
+                }
+                residueOffsets = Array(candidates.prefix(resolvedBudget.echoLayerCount))
+            } else {
+                residueOffsets = []
+            }
+
+            let aperture = family == .silenceAperture
+                ? LyricStageV4RendererPreparation.aperture(
+                    textBounds: positionedBounds(primary.positioned),
+                    canvasSize: size)
+                : nil
+            return PreparedV4SceneVisual(
+                family: family,
+                driver: driver,
+                topology: topology,
+                entrance: entrance,
+                sustain: sustain,
+                continuity: continuity,
+                motifPhase: recipe.motifPhase.rawValue,
+                intensity: recipe.intensity.clamped(to: 0.25...1),
+                primary: primary,
+                focusGlyphRange: focusGlyphRange,
+                lensPoints: lensPoints,
+                focusRail: focusRail,
+                handoffRail: handoffRail,
+                residueOffsets: residueOffsets,
+                aperture: aperture,
+                driverStartTime: driverStartTime,
+                hasRealWordTiming: hasRealWordTiming,
+                wrappedRuns: wrappedRuns,
+                budget: resolvedBudget)
+        }
+
+        var visuals: [Int: PreparedSceneVisual] = [:]
+        visuals.reserveCapacity(plan.scenes.count)
+        var consecutiveHighMotionScenes = 0
+        for scene in plan.scenes where lines.indices.contains(scene.lineIndex) {
+            let lineIndex = scene.lineIndex
+            let line = lines[lineIndex]
+            let primary: PreparedLineLayout
+            var auxiliary: [PreparedLineLayout] = []
+            var arcGlyphs: [PreparedArcGlyph] = []
+
+            switch scene.composition {
+            case .stillness:
+                primary = preparedLayout(
+                    lineIndex: lineIndex,
+                    proposedFontSize: 27,
+                    alignment: .center,
+                    centerY: size.height * 0.50,
+                    canvasSize: size)
+            case .leadingAnchor:
+                primary = preparedLayout(
+                    lineIndex: lineIndex,
+                    proposedFontSize: 31,
+                    alignment: .leading,
+                    centerY: size.height * 0.50,
+                    canvasSize: size)
+            case .trailingAnchor:
+                primary = preparedLayout(
+                    lineIndex: lineIndex,
+                    proposedFontSize: 31,
+                    alignment: .trailing,
+                    centerY: size.height * 0.50,
+                    canvasSize: size)
+            case .dialogue:
+                let currentOnLeading = scene.sectionIndex.isMultiple(of: 2)
+                let anchorSize = CGSize(width: size.width, height: size.height * 0.82)
+                primary = preparedLayout(
+                    lineIndex: lineIndex,
+                    proposedFontSize: 30,
+                    alignment: currentOnLeading ? .leading : .trailing,
+                    centerY: anchorSize.height * 0.50,
+                    canvasSize: anchorSize)
+                if let companion = scene.companionLineIndices.last,
+                   lines.indices.contains(companion) {
+                    auxiliary = [preparedLayout(
+                        lineIndex: companion,
+                        proposedFontSize: 19,
+                        alignment: currentOnLeading ? .trailing : .leading,
+                        centerY: size.height * 0.76,
+                        canvasSize: size)]
+                }
+            case .stack:
+                let entries = (scene.companionLineIndices + [lineIndex])
+                    .filter { lines.indices.contains($0) }
+                    .sorted()
+                let startY = size.height * 0.28
+                auxiliary = entries.enumerated().map { position, index in
+                    preparedLayout(
+                        lineIndex: index,
+                        proposedFontSize: index == lineIndex ? 34 : 20,
+                        alignment: index == lineIndex ? .leading : .trailing,
+                        centerY: startY + CGFloat(position) * min(56, size.height * 0.22),
+                        canvasSize: CGSize(width: size.width, height: size.height * 0.55))
+                }
+                primary = auxiliary.first(where: { $0.lineIndex == lineIndex })
+                    ?? preparedLayout(
+                        lineIndex: lineIndex,
+                        proposedFontSize: 34,
+                        alignment: .leading,
+                        centerY: startY,
+                        canvasSize: CGSize(width: size.width, height: size.height * 0.55))
+            case .arc:
+                let compiled = glyphs(for: line)
+                let count = max(1, compiled.count)
+                let usableWidth = size.width - 38
+                arcGlyphs = compiled.enumerated().map { index, glyph in
+                    let normalized = count == 1 ? 0.5 : Double(index) / Double(count - 1)
+                    return PreparedArcGlyph(
+                        glyph: glyph,
+                        index: index,
+                        point: CGPoint(
+                            x: 19 + usableWidth * CGFloat(normalized),
+                            y: size.height * 0.57 - CGFloat(sin(normalized * .pi) * 54)),
+                        fontSize: compiled.count > 16 ? 23 : 29,
+                        rotation: (normalized - 0.5) * 18)
+                }
+                primary = PreparedLineLayout(
+                    lineIndex: lineIndex,
+                    line: line,
+                    fontSize: compiled.count > 16 ? 23 : 29,
+                    alignment: .center,
+                    canvasSize: size,
+                    glyphs: compiled,
+                    positioned: [])
+            case .hero:
+                let count = glyphs(for: line).count
+                primary = preparedLayout(
+                    lineIndex: lineIndex,
+                    proposedFontSize: count <= 2 ? 64 : 52,
+                    alignment: .center,
+                    centerY: size.height * 0.50,
+                    canvasSize: size)
+            case .hookCall, .hookEcho, .hookConverge, .hookLock:
+                let count = glyphs(for: line).count
+                primary = preparedLayout(
+                    lineIndex: lineIndex,
+                    proposedFontSize: count > 14 ? 35 : 48,
+                    alignment: .center,
+                    centerY: size.height * 0.50,
+                    canvasSize: size)
+            }
+
+            var v4 = v4RecipesByLineIndex?[lineIndex].flatMap { recipe in
+                preparedV4Visual(recipe: recipe, scene: scene)
+            }
+            if v4?.isHighMotion == true {
+                if consecutiveHighMotionScenes >= 2 {
+                    v4 = nil
+                    consecutiveHighMotionScenes = 0
+                } else {
+                    consecutiveHighMotionScenes += 1
+                }
+            } else {
+                consecutiveHighMotionScenes = 0
+            }
+            visuals[lineIndex] = PreparedSceneVisual(
+                scene: scene,
+                line: line,
+                primary: primary,
+                auxiliary: auxiliary,
+                arcGlyphs: arcGlyphs,
+                v4: v4)
+        }
+
+        let safeTitle = title.isEmpty ? "MUSIC" : title
+        let titleFontSize: CGFloat = safeTitle.count > 18 ? 30 : 44
+        let titleGlyphs = syntheticGlyphs(for: safeTitle)
+        let interlude = PreparedInterludeLayout(
+            fontSize: titleFontSize,
+            positioned: makeGlyphLayout(
+                titleGlyphs,
+                fontSize: titleFontSize,
+                alignment: .leading,
+                centerY: size.height * 0.48,
+                in: size))
+        let preludeWindows = visuals.values.compactMap { visual -> LyricStageV4PreparedPreludeRuntime.Window? in
+            guard let v4 = visual.v4,
+                  v4.family == .silenceAperture,
+                  !v4.budget.usesWrappedFallback else { return nil }
+            return LyricStageV4PreparedPreludeRuntime.Window(
+                lineIndex: visual.scene.lineIndex,
+                audioFrom: v4.driverStartTime,
+                lyricTo: visual.line.from)
+        }
+        return PreparedStage(
+            runtime: LyricStagePreparedRuntimeV3(plan: plan, lines: lines),
+            v4PreludeRuntime: LyricStageV4PreparedPreludeRuntime(windows: preludeWindows),
+            visualsByLineIndex: visuals,
+            firstLine: lines.first,
+            lastLine: lines.last,
+            interludeLayout: interlude,
+            artist: artist)
+    }
+
+    private func drawV4(
+        visual: PreparedV4SceneVisual,
+        line: PlayerEngine.LyricLine,
+        primary: Color,
+        secondary: Color,
+        accent: Color,
+        warm: Color,
+        in context: GraphicsContext,
+        size: CGSize,
+        lyricTime: Double,
+        audioTime: Double
+    ) {
+        if visual.budget.usesWrappedFallback {
+            drawV4WrappedFallback(
+                visual: visual,
+                line: line,
+                primary: primary,
+                accent: accent,
+                in: context,
+                lyricTime: lyricTime)
+            return
+        }
+        switch visual.family {
+        case .railHandoff:
+            drawV4RailHandoff(
+                visual: visual,
+                line: line,
+                primary: primary,
+                accent: accent,
+                in: context,
+                lyricTime: lyricTime,
+                audioTime: audioTime)
+        case .semanticLens:
+            drawV4SemanticLens(
+                visual: visual,
+                line: line,
+                primary: primary,
+                secondary: secondary,
+                accent: accent,
+                in: context,
+                lyricTime: lyricTime,
+                audioTime: audioTime)
+        case .chorusMemory:
+            drawV4ChorusMemory(
+                visual: visual,
+                line: line,
+                primary: primary,
+                accent: accent,
+                warm: warm,
+                in: context,
+                lyricTime: lyricTime,
+                audioTime: audioTime)
+        case .silenceAperture:
+            drawV4SilenceAperture(
+                visual: visual,
+                line: line,
+                primary: primary,
+                secondary: secondary,
+                accent: accent,
+                in: context,
+                size: size,
+                lyricTime: lyricTime,
+                audioTime: audioTime)
+        }
+    }
+
+    private func drawV4WrappedFallback(
+        visual: PreparedV4SceneVisual,
+        line: PlayerEngine.LyricLine,
+        primary: Color,
+        accent: Color,
+        in context: GraphicsContext,
+        lyricTime: Double
+    ) {
+        let linePhase = smooth(progress(lyricTime, start: line.from, duration: 0.42))
+        for run in visual.wrappedRuns {
+            let raw = progress(
+                lyricTime,
+                start: run.hasRealWordTiming ? run.from : line.from,
+                duration: min(0.34, max(0.10, run.to - run.from)))
+            let reveal = reduceMotion ? (raw > 0 ? 1 : 0) : backOut(raw)
+            guard reveal > 0.001 else { continue }
+            let offset = reduceMotion
+                ? CGSize.zero
+                : CGSize(width: -18 * (1 - CGFloat(linePhase)), height: 0)
+            drawGlyph(
+                run.text,
+                at: run.point,
+                fontSize: visual.primary.fontSize,
+                color: primary,
+                opacity: LyricStageV4RendererPreparation.revealedTextOpacity(reveal),
+                offset: offset,
+                scale: 1,
+                weight: .bold,
+                in: context)
+        }
+        guard linePhase > 0.001,
+              let first = visual.wrappedRuns.first,
+              let last = visual.wrappedRuns.last else { return }
+        var rail = Path()
+        let railY = max(first.point.y, last.point.y) + visual.primary.fontSize * 0.72
+        rail.move(to: CGPoint(x: 16, y: railY))
+        rail.addLine(to: CGPoint(x: 16 + 54 * CGFloat(linePhase), y: railY))
+        context.stroke(
+            rail,
+            with: .color(accent.opacity(0.32 * linePhase)),
+            lineWidth: 1.1)
+    }
+
+    private func drawV4RailHandoff(
+        visual: PreparedV4SceneVisual,
+        line: PlayerEngine.LyricLine,
+        primary: Color,
+        accent: Color,
+        in context: GraphicsContext,
+        lyricTime: Double,
+        audioTime: Double
+    ) {
+        let phase = v4Phase(
+            visual: visual,
+            line: line,
+            lyricTime: lyricTime,
+            audioTime: audioTime,
+            duration: 0.58)
+        if let rail = visual.handoffRail {
+            drawV4Rail(
+                rail,
+                progress: reduceMotion ? (lyricTime >= line.from ? 1 : 0) : phase,
+                color: accent.opacity(0.24 + 0.30 * phase),
+                lineWidth: 1.2 + visual.intensity * 0.8,
+                in: context)
+        }
+        let travel = reduceMotion ? 1 : phase
+        let entry = visual.handoffRail?.entryOffset ?? .zero
+        for item in visual.primary.positioned {
+            let glyphReveal = v4GlyphReveal(
+                item.glyph,
+                visual: visual,
+                line: line,
+                lyricTime: lyricTime)
+            let isRevealed = glyphReveal > 0.001
+            var offset = CGSize(
+                width: entry.width * (1 - CGFloat(travel)),
+                height: entry.height * (1 - CGFloat(travel)))
+            if visual.entrance == "gather", !reduceMotion {
+                let side: CGFloat = item.index < visual.primary.positioned.count / 2 ? -1 : 1
+                offset.width += side * 26 * (1 - CGFloat(phase))
+            } else if visual.entrance == "settle", !reduceMotion {
+                offset.height += 10 * (1 - CGFloat(phase))
+            }
+            if visual.sustain == "trackingBreath", !reduceMotion, isRevealed {
+                let direction: CGFloat = item.index.isMultiple(of: 2) ? -1 : 1
+                offset.width += direction
+                    * 1.1
+                    * CGFloat(LyricStageCalmMotion.oneShotPulse(phase))
+            }
+            drawGlyph(
+                item.glyph.text,
+                at: item.point,
+                fontSize: visual.primary.fontSize,
+                color: item.index == visual.primary.positioned.count - 1 ? accent : primary,
+                opacity: LyricStageV4RendererPreparation.revealedTextOpacity(glyphReveal),
+                offset: offset,
+                scale: 1,
+                in: context)
+        }
+    }
+
+    private func drawV4SemanticLens(
+        visual: PreparedV4SceneVisual,
+        line: PlayerEngine.LyricLine,
+        primary: Color,
+        secondary: Color,
+        accent: Color,
+        in context: GraphicsContext,
+        lyricTime: Double,
+        audioTime: Double
+    ) {
+        guard let focus = visual.focusGlyphRange else { return }
+        let phase = v4Phase(
+            visual: visual,
+            line: line,
+            lyricTime: lyricTime,
+            audioTime: audioTime,
+            duration: 0.50)
+        for item in visual.primary.positioned {
+            let glyphReveal = v4GlyphReveal(
+                item.glyph,
+                visual: visual,
+                line: line,
+                lyricTime: lyricTime)
+            let focused = focus.contains(item.index)
+            let focusPhase = visual.driver == .wordReveal && focused
+                ? glyphReveal
+                : phase
+            let layoutPhase = reduceMotion ? (focusPhase > 0 ? 1 : 0) : focusPhase
+            let target = visual.lensPoints[item.index]
+            let position = CGPoint(
+                x: item.point.x + (target.x - item.point.x) * CGFloat(layoutPhase),
+                y: item.point.y + (target.y - item.point.y) * CGFloat(layoutPhase))
+            var offset = CGSize.zero
+            if visual.sustain == "trackingBreath", focused, !reduceMotion, glyphReveal > 0 {
+                offset.height = -1.2 * CGFloat(LyricStageCalmMotion.oneShotPulse(focusPhase))
+            }
+            let bloom = focused ? focusPhase : 0
+            let scale = reduceMotion
+                ? 1
+                : 1 + (visual.sustain == "weightBloom" ? 0.12 : 0.06) * bloom
+            let color: Color
+            if focused {
+                if visual.sustain == "sweep" {
+                    let span = max(1, focus.upperBound - focus.lowerBound)
+                    let localPosition = Double(item.index - focus.lowerBound) / Double(span)
+                    let sweep = min(max(phase * 1.35 - localPosition * 0.35, 0), 1)
+                    color = sweep >= 0.35 ? accent : primary
+                } else {
+                    color = accent
+                }
+            } else {
+                color = phase > 0.35 ? secondary.opacity(0.82) : primary
+            }
+            drawGlyph(
+                item.glyph.text,
+                at: position,
+                fontSize: visual.primary.fontSize,
+                color: color,
+                opacity: LyricStageV4RendererPreparation.revealedTextOpacity(glyphReveal),
+                offset: offset,
+                scale: scale,
+                weight: focused ? .black : .semibold,
+                in: context)
+        }
+        if let rail = visual.focusRail {
+            drawV4Rail(
+                rail,
+                progress: reduceMotion ? (lyricTime >= line.from ? 1 : 0) : phase,
+                color: accent.opacity(0.18 + 0.46 * phase),
+                lineWidth: 1.1 + visual.intensity * 0.9,
+                in: context)
+        }
+    }
+
+    private func drawV4ChorusMemory(
+        visual: PreparedV4SceneVisual,
+        line: PlayerEngine.LyricLine,
+        primary: Color,
+        accent: Color,
+        warm: Color,
+        in context: GraphicsContext,
+        lyricTime: Double,
+        audioTime: Double
+    ) {
+        let phase = v4Phase(
+            visual: visual,
+            line: line,
+            lyricTime: lyricTime,
+            audioTime: audioTime,
+            duration: 0.64)
+        if !reduceMotion {
+            for (layer, residueOffset) in visual.residueOffsets.enumerated() {
+                for item in visual.primary.positioned {
+                    let glyphReveal = v4GlyphReveal(
+                        item.glyph,
+                        visual: visual,
+                        line: line,
+                        lyricTime: lyricTime,
+                        delay: Double(layer + 1) * 0.045)
+                    guard glyphReveal > 0.001 else { continue }
+                    drawGlyph(
+                        item.glyph.text,
+                        at: item.point,
+                        fontSize: visual.primary.fontSize,
+                        color: layer.isMultiple(of: 2) ? accent : warm,
+                        opacity: LyricStageV4RendererPreparation.revealedTextOpacity(glyphReveal)
+                            * (layer == 0 ? 0.16 : 0.09),
+                        offset: residueOffset,
+                        scale: 0.98 + 0.02 * phase,
+                        in: context)
+                }
+            }
+        }
+        for item in visual.primary.positioned {
+            let glyphReveal = v4GlyphReveal(
+                item.glyph,
+                visual: visual,
+                line: line,
+                lyricTime: lyricTime)
+            let side: CGFloat = item.index < visual.primary.positioned.count / 2 ? -1 : 1
+            var offset = CGSize.zero
+            if !reduceMotion {
+                switch visual.entrance {
+                case "gather":
+                    offset.width = side * 62 * (1 - CGFloat(phase))
+                case "interleave":
+                    offset.height = (item.index.isMultiple(of: 2) ? -22 : 22) * (1 - CGFloat(phase))
+                default:
+                    offset.height = 9 * (1 - CGFloat(phase))
+                }
+            }
+            drawGlyph(
+                item.glyph.text,
+                at: item.point,
+                fontSize: visual.primary.fontSize,
+                color: visual.motifPhase == "resolve" ? warm : primary,
+                opacity: LyricStageV4RendererPreparation.revealedTextOpacity(glyphReveal),
+                offset: offset,
+                scale: reduceMotion ? 1 : 0.94 + 0.06 * phase,
+                in: context)
+        }
+    }
+
+    private func drawV4SilenceAperture(
+        visual: PreparedV4SceneVisual,
+        line: PlayerEngine.LyricLine,
+        primary: Color,
+        secondary: Color,
+        accent: Color,
+        in context: GraphicsContext,
+        size: CGSize,
+        lyricTime: Double,
+        audioTime: Double
+    ) {
+        let aperturePhase = smooth(progress(
+            audioTime,
+            start: visual.driverStartTime,
+            duration: 0.62))
+        if let aperture = visual.aperture {
+            drawV4Aperture(
+                aperture,
+                progress: reduceMotion
+                    ? (audioTime >= visual.driverStartTime ? 1 : 0)
+                    : aperturePhase,
+                color: accent.opacity(0.18 + 0.44 * aperturePhase),
+                lineWidth: 1.0 + visual.intensity * 0.9,
+                in: context)
+        }
+        guard lyricTime >= line.from else { return }
+        let linePhase = smooth(progress(lyricTime, start: line.from, duration: 0.48))
+        for item in visual.primary.positioned {
+            let glyphReveal = v4GlyphReveal(
+                item.glyph,
+                visual: visual,
+                line: line,
+                lyricTime: lyricTime)
+            let bloom = visual.sustain == "weightBloom" ? linePhase : 0
+            let splitOffset: CGSize
+            if visual.topology == "split", !reduceMotion {
+                let side: CGFloat = item.index < visual.primary.positioned.count / 2 ? -1 : 1
+                splitOffset = CGSize(width: side * 22 * (1 - CGFloat(linePhase)), height: 0)
+            } else {
+                splitOffset = .zero
+            }
+            drawGlyph(
+                item.glyph.text,
+                at: item.point,
+                fontSize: visual.primary.fontSize,
+                color: glyphReveal > 0 ? primary : secondary,
+                opacity: LyricStageV4RendererPreparation.revealedTextOpacity(glyphReveal),
+                offset: splitOffset,
+                scale: reduceMotion || glyphReveal <= 0
+                    ? 1
+                    : 0.97 + 0.03 * linePhase + 0.018 * bloom,
+                in: context)
+        }
+        _ = size
+    }
+
+    private func v4Phase(
+        visual: PreparedV4SceneVisual,
+        line: PlayerEngine.LyricLine,
+        lyricTime: Double,
+        audioTime: Double,
+        duration: Double
+    ) -> Double {
+        let start = visual.driver == .wordReveal
+            ? max(line.from, visual.driverStartTime)
+            : visual.driverStartTime
+        let clockTime = LyricStageV4RendererPreparation.driverClockTime(
+            driver: visual.driver,
+            lyricTime: lyricTime,
+            audioTime: audioTime)
+        return smooth(progress(clockTime, start: start, duration: duration))
+    }
+
+    private func v4GlyphReveal(
+        _ glyph: LyricStageGlyph,
+        visual: PreparedV4SceneVisual,
+        line: PlayerEngine.LyricLine,
+        lyricTime: Double,
+        delay: Double = 0
+    ) -> Double {
+        guard !visual.hasRealWordTiming else {
+            return reveal(glyph, time: lyricTime, delay: delay)
+        }
+        let raw = progress(
+            lyricTime,
+            start: line.from + delay,
+            duration: min(0.34, max(0.16, line.to - line.from)))
+        return reduceMotion ? (raw > 0 ? 1 : 0) : backOut(raw)
+    }
+
+    private func drawV4Rail(
+        _ rail: LyricStageV4PreparedRail,
+        progress: Double,
+        color: Color,
+        lineWidth: CGFloat,
+        in context: GraphicsContext
+    ) {
+        guard rail.points.count >= 2 else { return }
+        let segmentCount = rail.points.count - 1
+        for index in 0..<segmentCount {
+            let local = min(max(progress * Double(segmentCount) - Double(index), 0), 1)
+            guard local > 0.001 else { continue }
+            let start = rail.points[index]
+            let end = rail.points[index + 1]
+            var path = Path()
+            path.move(to: start)
+            path.addLine(to: CGPoint(
+                x: start.x + (end.x - start.x) * CGFloat(local),
+                y: start.y + (end.y - start.y) * CGFloat(local)))
+            context.stroke(path, with: .color(color), lineWidth: lineWidth)
+        }
+    }
+
+    private func drawV4Aperture(
+        _ aperture: LyricStageV4PreparedAperture,
+        progress: Double,
+        color: Color,
+        lineWidth: CGFloat,
+        in context: GraphicsContext
+    ) {
+        let phase = CGFloat(min(max(progress, 0), 1))
+        let gap = aperture.closedHalfGap
+            + (aperture.openHalfGap - aperture.closedHalfGap) * phase
+        let length = aperture.halfLength * (0.55 + 0.45 * phase)
+        var path = Path()
+        path.move(to: CGPoint(x: aperture.center.x - gap - length, y: aperture.center.y))
+        path.addLine(to: CGPoint(x: aperture.center.x - gap, y: aperture.center.y))
+        path.move(to: CGPoint(x: aperture.center.x + gap, y: aperture.center.y))
+        path.addLine(to: CGPoint(x: aperture.center.x + gap + length, y: aperture.center.y))
+        context.stroke(path, with: .color(color), lineWidth: lineWidth)
     }
 
     private func drawAnchor(
-        line: PlayerEngine.LyricLine,
-        alignment: TextAlignment,
-        fontSize: CGFloat,
+        prepared: PreparedLineLayout,
         entrance: CGSize,
         primary: Color,
         accent: Color,
@@ -1578,13 +2919,9 @@ struct LyricStageV53View: View {
         size: CGSize,
         time: Double
     ) {
-        let glyphs = LyricStageCompiler.glyphs(for: line)
-        let layout = layoutGlyphs(
-            glyphs,
-            fontSize: fontSize,
-            alignment: alignment,
-            centerY: size.height * 0.50,
-            in: size)
+        let line = prepared.line
+        let layout = prepared.positioned
+        let resolvedFontSize = prepared.fontSize
         let lineProgress = smooth(progress(time, start: line.from, duration: 0.56))
         for item in layout {
             let reveal = reveal(item.glyph, time: time)
@@ -1592,7 +2929,7 @@ struct LyricStageV53View: View {
             drawGlyph(
                 item.glyph.text,
                 at: item.point,
-                fontSize: emphasized ? fontSize + 2 : fontSize,
+                fontSize: emphasized ? resolvedFontSize + 2 : resolvedFontSize,
                 color: emphasized ? accent : primary,
                 opacity: 0.12 + 0.88 * reveal,
                 offset: CGSize(
@@ -1602,21 +2939,20 @@ struct LyricStageV53View: View {
                 in: context)
         }
 
-        if alignment != .center {
-            let width = size.width * CGFloat(0.20 + 0.55 * lineProgress)
-            let leading = alignment == .leading
-            let x = leading ? 10 : size.width - 10 - width
+        if prepared.alignment != .center {
+            let railSize = prepared.canvasSize
+            let width = railSize.width * CGFloat(0.20 + 0.55 * lineProgress)
+            let leading = prepared.alignment == .leading
+            let x = leading ? 10 : railSize.width - 10 - width
             var rail = Path()
-            rail.move(to: CGPoint(x: x, y: size.height * 0.78))
-            rail.addLine(to: CGPoint(x: x + width, y: size.height * 0.78))
+            rail.move(to: CGPoint(x: x, y: railSize.height * 0.78))
+            rail.addLine(to: CGPoint(x: x + width, y: railSize.height * 0.78))
             context.stroke(rail, with: .color(accent.opacity(0.28)), lineWidth: 1.2)
         }
     }
 
     private func drawDialogue(
-        scene: LyricStageV53Scene,
-        line: PlayerEngine.LyricLine,
-        lines: [PlayerEngine.LyricLine],
+        visual: PreparedSceneVisual,
         primary: Color,
         secondary: Color,
         accent: Color,
@@ -1625,12 +2961,11 @@ struct LyricStageV53View: View {
         size: CGSize,
         time: Double
     ) {
+        let scene = visual.scene
+        let line = visual.line
         let currentOnLeading = scene.sectionIndex.isMultiple(of: 2)
-        let currentAlignment: TextAlignment = currentOnLeading ? .leading : .trailing
         drawAnchor(
-            line: line,
-            alignment: currentAlignment,
-            fontSize: 30,
+            prepared: visual.primary,
             entrance: CGSize(width: currentOnLeading ? -42 : 42, height: 0),
             primary: primary,
             accent: currentOnLeading ? accent : warm,
@@ -1638,23 +2973,14 @@ struct LyricStageV53View: View {
             size: CGSize(width: size.width, height: size.height * 0.82),
             time: time)
 
-        guard let companionIndex = scene.companionLineIndices.last,
-              lines.indices.contains(companionIndex) else { return }
-        let companion = lines[companionIndex]
-        let companionAlignment: TextAlignment = currentOnLeading ? .trailing : .leading
-        let glyphs = LyricStageCompiler.glyphs(for: companion)
-        let layout = layoutGlyphs(
-            glyphs,
-            fontSize: 19,
-            alignment: companionAlignment,
-            centerY: size.height * 0.76,
-            in: size)
+        guard let companionLayout = visual.auxiliary.last else { return }
+        let companion = companionLayout.line
         let residue = max(0, 1 - progress(time, start: max(companion.to, line.from), duration: 1.8))
-        for item in layout {
+        for item in companionLayout.positioned {
             drawGlyph(
                 item.glyph.text,
                 at: item.point,
-                fontSize: 19,
+                fontSize: companionLayout.fontSize,
                 color: secondary,
                 opacity: 0.10 + 0.36 * residue,
                 offset: CGSize(width: currentOnLeading ? 12 : -12, height: 0),
@@ -1663,9 +2989,7 @@ struct LyricStageV53View: View {
     }
 
     private func drawStack(
-        scene: LyricStageV53Scene,
-        line: PlayerEngine.LyricLine,
-        lines: [PlayerEngine.LyricLine],
+        visual: PreparedSceneVisual,
         primary: Color,
         secondary: Color,
         accent: Color,
@@ -1673,28 +2997,17 @@ struct LyricStageV53View: View {
         size: CGSize,
         time: Double
     ) {
-        let entries = (scene.companionLineIndices + [scene.lineIndex])
-            .filter { lines.indices.contains($0) }
-            .sorted()
-        let currentPosition = entries.firstIndex(of: scene.lineIndex) ?? 0
-        let startY = size.height * 0.28
-        for (position, index) in entries.enumerated() {
-            let isCurrent = index == scene.lineIndex
-            let y = startY + CGFloat(position) * min(56, size.height * 0.22)
-            let glyphs = LyricStageCompiler.glyphs(for: lines[index])
-            let fontSize: CGFloat = isCurrent ? 34 : 20
-            let layout = layoutGlyphs(
-                glyphs,
-                fontSize: fontSize,
-                alignment: isCurrent ? .leading : .trailing,
-                centerY: y,
-                in: size)
-            for item in layout {
+        let scene = visual.scene
+        let line = visual.line
+        let currentPosition = visual.auxiliary.firstIndex { $0.lineIndex == scene.lineIndex } ?? 0
+        for (position, prepared) in visual.auxiliary.enumerated() {
+            let isCurrent = prepared.lineIndex == scene.lineIndex
+            for item in prepared.positioned {
                 let opacity = isCurrent ? 0.15 + 0.85 * reveal(item.glyph, time: time) : 0.14
                 drawGlyph(
                     item.glyph.text,
                     at: item.point,
-                    fontSize: fontSize,
+                    fontSize: prepared.fontSize,
                     color: isCurrent ? (position == currentPosition ? accent : primary) : secondary,
                     opacity: opacity,
                     offset: CGSize(width: isCurrent ? -30 * (1 - CGFloat(smooth(progress(time, start: line.from, duration: 0.55)))) : 0, height: 0),
@@ -1704,49 +3017,40 @@ struct LyricStageV53View: View {
     }
 
     private func drawArc(
-        line: PlayerEngine.LyricLine,
+        visual: PreparedSceneVisual,
         primary: Color,
         accent: Color,
         in context: GraphicsContext,
         size: CGSize,
         time: Double
     ) {
-        let glyphs = LyricStageCompiler.glyphs(for: line)
-        let count = max(1, glyphs.count)
-        let usableWidth = size.width - 38
-        for (index, glyph) in glyphs.enumerated() {
-            let normalized = count == 1 ? 0.5 : Double(index) / Double(count - 1)
-            let x = 19 + usableWidth * CGFloat(normalized)
-            let y = size.height * 0.57 - CGFloat(sin(normalized * .pi) * 54)
-            let reveal = reveal(glyph, time: time)
+        let count = max(1, visual.arcGlyphs.count)
+        for prepared in visual.arcGlyphs {
+            let reveal = reveal(prepared.glyph, time: time)
             drawGlyph(
-                glyph.text,
-                at: CGPoint(x: x, y: y),
-                fontSize: glyphs.count > 16 ? 23 : 29,
-                color: index == count / 2 ? accent : primary,
+                prepared.glyph.text,
+                at: prepared.point,
+                fontSize: prepared.fontSize,
+                color: prepared.index == count / 2 ? accent : primary,
                 opacity: 0.10 + 0.90 * reveal,
                 offset: CGSize(width: 0, height: 34 * (1 - CGFloat(reveal))),
                 scale: 0.76 + 0.24 * reveal,
-                rotation: (normalized - 0.5) * 18,
+                rotation: prepared.rotation,
                 in: context)
         }
     }
 
     private func drawHero(
-        line: PlayerEngine.LyricLine,
+        visual: PreparedSceneVisual,
         primary: Color,
         accent: Color,
         in context: GraphicsContext,
         size: CGSize,
         time: Double
     ) {
-        let glyphs = LyricStageCompiler.glyphs(for: line)
-        let layout = layoutGlyphs(
-            glyphs,
-            fontSize: glyphs.count <= 2 ? 64 : 52,
-            alignment: .center,
-            centerY: size.height * 0.50,
-            in: size)
+        let line = visual.line
+        let fontSize = visual.primary.fontSize
+        let layout = visual.primary.positioned
         let arrival = backOut(progress(time, start: line.from, duration: 0.62))
         for item in layout {
             let reveal = reveal(item.glyph, time: time)
@@ -1754,7 +3058,7 @@ struct LyricStageV53View: View {
             drawGlyph(
                 item.glyph.text,
                 at: item.point,
-                fontSize: glyphs.count <= 2 ? 64 : 52,
+                fontSize: fontSize,
                 color: item.index == layout.count - 1 ? accent : primary,
                 opacity: reveal,
                 offset: CGSize(width: side * 94 * (1 - CGFloat(arrival)), height: CGFloat(item.index % 3 - 1) * 24 * (1 - CGFloat(arrival))),
@@ -1765,8 +3069,7 @@ struct LyricStageV53View: View {
     }
 
     private func drawHook(
-        scene: LyricStageV53Scene,
-        line: PlayerEngine.LyricLine,
+        visual: PreparedSceneVisual,
         primary: Color,
         accent: Color,
         warm: Color,
@@ -1774,14 +3077,10 @@ struct LyricStageV53View: View {
         size: CGSize,
         time: Double
     ) {
-        let glyphs = LyricStageCompiler.glyphs(for: line)
-        let fontSize: CGFloat = glyphs.count > 14 ? 35 : 48
-        let layout = layoutGlyphs(
-            glyphs,
-            fontSize: fontSize,
-            alignment: .center,
-            centerY: size.height * 0.50,
-            in: size)
+        let scene = visual.scene
+        let line = visual.line
+        let fontSize = visual.primary.fontSize
+        let layout = visual.primary.positioned
         let lineProgress = backOut(progress(time, start: line.from, duration: 0.66))
 
         switch scene.composition {
@@ -1862,21 +3161,86 @@ struct LyricStageV53View: View {
         line: PlayerEngine.LyricLine,
         time: Double,
         accent: Color,
+        motifPhase: LyricStageMotifPhaseV3,
+        audioAccent: Double,
         in context: GraphicsContext,
         size: CGSize
     ) {
         guard scene.isSectionStart else { return }
-        let phase = 1 - smooth(progress(time, start: line.from, duration: 0.72))
+        let duration: Double = motifPhase == .transform ? 0.56 : 0.72
+        let phase = 1 - smooth(progress(time, start: line.from, duration: duration))
         guard phase > 0.001 else { return }
         let width = (size.width - 24) * CGFloat(phase)
         var cut = Path()
         cut.move(to: CGPoint(x: size.width - 12 - width, y: size.height * 0.18))
         cut.addLine(to: CGPoint(x: size.width - 12, y: size.height * 0.18))
-        context.stroke(cut, with: .color(accent.opacity(0.42 * phase)), lineWidth: 1.4)
+        let phaseWeight: Double = switch motifPhase {
+        case .introduce: 0.30
+        case .develop: 0.38
+        case .transform: 0.54
+        case .resolve: 0.34
+        }
+        context.stroke(
+            cut,
+            with: .color(accent.opacity(
+                (phaseWeight + scene.intensity.clamped(to: 0...1) * 0.10 + audioAccent * 0.12) * phase)),
+            lineWidth: (motifPhase == .transform ? 1.8 : 1.2) + 0.3 * scene.intensity.clamped(to: 0...1))
+    }
+
+    /// Audio may brighten a section-edge decoration after lyric reveal. It never
+    /// moves/scales text or changes lyric timing and scene ownership.
+    private func audioAccentPulse(
+        audioTime: Double,
+        lyricTime: Double,
+        line: PlayerEngine.LyricLine,
+        scene: LyricStageV53Scene,
+        motifPhase: LyricStageMotifPhaseV3
+    ) -> Double {
+        guard scene.isSectionStart,
+              let audioMap,
+              lyricTime >= line.from,
+              lyricTime <= line.to + 0.35 else { return 0 }
+        var onsetPulse = 0.0
+        if let onset = audioMap.nearestOnset(to: audioTime, tolerance: 0.14) {
+            let elapsed = audioTime - onset.time
+            if onset.strength >= 0.72, elapsed >= 0, elapsed <= 0.14 {
+                onsetPulse = (1 - elapsed / 0.14) * onset.strength
+            }
+        }
+        let energy = audioMap.envelope(.energy, at: audioTime) ?? 0
+        let downbeatPulse = energy >= 0.62
+            ? trailingPulse(audioMap.downbeats, at: audioTime, window: 0.12)
+            : 0
+        let phaseWeight: Double = switch motifPhase {
+        case .introduce: 0.72
+        case .develop: 0.88
+        case .transform: 1.0
+        case .resolve: 0.64
+        }
+        return min(
+            1,
+            max(onsetPulse, downbeatPulse * 0.72)
+                * (0.55 + energy * 0.45)
+                * phaseWeight
+                * scene.intensity.clamped(to: 0...1))
+    }
+
+    private func trailingPulse(_ events: [Double], at time: Double, window: Double) -> Double {
+        guard !events.isEmpty else { return 0 }
+        var lower = 0
+        var upper = events.count
+        while lower < upper {
+            let middle = (lower + upper) / 2
+            if events[middle] <= time { lower = middle + 1 } else { upper = middle }
+        }
+        guard lower > 0 else { return 0 }
+        let elapsed = time - events[lower - 1]
+        guard elapsed >= 0, elapsed <= window else { return 0 }
+        return 1 - elapsed / window
     }
 
     private func drawInterlude(
-        title: String,
+        layout: PreparedInterludeLayout,
         subtitle: String,
         progress: Double,
         primary: Color,
@@ -1884,21 +3248,12 @@ struct LyricStageV53View: View {
         in context: GraphicsContext,
         size: CGSize
     ) {
-        let safeTitle = title.isEmpty ? "MUSIC" : title
-        let fontSize: CGFloat = safeTitle.count > 18 ? 30 : 44
-        let glyphs = syntheticGlyphs(for: safeTitle)
-        let layout = layoutGlyphs(
-            glyphs,
-            fontSize: fontSize,
-            alignment: .leading,
-            centerY: size.height * 0.48,
-            in: size)
-        for item in layout {
+        for item in layout.positioned {
             let stagger = min(1, max(0, progress * 1.35 - Double(item.index) * 0.035))
             drawGlyph(
                 item.glyph.text,
                 at: item.point,
-                fontSize: fontSize,
+                fontSize: layout.fontSize,
                 color: item.index.isMultiple(of: 5) ? accent : primary,
                 opacity: stagger,
                 offset: CGSize(width: -56 * (1 - CGFloat(stagger)), height: 0),
@@ -1917,7 +3272,26 @@ struct LyricStageV53View: View {
         }
     }
 
-    private func layoutGlyphs(
+    private func fittedFontSize(
+        glyphCount: Int,
+        proposed: CGFloat,
+        in size: CGSize
+    ) -> CGFloat {
+        guard glyphCount > 0 else { return proposed }
+        var candidate = proposed
+        while candidate > 14 {
+            let averageGlyphWidth = max(6, candidate * 0.62)
+            let perRow = max(1, Int((size.width - 30) / averageGlyphWidth))
+            let rows = Int(ceil(Double(glyphCount) / Double(perRow)))
+            if CGFloat(rows) * candidate * 1.12 <= size.height * 0.84 {
+                return candidate
+            }
+            candidate -= 2
+        }
+        return 14
+    }
+
+    private func makeGlyphLayout(
         _ glyphs: [LyricStageGlyph],
         fontSize: CGFloat,
         alignment: TextAlignment,
@@ -1957,11 +3331,22 @@ struct LyricStageV53View: View {
                     index: item.1,
                     point: CGPoint(
                         x: cursor + item.2 / 2,
-                        y: firstY + CGFloat(rowIndex) * rowHeight)))
+                        y: firstY + CGFloat(rowIndex) * rowHeight),
+                    size: CGSize(width: item.2, height: rowHeight)))
                 cursor += item.2 + spacing
             }
         }
         return result
+    }
+
+    private func positionedBounds(_ glyphs: [PositionedGlyph]) -> CGRect {
+        glyphs.reduce(into: CGRect.null) { bounds, item in
+            bounds = bounds.union(CGRect(
+                x: item.point.x - item.size.width / 2,
+                y: item.point.y - item.size.height / 2,
+                width: item.size.width,
+                height: item.size.height))
+        }
     }
 
     private func syntheticGlyphs(for text: String) -> [LyricStageGlyph] {
@@ -2014,6 +3399,7 @@ struct LyricStageV53View: View {
         offset: CGSize = .zero,
         scale: Double = 1,
         rotation: Double = 0,
+        weight: Font.Weight = .black,
         in context: GraphicsContext
     ) {
         var local = context
@@ -2023,7 +3409,7 @@ struct LyricStageV53View: View {
         local.scaleBy(x: scale, y: scale)
         local.draw(
             Text(text)
-                .font(.system(size: fontSize, weight: .black))
+                .font(.system(size: fontSize, weight: weight))
                 .foregroundStyle(color),
             at: .zero,
             anchor: .center)
@@ -2045,6 +3431,39 @@ struct LyricStageV53View: View {
                 .foregroundStyle(color),
             at: point,
             anchor: anchor)
+    }
+}
+
+struct LyricStageV3SummarySheet: View {
+    let summary: LyricStagePlanV3Summary
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("导演") {
+                    Text(summary.concept)
+                    LabeledContent("母题", value: summary.motif)
+                    LabeledContent("强弱弧线", value: summary.intensityArc)
+                    LabeledContent("来源", value: summary.source == .luna ? "Luna V3 + 本地补齐" : "本地完整规划")
+                    if summary.partial {
+                        Label("线上分段仅部分成功，其余使用本地规划", systemImage: "exclamationmark.triangle")
+                    }
+                }
+                if !summary.sections.isEmpty {
+                    Section("段落") {
+                        ForEach(summary.sections, id: \.self, content: Text.init)
+                    }
+                }
+                if !summary.compositions.isEmpty {
+                    Section("构图预算") {
+                        ForEach(summary.compositions, id: \.self, content: Text.init)
+                    }
+                }
+            }
+            .navigationTitle("V5.3 演出摘要")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .accessibilityIdentifier("lyricStageV3SummarySheet")
     }
 }
 

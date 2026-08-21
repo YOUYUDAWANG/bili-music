@@ -12,6 +12,7 @@ import {
   buildResponsesPlainBody,
   parseChatCompletionsResponse,
   parseResponsesResponse,
+  selectedUpstreamAPIKey,
 } from "../src/provider.js";
 import {
   compactDirectorPromptInputs,
@@ -184,6 +185,15 @@ test("builds compatibility requests without advanced parameters", () => {
   const responsesBody = buildResponsesPlainBody("gpt-5.6-luna", "normalize", { title: "晴天" });
   assert.equal(responsesBody.text, undefined);
   assert.equal(responsesBody.model, "gpt-5.6-luna");
+});
+
+test("prefers the CPA secret while preserving the legacy upstream fallback", () => {
+  assert.equal(selectedUpstreamAPIKey({
+    CPA_UPSTREAM_API_KEY: "cpa-key",
+    UPSTREAM_API_KEY: "legacy-key",
+  }), "cpa-key");
+  assert.equal(selectedUpstreamAPIKey({ UPSTREAM_API_KEY: "legacy-key" }), "legacy-key");
+  assert.equal(selectedUpstreamAPIKey({}), "");
 });
 
 test("sanitizes lyric director input without rewriting lyric text", () => {

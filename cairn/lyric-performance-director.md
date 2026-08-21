@@ -5,7 +5,7 @@ summary: "NowPlaying 播放主页中区高能歌词光场舞台、三层景深�
 tags: [lyrics, luna, motion, embellishment, vfx, nowplaying]
 contains: [decision, contract, deployment-boundary]
 created: "2026-08-19"
-updated: "2026-08-20"
+updated: "2026-08-21"
 related: ["BiliMusic/Features/Player/NowPlayingLyricStageView.swift", "BiliMusic/Features/Player/LyricVFXTokens.swift", "BiliMusic/Features/Player/LyricEmbellishment.swift", "BiliMusic/Features/Player/LyricEmbellishmentStore.swift"]
 authoring_mode: ai_generated
 ---
@@ -28,10 +28,15 @@ authoring_mode: ai_generated
   1. 本地零延迟确定性规则引擎 (`LyricEmbellishmentDirector`)；
   2. 露娜 AI 智能装帧 (`LyricEmbellishmentClient` -> Worker `POST /v1/lyrics/embellish`)，秒级返回情感与重点词风格表，落盘至 `Documents/lyric-embellishments.json`。
 - V5.3 与 V5.1 等全屏多幕实验保留在 Debug 菜单，不影响产品默认路径。
-- V5.3 当前没有通用 AudioPerformanceMap，也不调用 Luna；真实逐字轴拥有文字出现时刻，结构规划与构图只改变视觉。它证明“专曲 Demo 的构图知识可以先抽象为通用语法”，尚未证明音乐段落分析、音频重拍或模型分镜已经泛化。
+- V5.3 已形成唯一的通用链路：`LyricsFacts + AudioPerformanceMapV2 + optional Luna V3 -> LyricStageDirectorV3 -> LyricStagePreparedRuntimeV3`。歌词正文、行/字时间和并行声部始终由本地事实层拥有；音频只决定 section、强弱和 reveal 之后的 accent；Luna 只返回 Stage Bible、连续 section 和稀疏构图 override，不得返回坐标或修改时间轴。
+- V4 在 V5.3 之上新增独立的 `AudioStructureScoreV4 + Gemini Scene Recipe` 层：App 将已缓存音频压成有界的 tempo/section/逐行事实/轮廓/结构地标，Gemini 只选择 typed motif 与 `topology × entrance × focus × sustain × continuity × driver`；本地编译器把 Rail Handoff、Semantic Lens、Chorus Memory、Silence Aperture 叠到完整 V5.3 fallback。结构地标使用 raw audio clock，歌词/逐字 reveal 使用 offset lyric clock；未 reveal 字形严格为 0，音频不能提前或延后歌词。
+- V4 Prepared renderer 将 rail、focus、residue、aperture、双时钟 prelude 与长句 timing-run/row fallback 全部预编译。普通场景最多 48 个独立 glyph transform、2 层 residue、96 次文字绘制；超过 48 字改用完整换行 row/line fallback，不截字、不显示省略号。Reduce Motion 只保留颜色、字重、轨道和可读的相位变化。
+- 默认运动语法改为 static-first：普通逐字/逐行歌词只在落点后做一次最多 1.5% 的轻触并在 36% 进度前归零；背景色场静止，Cosmic Drift / tracking breath 落稳后严格为 0；V3/V4 正文不再随普通 beat/onset 缩放。强 onset/downbeat 仅可增强 section-edge 装饰，Impact、Heartbeat 与 structuralMoment 仍可作为明确的稀疏事件。
+- `AudioPerformanceMapV2` 只分析已经完成的本地缓存，不下载、不等待播放连接；显式 beat/downbeat/onset、tempo、五类量化 envelope、silence/section region 和 confidence 以音频指纹独立缓存。相同 BV 的不同 CID 不得互相复用；分析版本变化会失效。App 的显式 V3 生成先应用完整本地计划，再请求 Luna，取消、切歌、旧缓存任务都由 generation ID 隔离。
+- V5.3 执行层把场景边界索引、glyph、字体拟合、换行、arc 与 interlude 布局移出 Timeline draw；逐帧只做 O(log n) scene sample、O(1) visual lookup、时钟、音频二分查询、插值和绘制。长 hero/arc/hook/dialogue/stack 在编译预算阶段降级到完整换行 anchor，不截字、不显示省略号。
 - 2026-08-19 起 App 另有 V5.1 Event 舞台合同 `lyric-stage-v2-events`：StyleSheet / Section / Scene / Actor / Event，由 `LyricStageCompilerV2` 预编译绝对字符轨道，`LyricStageCanvasView` 每帧只执行 `sample(at:)`。Debug 可在本地规则、当前 V5 行级舞台、V5.1 Event 舞台和样片之间切换；默认仍是本地规则。
-- Worker 已上线 `POST /v2/lyrics/direct`，与 `/v1/lyrics/direct` 并存；V2 使用独立 KV key `director-v2:`，缓存写入 App 的 `lyric-stage-v2.json`。生产当前版本 `c593e5b3-eb9e-4360-9a1e-8dd1a58ad723`：bible 与最多 4 段 scene 并行，避免超过现有 App 45s 无首包超时。Debug「生成 V5.1」打线上 `/v2`。
-- 真机曾出现点击 V5.1 后“完全不动”：设备 Documents 起初没有 V2 缓存，旧按钮只切换渲染器；同时 Section density/accent 预算把本地 hold pulse 当装饰删掉。生成 10 Scene / 41 Event 后又暴露 Canvas 只偶发刷新：AVPlayer 时间藏在绘制闭包，Timeline 还会被 motion/reduce-motion gate 整体暂停。现首次选择会自动生成；低强度 hold pulse 作为基线保留；tick 明确进入 Canvas，歌词时钟与动作强度分离，正常展开 60fps、状态门禁异常时仍保底 30fps，Reduce Motion 只降级动作而不冻结换行。
+- Worker 已上线 `/v1`、`/v2`、`/v3/lyrics/direct`、`/v4/lyrics/direct` 与 `/v1/lyrics/embellish`。V2/V3/V4 使用独立 KV 前缀；V4 只缓存双端门禁通过、非 degraded 的完整结果，并等待 KV 写入后响应。生产当前版本为 `79c3d38c-363f-4c5d-b76b-625c16b3bdf1`，normalize、V1、V2、V3、V4 和 embellish 全部使用 CPA `gemini-3.7-flash-high`；CPA Secret 与旧上游 Secret 独立。上一 V4 版本为 `14834316-d27d-4c15-8bbb-435c3e7fae5c`，V4 上线前版本为 `52cc64da-2efd-4ce6-84ad-df1472b9e692`；关闭 `LYRIC_DIRECTOR_V4_ENABLED` 可只停 V4；包含 embellish、但尚无 V3 的回滚基线为 `1b07471b-49e4-48cf-adb1-c3ca591db573`。
+- V5.1/V5.3 选择动作都不再自动联网；网络生成只存在于明确标注 Luna 的 Debug 操作。低强度 hold pulse、Timeline tick 与歌词时钟修复仍保留，Reduce Motion 只降级动作而不冻结换行。
 - V5.2 目前是「You＆合図」0–176.518 秒的专曲全曲舞台：从真机 AAC 提取 178.206 BPM、524 拍、131 重拍、341 个高置信 onset 和约 21.53Hz 能量包络；40 行逐字歌词覆盖开篇、原黄金段、推进、指挥断句、Sunday 弧线、主题再现与终章，前后器乐段也有声音场。它是本地手工 Canvas，不读 V2 score、不调用 Worker。精确逐字轴拥有 reveal 时刻，绝不等待后续鼓点；±90ms 附近的 onset/beat 只追加回弹、冲击、方向和场景强弱。Debug 入口只对该 BVID 开放，点击会从 0 秒播放全曲。
 - 本地导演 V2 只生成安静基线、重复句 echo 和真实 overlapGroup 的 splitVoices；旧 v4/v5 缓存经 `LyricStageLegacyAdapter` 进入同一渲染器。无逐字轴时不写 syncWindow，不做伪卡拉 OK。
 - 执行层现按 Actor 独立 typeRole 布局（关键词可大于整行）；entrance/performance/hold/exit 有动词允许表；超预算时去掉 backdrop 并删除 `.echo` Event，采样不再把残影加回来。中日文按 token 边界换行。Actor 中心按 `(sceneID, actorID)` 隔离；partial Luna 补缺会裁掉已覆盖的声部行。Section 的 density / heroBudget / accentBudget / motifRef 会进入预算降级。封面色进入缓存指纹。
@@ -47,6 +52,8 @@ authoring_mode: ai_generated
 
 - 端点：`POST /v1/lyrics/direct` 仍为当前生产合同，与元数据端点共用 Worker Bearer 认证；导演版本当前为 `luna-lyric-director-v5-stage-preview`。
 - 生产 V2 端点：`POST /v2/lyrics/direct`，输出 `lyric-stage-v2-events`。Luna 只给 Section/Actor/Event/相对时间；绝对秒、坐标、换行、预算和 Reduce Motion 由 App 编译器处理。
+- 生产 V3 端点：`POST /v3/lyrics/direct`，输出 `lyric-stage-v3-choreography`。输入最多 180 行完整歌词轮廓与稀疏 `LyricStageAudioSummaryV3`；180 行长文本+rich audio 的 App 请求实测 93,401 bytes，低于 Worker 98,304-byte 实际 body 门禁，且不发送 words/tokens/音频。输出只含 Stage Bible、连续 sections 与不超过预算的稀疏 scene override。
+- 生产 V4 端点：`POST /v4/lyrics/direct`，输出 `lyric-stage-v4-scene-recipe` / `scene-recipe-grammar-v1`。请求保留完整歌词与逐行时间，音频结构采用 Q8/毫秒 tuple；App 以 88KiB 软预算依次减少 line details、moments 和 contour，绝不截歌词，仍超过 98,304-byte 硬门限就本地回退。`audioScoreHash` 只做双端身份，音频指纹、raw beat/onset/accent arrays、Secret 和设备信息不进入 Gemini prompt。
 - 输出：`lyric-performance-v4`，包含 lineCount、覆盖每个时间点的 compositions、稀疏 scenes 与可选 wordCues。每个 composition 必须包含当前 lineIndex，并按视觉顺序选择 1–3 个相邻不超过两位的真实歌词索引。scene 可选择九种逐行动效；Cascade 必须对应至少两行 composition。
 - 真实逐字歌词始终由 App 本地执行克制的 Sweep。Luna 只为约 10%–30% 有逐字时间的行追加一个范围 cue，可选 Sweep / Impact / Stretch / Echo Trail，最多连续 12 个真实 word index；无 words 的行、越界范围、同一行重复 cue 和未知效果会在 Worker 与 App 两端过滤。
 - Luna 不改写、翻译、合并或拆分歌词；只引用 lineIndex。服务端和 App 各做一次 allowlist、范围 clamp、逐行覆盖、重复/越界过滤和版本/身份/歌词哈希校验。长句由 UI 完整换行，禁止用省略号；导演需通过减少同屏行数控制密度。
@@ -58,6 +65,8 @@ authoring_mode: ai_generated
 ## 开发入口与撤销
 
 - Debug 菜单分为「歌词舞台」与「Luna」：本地规则 / V5 / V5.1 / 样片互斥；Luna 可生成 V5.1、查看演出摘要或清除独立 V2 缓存。V5 生成入口仍保留便于回滚。
+- V5.3 有独立的显式「Luna V3」生成、摘要和清除入口；失败时保留本地完整 V5.3，不影响播放或歌词库。V3 缓存为 `Documents/lyric-stage-v3.json`，身份包含歌词、音频摘要、compiler 与线上 director version，不覆盖 V1/V2 缓存。
+- V4 有独立的显式「生成 V4 音频结构演出（Gemini）」、摘要和清除入口。生成先分析已完成的本地音频缓存；缺缓存时不请求 Gemini。有效 direction 写入 `Documents/lyric-stage-v4.json`，显式进入 V5.3 时按相同的确定性 request degradation 恢复；切歌、V3/V4 并发、清除与旧任务都由独立 generation ID 隔离。V4 无效或超时只保留完整本地 V5.3。
 - “恢复本地歌词导演”会清除当前曲目的 Luna 缓存，便于 A/B。
 - “播放动态文字样片”只启用本地 v5 motion study，再点一次关闭；不请求 Worker、不写歌词演出缓存，也不影响当前 v4/Luna 脚本。
 - “启用 v5 真实歌词舞台”使用当前真实歌词和已缓存的 Luna score；再次点击回到现有 v4 中央歌词。样片与真实舞台互斥。
@@ -83,3 +92,11 @@ authoring_mode: ai_generated
 16. V5.3 通用编舞：V5.2 保留作 A/B；新规划器无歌曲身份和固定时间分支，连续重复 Hook 自动四阶段递进，普通行产生七种构图。初次关键帧暴露前奏空白和全曲重复计数使首轮 Hook 不锁定，现分别以通用标题前奏和连续重复簇修正。iOS 27 / iPhone 17 Pro 规则 19/19、10 时间点 UI 1/1；签名 Debug 已安装启动。用户整首体感、其他歌曲泛化、真实音频分析与 Luna 调度仍待验证。
 17. 2026-08-20 按用户“启用 V2 服务端”复核：当时生产仍是 `153857a6-dc21-4e5b-8710-3b153f24f131`。健康端点三个 API、V2 未授权 401、normalize 非降级、V1 8 行样本非降级、V2 8 行样本返回 `lyric-stage-v2-events` 且延迟复打 KV 命中。
 18. 同日真机提交超时：App 45s 无首包断开，Worker 串行 bible+scene 需要 45–51s。随后部署 `c593e5b3-eb9e-4360-9a1e-8dd1a58ad723`，bible 与最多 4 段 scene 并行并在返回前写入 KV。24 行线上样本 19.2s 非降级、复打 354ms hit。客户端超时改为 90/120s，需下次真机安装。Worker 26/26。
+19. 2026-08-21 V3 完整链路上线：Worker `414458cf-77d5-4bc8-ba10-ff6a6aebbb6a` 的 `/health` 列出五个端点且 V3 enabled；12 行重复 Hook/二重唱/音频摘要生产请求 23.35s miss，返回 5 个连续 Section、5 个有效 Scene、`degraded=false`，复打 53ms hit。V1、V2、embellish、normalize 同轮均 200/非降级，V3 未授权为 401；Worker 43/43。
+20. App/事实层聚焦测试在 iPhone 17 Pro / iOS 27 模拟器 26/26；Python 合同 2/2；V5.3 十关键帧、长歌词和 LNPopup 四项 UI 均通过（旧 accessibility 名称已随现行 `nowPlayingLyricStageView` 修正）。真实 152.04s B 站 AAC 临时装入测试包后在 iPhone 17 Pro / iOS 27 完整解码、分析并通过，测试结束已从工程移除，未提交音频。
+21. 真机 Debug V5.3 固定 Hook 画面录制 31.1s Animation Hitches：120Hz 门槛下 29 个 missed-frame 记录，其中仅 2 个超过 16.7ms，最大 33.34ms；App 进程完整存活。这个证据包含 SwiftUI/合成器，不能冒充歌词 draw 自身 p95。随后按用户选择改用 iPhone 17 Pro / iOS 27 模拟器，在 Debug-only 性能开关下直接包住 Canvas draw：Hook、Dialogue、Final 三种构图各 240 帧，p50 分别为 0.64 / 1.95 / 2.43ms，p95 为 1.52 / 5.91 / 4.68ms，p99 为 3.36 / 7.04 / 6.76ms，最大 6.20 / 8.41 / 12.87ms，三轮均 0 帧超过 16.67ms。逐帧封面调色板解析已提升到 Canvas 外；当前构建冷编译为 17.18–24.01ms，低于 50ms 拆分门槛。`makePreparedStage` 与其外侧的 plan digest 仍同步发生在 SwiftUI 主线程，但只在 identity 改变时执行；若真实歌曲或更长歌词把冷编译推过 50ms，再拆成后台 Sendable 编译阶段。
+22. 用户在 App 发起一次真实 V3 请求后命中原 38 秒上限。只放宽 V3：Luna 单次请求 35→55 秒、整个兼容协议预算 38→60 秒；App 仍允许 120 秒，V1/V2/embellish 的短预算不变。修复部署为 `060adf92-75b7-4719-a55c-3936ce5e727e`，Worker 43/43；线上全新 12 行 Hook/二重唱/音频摘要冷请求 18.22 秒、3 Section / 5 Scene、`degraded=false`，复打 71.8ms KV hit，健康端点与未授权 401 同轮通过。
+23. 用户随后在真实 App 完成一次约 3 分钟的 V3 生成。设备容器证据显示 `BV1XWdrBVEn3#37667474477` 的 176.47 秒音频图在 01:53:25 JST 写入，包含 261 beat、65 downbeat、480 onset、38 region、overall confidence 0.827；通过 App 本地门禁的 40 行 V3 演出在 01:54:54 写入，包含 7 Section、16 Scene 与完整 Stage Bible。用户观察的约 3 分钟是“首次整首本地音频分析 + Luna 请求”的总时长，现有时间戳不能进一步精确拆分；相同音频指纹和歌词再次生成会复用本地 AudioPerformanceMap 与 Worker KV。
+24. 经用户指定，全链路从旧上游切换到 CPA `gemini-3.7-flash-high`。新 `CPA_UPSTREAM_API_KEY` 只存 macOS 钥匙串与 Cloudflare Secret，旧 Secret 未覆盖，便于回滚；normalize、V1、V2、V3、embellish 的版本全部 bump，避免同曲继续命中旧模型缓存。生产 `52cc64da-2efd-4ce6-84ad-df1472b9e692` 全新 miss 依次为 4.63 / 14.79 / 19.63 / 6.50 / 5.95 秒，均 `chat-json-object`、`model=gemini-3.7-flash-high`、非降级；V2 为 4 Section / 5 Scene / 7 Actor / 18 Event，V3 为 3 Section / 4 Scene，V3 复打 321ms hit。Worker 44/44。
+25. V4 Audio Structure + Scene Recipe 当前部署为 `79c3d38c-363f-4c5d-b76b-625c16b3bdf1`。最终修正版在 98,304-byte 门限内保留每行完整歌词，V1–V3 兼容行为不变；Worker 54/54。首个 12 行逐字/重复 Hook/二重唱/量化音频结构 canary 冷请求 9.10 秒，返回 2 个连续 Section、4 个有效 Recipe、`model=gemini-3.7-flash-high`、`degraded=false`，相同请求 83ms KV hit；最终部署的新 4 行请求也非降级产出有效 `chorusMemory`，复打命中 V4 KV，六条路由无令牌均保持 401。正式默认路径仍不自动联网，V4 只在 Debug 显式生成/恢复。
+26. 用户实际观看后指出默认歌词持续跳动会疲劳。普通字的默认 6% 全词程缩放/2.2pt 上浮改为最多 1.5% 的短落点，36% 后严格静止；整行模式共用同一 envelope，动态色场改静态；Cosmic Drift、Rail/Semantic `trackingBreath` 由永久正弦改为一次性落稳。V3 整体 beat 缩放与四个 V4 family 的音频文字缩放全部移除，只有 section start 的强 onset/高能 downbeat 可点亮装饰线。iPhone 17 Pro / iOS 27：V4 全链 24/24、默认歌词和 V4 UI 各 1/1；V4 双 residue 短 Hook 最新 240 帧 Canvas draw p50/p95/p99/max 为 0.93/3.30/5.56/12.01ms，0 帧超过 16.67ms。
