@@ -2,6 +2,14 @@
 
 本文件按反向时间顺序记录实质进展——最新记录放在本行下方最顶部。每条记录保持简短，只写摘要与指针；稳定结论沉淀到 `cairn/<topic>.md`。
 
+## 2026-10-31 · 云端 Linux 代理的可执行检查
+
+- Cloud Agent 是 Ubuntu，没有 Xcode，不能跑 `xcodegen`、`xcodebuild` 或 iOS 模拟器。
+- `python3 scripts/verify_search_rcmd.py "周杰伦 晴天"` 已跑通搜索、首页推荐和相关推荐。
+- `scripts/verify_audio.py` 依赖的 `view` 接口返回 HTTP 412；同一网络下 `pagelist` 与 `playurl` 仍能取到音频流。
+- 完整 iOS 编译仍以 GitHub Actions 的 `macos-15` 门禁为准。
+- 详情：见 `cairn/ci-build.md` 与 `AGENTS.md`。
+
 ## 2026-08-14 · 收紧播放器节奏并开放一级完整队列
 
 - 移除收起状态对播放信息和控制区的 64pt 人为下沉，减少顶部、封面下方和控制区之间的断裂留白。
